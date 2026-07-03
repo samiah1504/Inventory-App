@@ -1,0 +1,82 @@
+import { NavLink, useLocation } from 'react-router-dom'
+import {
+  Home, ShoppingCart, Package, BarChart3, Settings,
+  Truck, Warehouse, Users, FileText, ClipboardList
+} from 'lucide-react'
+import { useAuthStore } from '../../stores/authStore'
+
+const NAV_CONFIG = {
+  ceo: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
+  ],
+  operations_manager: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/documents', icon: FileText, label: 'Docs' },
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
+    { to: '/customers', icon: Users, label: 'Customers' },
+  ],
+  customer_support: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/orders/new', icon: ShoppingCart, label: 'New Order' },
+    { to: '/orders', icon: ClipboardList, label: 'My Orders' },
+    { to: '/customers', icon: Users, label: 'Customers' },
+  ],
+  fulfillment: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/fulfillment', icon: Truck, label: 'Fulfillment' },
+  ],
+  waybill: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/waybill', icon: Truck, label: 'Waybill' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+  ],
+  inventory: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
+    { to: '/inventory/transfers', icon: Warehouse, label: 'Transfers' },
+  ],
+}
+
+export function BottomNav() {
+  const { user } = useAuthStore()
+  const role = user?.role || 'customer_support'
+  const navItems = NAV_CONFIG[role] || NAV_CONFIG.customer_support
+
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 safe-area-bottom">
+      <div className="flex items-center justify-around px-1 pt-1 pb-2 max-w-lg mx-auto">
+        {navItems.map(({ to, icon: Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl min-w-[60px] transition-all ${
+                isActive
+                  ? 'text-blue-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <div className={`p-1.5 rounded-xl transition-colors ${isActive ? 'bg-blue-50' : ''}`}>
+                  <Icon size={22} />
+                </div>
+                <span className={`text-[10px] font-medium ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
+                  {label}
+                </span>
+              </>
+            )}
+          </NavLink>
+        ))}
+      </div>
+    </nav>
+  )
+}
