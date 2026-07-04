@@ -77,11 +77,11 @@ export function NewOrderPage() {
         setCustomerHistory(data)
         if (data) {
           setValue('customer_name', data.name)
-          const lastAddr = data.addresses?.[0]
-          if (lastAddr) {
-            setValue('address', lastAddr.address || '')
-            setValue('city', lastAddr.city || '')
-            setValue('state', lastAddr.state || '')
+          const primaryAddr = data.addresses?.find(a => a.is_primary) || data.addresses?.[0]
+          if (primaryAddr) {
+            setValue('address', primaryAddr.address || '')
+            setValue('city', primaryAddr.city || '')
+            setValue('state', primaryAddr.state || '')
           }
         }
       } else {

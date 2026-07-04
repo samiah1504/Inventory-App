@@ -355,7 +355,7 @@ export function OrderDetailPage() {
                 </button>
                 <button
                   onClick={() => handleGeneratePdf('receipt')}
-                  disabled={!['paid'].includes(order.status)}
+                  disabled={!['paid', 'partially_paid'].includes(order.status)}
                   className="py-2.5 px-2 bg-green-50 text-green-700 rounded-xl text-xs font-medium flex flex-col items-center gap-1 active:scale-95 transition-all disabled:opacity-40"
                 >
                   <FileText size={18} /> Receipt

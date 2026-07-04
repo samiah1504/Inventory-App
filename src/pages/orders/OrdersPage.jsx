@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, SlidersHorizontal, X } from 'lucide-react'
 import { useOrders } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
-import { StatusBadge } from '../../components/ui/Badge'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { OrderCard } from './OrderCard'
 import { formatCurrency, formatDate, ORDER_STATUSES, statusLabel, NIGERIAN_STATES } from '../../utils/format'
 import { ShoppingCart } from 'lucide-react'
+import { Input } from '../../components/ui/Input'
 
 const ALL_STATUS_TABS = [
   { key: 'all', label: 'All' },
@@ -68,11 +68,20 @@ export function OrdersPage() {
   const canFilterBusiness = ['ceo', 'super_admin', 'operations_manager'].includes(role)
   const { data: businesses } = useBusinesses()
 
+  const [showDateFilter, setShowDateFilter] = useState(false)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  const hasDateFilter = !!(dateFrom || dateTo)
+
   const filters = {
     search: search || undefined,
     status: activeTab !== 'all' ? activeTab : undefined,
     business_id: businessFilter || undefined,
     state: stateFilter || undefined,
+    date_from: dateFrom ? `${dateFrom}T00:00:00` : undefined,
+    date_to: dateTo ? `${dateTo}T23:59:59` : undefined,
+    limit: 250,
   }
 
   const { data: orders, isLoading } = useOrders(filters)
@@ -90,14 +99,26 @@ export function OrdersPage() {
       <TopBar
         title={isCS ? 'My Orders' : 'Orders'}
         back={false}
-        actions={canCreate && (
-          <button
-            onClick={() => navigate('/orders/new')}
-            className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all"
-          >
-            <Plus size={20} />
-          </button>
-        )}
+        actions={
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowDateFilter(v => !v)}
+              className={`p-2 rounded-xl active:scale-95 transition-all relative ${hasDateFilter ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              title="Filter by date"
+            >
+              <SlidersHorizontal size={18} />
+              {hasDateFilter && <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-amber-400 rounded-full" />}
+            </button>
+            {canCreate && (
+              <button
+                onClick={() => navigate('/orders/new')}
+                className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all"
+              >
+                <Plus size={20} />
+              </button>
+            )}
+          </div>
+        }
       />
 
       <div className="px-4 py-3 space-y-3 bg-white border-b border-gray-100 sticky top-[57px] z-20">
@@ -106,6 +127,20 @@ export function OrdersPage() {
           onChange={setSearch}
           placeholder="Search orders, customer, phone..."
         />
+        {showDateFilter && (
+          <div className="space-y-2">
+            <div className="flex gap-2 items-center">
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1" />
+              <span className="text-xs text-gray-400">to</span>
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1" />
+              {hasDateFilter && (
+                <button onClick={() => { setDateFrom(''); setDateTo('') }} className="p-2 bg-gray-100 rounded-xl active:scale-95">
+                  <X size={14} className="text-gray-500" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {canFilterBusiness && businesses && businesses.length > 1 && (
           <select
             value={businessFilter}
@@ -157,7 +192,10 @@ export function OrdersPage() {
           />
         ) : (
           <>
-            <p className="text-xs text-gray-500">{orders.length} order{orders.length !== 1 ? 's' : ''}</p>
+            <p className="text-xs text-gray-500">
+              {orders.length} order{orders.length !== 1 ? 's' : ''}
+              {orders.length === 250 && ' (showing latest 250 — use date filter to narrow)'}
+            </p>
             {orders.map(order => (
               <OrderCard key={order.id} order={order} onClick={() => navigate(`/orders/${order.id}`)} />
             ))}
