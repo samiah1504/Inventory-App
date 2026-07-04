@@ -50,7 +50,7 @@ export function WarehousesPage() {
         title="Warehouses"
         actions={
           <button onClick={() => { setEditing(null); setForm({ name: '', state: '', city: '', address: '', contact_person: '', contact_phone: '', whatsapp_group: '' }); setShowModal(true) }}
-            className="p-2 bg-blue-600 text-white rounded-xl active:scale-95">
+            className="p-2 bg-blue-600 text-black rounded-xl active:scale-95">
             <Plus size={20} />
           </button>
         }

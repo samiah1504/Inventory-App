@@ -93,7 +93,7 @@ export function StaffPage() {
       <TopBar
         title="Staff Management"
         actions={
-          <button onClick={openNew} className="p-2 bg-blue-600 text-white rounded-xl active:scale-95">
+          <button onClick={openNew} className="p-2 bg-blue-600 text-black rounded-xl active:scale-95">
             <Plus size={20} />
           </button>
         }

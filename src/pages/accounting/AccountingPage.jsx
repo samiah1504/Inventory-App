@@ -84,7 +84,7 @@ export function AccountingPage() {
       <TopBar
         title="Expenses"
         actions={
-          <button onClick={() => setShowModal(true)} className="p-2 bg-blue-600 text-white rounded-xl active:scale-95">
+          <button onClick={() => setShowModal(true)} className="p-2 bg-blue-600 text-black rounded-xl active:scale-95">
             <Plus size={20} />
           </button>
         }

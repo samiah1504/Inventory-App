@@ -186,7 +186,7 @@ export function CustomerDetailPage() {
             </button>
             {canCreateOrder && (
               <button onClick={handleNewOrder}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium active:scale-95 transition-all">
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 bg-blue-600 text-black rounded-xl text-sm font-medium active:scale-95 transition-all">
                 <ShoppingCart size={15} /> Order
               </button>
             )}

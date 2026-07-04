@@ -40,7 +40,7 @@ export function DocumentsPage() {
         <div className="flex gap-2">
           {['invoices', 'receipts', 'delivery_notes'].map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize ${activeTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              className={`px-3 py-1.5 rounded-full text-xs font-medium capitalize ${activeTab === tab ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}>
               {tab.replace('_', ' ')}
             </button>
           ))}

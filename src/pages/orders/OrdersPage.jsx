@@ -103,7 +103,7 @@ export function OrdersPage() {
           <div className="flex gap-2">
             <button
               onClick={() => setShowDateFilter(v => !v)}
-              className={`p-2 rounded-xl active:scale-95 transition-all relative ${hasDateFilter ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              className={`p-2 rounded-xl active:scale-95 transition-all relative ${hasDateFilter ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-700'}`}
               title="Filter by date"
             >
               <SlidersHorizontal size={18} />
@@ -112,7 +112,7 @@ export function OrdersPage() {
             {canCreate && (
               <button
                 onClick={() => navigate('/orders/new')}
-                className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all"
+                className="p-2 bg-blue-600 text-black rounded-xl active:scale-95 transition-all"
               >
                 <Plus size={20} />
               </button>
@@ -169,7 +169,7 @@ export function OrdersPage() {
               onClick={() => handleTabChange(key)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
                 activeTab === key
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-blue-600 text-black'
                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
               }`}
             >

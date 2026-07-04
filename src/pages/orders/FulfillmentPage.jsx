@@ -102,7 +102,7 @@ export function FulfillmentPage() {
               key={key}
               onClick={() => { setTab(key); setSelectedState('') }}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                tab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'
+                tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'
               }`}
             >
               {label}

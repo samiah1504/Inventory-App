@@ -251,7 +251,7 @@ export function ReportsPage() {
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
           {REPORT_TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
             >{label}</button>
           ))}
         </div>

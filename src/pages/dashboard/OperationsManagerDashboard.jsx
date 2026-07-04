@@ -35,10 +35,10 @@ export function OperationsManagerDashboard() {
 
   return (
     <div className="overflow-y-auto h-full">
-      <div className="bg-blue-600 text-white px-4 pt-12 pb-6">
-        <p className="text-blue-200 text-sm">Operations Manager</p>
+      <div className="bg-gray-900 text-white px-4 pt-12 pb-6">
+        <p className="text-yellow-400 text-sm font-medium">Operations Manager</p>
         <h1 className="text-2xl font-bold">{user?.name}</h1>
-        <p className="text-blue-200 text-sm mt-0.5">{user?.staff_code}</p>
+        <p className="text-gray-400 text-sm mt-0.5">{user?.staff_code}</p>
       </div>
       <div className="px-4 -mt-4 space-y-4 pb-6">
         <div className="grid grid-cols-2 gap-3">

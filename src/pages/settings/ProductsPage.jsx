@@ -142,7 +142,7 @@ export function ProductsPage() {
         actions={
           <button
             onClick={() => mainTab === 'categories' ? openNewCat() : (setEditing(null), setShowModal(true))}
-            className="p-2 bg-blue-600 text-white rounded-xl active:scale-95"
+            className="p-2 bg-blue-600 text-black rounded-xl active:scale-95"
           >
             <Plus size={20} />
           </button>
@@ -153,11 +153,11 @@ export function ProductsPage() {
       <div className="px-4 pt-3 pb-0 bg-white border-b border-gray-100 sticky top-[57px] z-20 space-y-2">
         <div className="flex gap-2 border-b border-gray-100 pb-2">
           <button onClick={() => setMainTab('products')}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all ${mainTab === 'products' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all ${mainTab === 'products' ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}>
             Products
           </button>
           <button onClick={() => setMainTab('categories')}
-            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all ${mainTab === 'categories' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-xl transition-all ${mainTab === 'categories' ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}>
             <Tag size={14} /> Categories {categories?.length ? `(${categories.length})` : ''}
           </button>
         </div>
@@ -179,7 +179,7 @@ export function ProductsPage() {
                 { key: 'inactive', label: 'Inactive' },
               ].map(({ key, label }) => (
                 <button key={key} onClick={() => setFilterTab(key)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium ${filterTab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium ${filterTab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}>
                   {label}
                 </button>
               ))}

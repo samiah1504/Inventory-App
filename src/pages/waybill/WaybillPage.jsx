@@ -215,7 +215,7 @@ export function WaybillPage() {
         <div className="flex gap-2 px-4 py-3 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
             >{label}</button>
           ))}
         </div>
@@ -296,7 +296,7 @@ export function WaybillPage() {
         {tab === 'transfers' && (
           <div className="space-y-3">
             <button onClick={() => setShowTransferModal(true)}
-              className="w-full py-3 bg-blue-600 text-white rounded-2xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 transition-all">
+              className="w-full py-3 bg-blue-600 text-black rounded-2xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 transition-all">
               <Plus size={16} /> New Warehouse Transfer
             </button>
             {transfers.isLoading ? <SkeletonList count={3} /> :

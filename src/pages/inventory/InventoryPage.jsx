@@ -102,7 +102,7 @@ export function InventoryPage() {
         back={false}
         actions={
           <button onClick={() => setShowAddModal(true)}
-            className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all">
+            className="p-2 bg-blue-600 text-black rounded-xl active:scale-95 transition-all">
             <Plus size={20} />
           </button>
         }
@@ -119,7 +119,7 @@ export function InventoryPage() {
         <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
             >{label}</button>
           ))}
         </div>
