@@ -72,18 +72,22 @@ export function SettingsPage() {
 }
 
 function NonAdminSettings({ user, logout }) {
+  const navigate = useNavigate()
+  const isOpsManager = user?.role === 'operations_manager'
+
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Settings" back={false} />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        {/* Profile card */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-bold text-lg">
               {user?.name?.[0]}
             </div>
             <div>
               <p className="text-base font-bold text-gray-900">{user?.name}</p>
-              <p className="text-sm text-gray-500">@{user?.username} · {user?.role?.replace('_', ' ')} · {user?.staff_code}</p>
+              <p className="text-sm text-gray-500 capitalize">@{user?.username} · {user?.role?.replace(/_/g, ' ')} · {user?.staff_code}</p>
             </div>
           </div>
           <button
@@ -93,6 +97,23 @@ function NonAdminSettings({ user, logout }) {
             <LogOut size={16} /> Sign Out
           </button>
         </div>
+
+        {/* Ops Manager gets access to alert config */}
+        {isOpsManager && (
+          <button
+            onClick={() => navigate('/settings/alerts')}
+            className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+          >
+            <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
+              <Bell size={20} />
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-semibold text-gray-900">Alert Thresholds</p>
+              <p className="text-xs text-gray-500">Configure order stale/delay alerts</p>
+            </div>
+            <ChevronRight size={18} className="text-gray-400 shrink-0" />
+          </button>
+        )}
       </div>
     </div>
   )
