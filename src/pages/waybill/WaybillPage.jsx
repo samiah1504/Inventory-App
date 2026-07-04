@@ -91,7 +91,7 @@ export function WaybillPage() {
       ...batchForm,
       batch_number: batchNumber,
       total_cost: Number(batchForm.total_cost) || 0,
-      business_id: awaitingOrders.data?.[0]?.business_id,
+      business_id: awaitingOrders.data?.find(o => selectedOrders.includes(o.id))?.business_id || null,
       created_by: user?.id,
     }).select().single()
 
