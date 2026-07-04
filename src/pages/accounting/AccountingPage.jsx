@@ -23,7 +23,11 @@ const ADMIN_ONLY_TYPES = ['supplier_payment', 'rent', 'salary', 'ads', 'electric
 
 export function AccountingPage() {
   const [showModal, setShowModal] = useState(false)
-  const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0])
+  const [dateFrom, setDateFrom] = useState(() => {
+    const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
+  })
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [businessFilter, setBusinessFilter] = useState('')
   const [form, setForm] = useState({
     business_id: '', expense_type: 'misc', amount: '', description: '',
     date: new Date().toISOString().split('T')[0], notes: '', is_admin_only: false
@@ -36,11 +40,13 @@ export function AccountingPage() {
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
 
   const { data: expenses, isLoading } = useQuery({
-    queryKey: ['expenses', dateFrom, isCeo],
+    queryKey: ['expenses', dateFrom, dateTo, isCeo, businessFilter],
     queryFn: async () => {
       let query = supabase.from('expenses').select('*, business:businesses(name)')
-        .gte('date', dateFrom).order('created_at', { ascending: false }).limit(100)
+        .gte('date', dateFrom).lte('date', dateTo)
+        .order('date', { ascending: false }).limit(200)
       if (!isCeo) query = query.eq('is_admin_only', false)
+      if (businessFilter) query = query.eq('business_id', businessFilter)
       const { data, error } = await query
       if (error) throw error
       return data || []
@@ -84,8 +90,21 @@ export function AccountingPage() {
         }
       />
 
-      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20">
-        <Input type="date" label="From date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20 space-y-2">
+        <div className="flex gap-2">
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1" />
+          <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1" />
+        </div>
+        {isCeo && (
+          <select
+            value={businessFilter}
+            onChange={e => setBusinessFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Businesses</option>
+            {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
