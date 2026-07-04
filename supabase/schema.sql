@@ -186,6 +186,9 @@ CREATE TABLE orders (
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   delivered_at TIMESTAMPTZ,
 
+  -- Internal staff notes (set at order creation)
+  internal_note TEXT,
+
   -- Flags
   is_copied_for_whatsapp BOOLEAN DEFAULT false,
   has_waybill BOOLEAN DEFAULT false
