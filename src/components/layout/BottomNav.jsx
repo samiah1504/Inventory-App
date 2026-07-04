@@ -29,8 +29,8 @@ const NAV_CONFIG = {
   ],
   customer_support: [
     { to: '/', icon: Home, label: 'Home' },
-    { to: '/orders/new', icon: ShoppingCart, label: 'New Order' },
-    { to: '/orders', icon: ClipboardList, label: 'My Orders' },
+    { to: '/orders/new', icon: ShoppingCart, label: 'New Order', end: true },
+    { to: '/orders', icon: ClipboardList, label: 'My Orders', end: true },
     { to: '/customers', icon: Users, label: 'Customers' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
@@ -62,11 +62,11 @@ export function BottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 safe-area-bottom">
       <div className="flex items-center justify-around px-1 pt-1 pb-2 max-w-lg mx-auto">
-        {navItems.map(({ to, icon: Icon, label }) => (
+        {navItems.map(({ to, icon: Icon, label, end: endProp }) => (
           <NavLink
             key={to}
             to={to}
-            end={to === '/'}
+            end={endProp ?? to === '/'}
             className={({ isActive }) =>
               `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl min-w-[60px] transition-all ${
                 isActive
