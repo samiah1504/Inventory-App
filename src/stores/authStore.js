@@ -15,7 +15,7 @@ export const useAuthStore = create(
         try {
           const { data, error } = await supabase
             .from('staff_users')
-            .select('*, roles(name, permissions)')
+            .select('*')
             .eq('username', username)
             .eq('password', password)
             .eq('is_active', true)
