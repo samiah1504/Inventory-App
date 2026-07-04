@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Phone, MessageCircle, Copy, FileText, Edit, ChevronDown, Plus, Clock, AlertTriangle, Pencil } from 'lucide-react'
+import { Phone, MessageCircle, Copy, FileText, Plus, Pencil, Calendar } from 'lucide-react'
 import { useOrder, useUpdateOrderStatus } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
 import { TopBar } from '../../components/layout/TopBar'
@@ -43,6 +43,8 @@ export function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [pendingStatus, setPendingStatus] = useState(null)
   const [showReasonModal, setShowReasonModal] = useState(false)
+  const [showProcessingModal, setShowProcessingModal] = useState(false)
+  const [processingDate, setProcessingDate] = useState(new Date().toISOString().split('T')[0])
 
   if (isLoading) return (
     <div className="flex flex-col h-full">
@@ -65,7 +67,10 @@ export function OrderDetailPage() {
   const allowedTransitions = STATUS_TRANSITIONS[user?.role] || []
   const canChangeStatus = allowedTransitions.length > 0
   const canViewDocs = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
-  const canEdit = user?.role === 'customer_support' && order.status === 'new' && order.created_by === user?.id
+  const canEdit = order.status === 'new' && (
+    (['ceo', 'super_admin', 'operations_manager'].includes(user?.role)) ||
+    (user?.role === 'customer_support' && order.created_by === user?.id)
+  )
 
   function handleCopyOrder() {
     const msg = buildOrderMessage(order)
@@ -86,12 +91,27 @@ export function OrderDetailPage() {
       setShowStatusModal(false)
       return
     }
+    if (newStatus === 'processing') {
+      setShowProcessingModal(true)
+      setShowStatusModal(false)
+      return
+    }
     await updateStatus.mutateAsync({
       id: order.id,
       status: newStatus,
       timelineDesc: `Marked ${statusLabel(newStatus)} by ${user?.name}`
     })
     setShowStatusModal(false)
+  }
+
+  async function handleProcessingSubmit() {
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'processing',
+      extra: { planned_delivery_date: processingDate || null },
+      timelineDesc: `Scheduled for delivery on ${processingDate} by ${user?.name}`
+    })
+    setShowProcessingModal(false)
   }
 
   async function handlePaymentSubmit() {
@@ -263,7 +283,15 @@ export function OrderDetailPage() {
               <Row label="Total Amount" value={formatCurrency(order.total_amount)} highlight />
             </div>
             <Row label="Source" value={order.source} />
-            {order.staff_code && <Row label="Staff" value={order.staff_code} />}
+            {order.created_by_staff && (
+              <Row label="Staff" value={`${order.created_by_staff.name} (${order.created_by_staff.staff_code})`} />
+            )}
+            {order.internal_note && (
+              <div>
+                <p className="text-xs text-gray-500 mb-1">Internal Note</p>
+                <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-2">{order.internal_note}</p>
+              </div>
+            )}
             <Row label="Created" value={formatDateTime(order.created_at)} />
           </div>
 
@@ -530,6 +558,40 @@ export function OrderDetailPage() {
           onChange={e => setNote(e.target.value)}
           rows={4}
         />
+      </Modal>
+
+      {/* Processing / Schedule Delivery Modal */}
+      <Modal
+        isOpen={showProcessingModal}
+        onClose={() => setShowProcessingModal(false)}
+        title="Schedule Delivery"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowProcessingModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={handleProcessingSubmit} loading={updateStatus.isPending} className="flex-1">
+              Confirm
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 text-blue-600 mb-2">
+            <Calendar size={18} />
+            <p className="text-sm font-medium">Set the planned delivery date for this order</p>
+          </div>
+          <Input
+            label="Planned Delivery Date"
+            type="date"
+            value={processingDate}
+            onChange={e => setProcessingDate(e.target.value)}
+            required
+          />
+          {order.customer_requested_delivery_date && (
+            <p className="text-xs text-gray-500">
+              Customer requested: <strong>{formatDate(order.customer_requested_delivery_date)}</strong>
+            </p>
+          )}
+        </div>
       </Modal>
     </div>
   )

@@ -66,10 +66,16 @@ export function OrderCard({ order, onClick, showActions = true }) {
           <span>{order.state}</span>
           {order.city && <span className="text-gray-400">, {order.city}</span>}
         </div>
-        {order.customer_requested_delivery_date && (
+        {order.planned_delivery_date && (
+          <div className="flex items-center gap-1.5 text-xs text-blue-600 font-medium">
+            <Calendar size={12} />
+            <span>Delivery: {formatDate(order.planned_delivery_date)}</span>
+          </div>
+        )}
+        {!order.planned_delivery_date && order.customer_requested_delivery_date && (
           <div className="flex items-center gap-1.5 text-xs text-gray-600">
             <Calendar size={12} className="text-gray-400" />
-            <span>{formatDate(order.customer_requested_delivery_date)}</span>
+            <span>Req: {formatDate(order.customer_requested_delivery_date)}</span>
           </div>
         )}
       </div>
