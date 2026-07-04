@@ -15,7 +15,15 @@ export function DocumentsPage() {
   const [activeTab, setActiveTab] = useState('invoices')
   const navigate = useNavigate()
 
-  const { data: orders, isLoading } = useOrders({ search: search || undefined, limit: 100 })
+  const statusFilter = activeTab === 'receipts'
+    ? 'paid'
+    : undefined
+
+  const { data: orders, isLoading } = useOrders({
+    search: search || undefined,
+    status: statusFilter,
+    limit: 100,
+  })
 
   function handleDoc(type, order) {
     const business = order.business
@@ -26,7 +34,7 @@ export function DocumentsPage() {
     savePdf(doc, `${type}-${order.order_number}.pdf`)
   }
 
-  const paidOrders = (orders || []).filter(o => ['paid'].includes(o.status))
+  const displayOrders = orders || []
 
   return (
     <div className="flex flex-col h-full">
@@ -45,10 +53,10 @@ export function DocumentsPage() {
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {isLoading ? <SkeletonList count={5} /> : (
-          (activeTab === 'receipts' ? paidOrders : (orders || [])).length === 0 ? (
+          displayOrders.length === 0 ? (
             <EmptyState icon={<FileText size={28} />} title="No documents" />
           ) : (
-            (activeTab === 'receipts' ? paidOrders : (orders || [])).map(order => (
+            displayOrders.map(order => (
               <div key={order.id} className="bg-white rounded-2xl p-4 border border-gray-100">
                 <div className="flex items-start justify-between gap-2 mb-3">
                   <div className="flex-1 min-w-0" onClick={() => navigate(`/orders/${order.id}`)}>
