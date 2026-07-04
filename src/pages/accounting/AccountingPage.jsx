@@ -95,14 +95,14 @@ export function AccountingPage() {
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1" />
           <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1" />
         </div>
-        {isCeo && (
+        {businesses && businesses.length > 1 && (
           <select
             value={businessFilter}
             onChange={e => setBusinessFilter(e.target.value)}
             className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">All Businesses</option>
-            {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
       </div>

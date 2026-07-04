@@ -124,7 +124,7 @@ export function WaybillPage() {
     queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
   }
 
-  async function markReceived(batchId) {
+  async function markReceived(batchId, batchNumber) {
     await supabase.from('waybill_batches').update({
       status: 'received', received_at: new Date().toISOString(), received_by: user?.id
     }).eq('id', batchId)
@@ -133,7 +133,17 @@ export function WaybillPage() {
       .from('waybill_batch_orders').select('order_id').eq('batch_id', batchId)
 
     for (const bo of batchOrders || []) {
-      await supabase.from('orders').update({ status: 'received_at_warehouse' }).eq('id', bo.order_id)
+      await supabase.from('orders').update({
+        status: 'received_at_warehouse',
+        updated_at: new Date().toISOString(),
+      }).eq('id', bo.order_id)
+      await supabase.from('order_timeline').insert({
+        order_id: bo.order_id,
+        action: 'received_at_warehouse',
+        description: `Received at warehouse from batch ${batchNumber} by ${user?.name}`,
+        staff_id: user?.id,
+        staff_name: user?.name,
+      })
     }
     showToast('Marked as received', 'success')
     queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
@@ -243,7 +253,7 @@ export function WaybillPage() {
                 <p className="text-sm font-medium text-gray-900">{batch.courier_company}</p>
                 <p className="text-xs text-gray-500">{batch.warehouse?.name || batch.destination_state} · {batch.tracking_number}</p>
                 {batch.status === 'in_transit' && (
-                  <button onClick={() => markReceived(batch.id)}
+                  <button onClick={() => markReceived(batch.id, batch.batch_number)}
                     className="mt-3 w-full py-2 bg-green-600 text-white text-sm font-medium rounded-xl active:scale-95 transition-all">
                     Mark Received at Warehouse
                   </button>
