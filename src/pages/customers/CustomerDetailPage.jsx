@@ -1,18 +1,34 @@
+import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Phone, MessageCircle, ShoppingCart, AlertTriangle, MapPin } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { Phone, MessageCircle, ShoppingCart, AlertTriangle, MapPin, Plus, Edit, Trash2 } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
 import { StatusBadge } from '../../components/ui/Badge'
-import { formatCurrency, formatDate } from '../../utils/format'
+import { Modal, ConfirmModal } from '../../components/ui/Modal'
+import { Button } from '../../components/ui/Button'
+import { Input, Select } from '../../components/ui/Input'
+import { formatCurrency, formatDate, NIGERIAN_STATES } from '../../utils/format'
 import { openDialer, openWhatsApp } from '../../utils/whatsapp'
 import { useAuthStore } from '../../stores/authStore'
+import { useAppStore } from '../../stores/appStore'
 
 export function CustomerDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user } = useAuthStore()
+  const { showToast } = useAppStore()
+  const queryClient = useQueryClient()
+
+  const canEdit = ['ceo', 'super_admin', 'operations_manager', 'customer_support'].includes(user?.role)
   const canCreateOrder = ['ceo', 'super_admin', 'customer_support', 'operations_manager'].includes(user?.role)
+
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [showAddrModal, setShowAddrModal] = useState(false)
+  const [editingAddr, setEditingAddr] = useState(null)
+  const [deleteAddrId, setDeleteAddrId] = useState(null)
+  const [editForm, setEditForm] = useState({ name: '', phone: '' })
+  const [addrForm, setAddrForm] = useState({ address: '', city: '', state: '', is_primary: false })
 
   const { data: customer, isLoading } = useQuery({
     queryKey: ['customer', id],
@@ -28,6 +44,78 @@ export function CustomerDetailPage() {
     enabled: !!id,
   })
 
+  const updateCustomer = useMutation({
+    mutationFn: async (data) => {
+      const { error } = await supabase.from('customers').update(data).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customer', id] })
+      queryClient.invalidateQueries({ queryKey: ['customers'] })
+      showToast('Customer updated', 'success')
+      setShowEditModal(false)
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+
+  const saveAddress = useMutation({
+    mutationFn: async (data) => {
+      if (editingAddr) {
+        const { error } = await supabase.from('customer_addresses').update(data).eq('id', editingAddr.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('customer_addresses').insert({ ...data, customer_id: id })
+        if (error) throw error
+      }
+      if (data.is_primary) {
+        const targetId = editingAddr?.id
+        // Clear other primaries (best-effort, ignore errors)
+        await supabase.from('customer_addresses')
+          .update({ is_primary: false })
+          .eq('customer_id', id)
+          .neq('id', targetId || '00000000-0000-0000-0000-000000000000')
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customer', id] })
+      showToast(editingAddr ? 'Address updated' : 'Address added', 'success')
+      setShowAddrModal(false)
+      setEditingAddr(null)
+      setAddrForm({ address: '', city: '', state: '', is_primary: false })
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+
+  const deleteAddress = useMutation({
+    mutationFn: async (addrId) => {
+      const { error } = await supabase.from('customer_addresses').delete().eq('id', addrId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customer', id] })
+      showToast('Address removed', 'success')
+      setDeleteAddrId(null)
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+
+  function openEditCustomer() {
+    setEditForm({ name: customer.name || '', phone: customer.phone || '' })
+    setShowEditModal(true)
+  }
+
+  function openAddAddress() {
+    setEditingAddr(null)
+    setAddrForm({ address: '', city: '', state: '', is_primary: false })
+    setShowAddrModal(true)
+  }
+
+  function openEditAddress(addr) {
+    setEditingAddr(addr)
+    setAddrForm({ address: addr.address || '', city: addr.city || '', state: addr.state || '', is_primary: addr.is_primary || false })
+    setShowAddrModal(true)
+  }
+
   if (isLoading) return (
     <div className="flex flex-col h-full">
       <TopBar title="Customer" />
@@ -38,6 +126,7 @@ export function CustomerDetailPage() {
 
   const orders = customer.orders || []
   const addresses = customer.addresses || []
+  const primaryAddr = addresses.find(a => a.is_primary) || addresses[0]
   const successRate = customer.total_orders > 0
     ? Math.round((customer.successful_orders / customer.total_orders) * 100) : 0
   const outstandingBalance = orders
@@ -46,17 +135,24 @@ export function CustomerDetailPage() {
 
   function handleNewOrder() {
     const params = new URLSearchParams({ phone: customer.phone || '', name: customer.name || '' })
-    if (addresses[0]) {
-      if (addresses[0].address) params.set('address', addresses[0].address)
-      if (addresses[0].city) params.set('city', addresses[0].city)
-      if (addresses[0].state) params.set('state', addresses[0].state)
+    if (primaryAddr) {
+      if (primaryAddr.address) params.set('address', primaryAddr.address)
+      if (primaryAddr.city) params.set('city', primaryAddr.city)
+      if (primaryAddr.state) params.set('state', primaryAddr.state)
     }
     navigate(`/orders/new?${params.toString()}`)
   }
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title={customer.name} />
+      <TopBar
+        title={customer.name}
+        actions={canEdit && (
+          <button onClick={openEditCustomer} className="p-2 bg-gray-100 rounded-xl active:scale-95">
+            <Edit size={18} className="text-gray-600" />
+          </button>
+        )}
+      />
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-8">
 
         {/* Profile */}
@@ -73,10 +169,10 @@ export function CustomerDetailPage() {
               )}
             </div>
           </div>
-          {addresses.length > 0 && (
+          {primaryAddr && (
             <div className="flex items-start gap-1.5 text-xs text-gray-500 mb-3">
               <MapPin size={13} className="mt-0.5 shrink-0 text-gray-400" />
-              <span>{[addresses[0].address, addresses[0].city, addresses[0].state].filter(Boolean).join(', ')}</span>
+              <span>{[primaryAddr.address, primaryAddr.city, primaryAddr.state].filter(Boolean).join(', ')}</span>
             </div>
           )}
           <div className="flex gap-2 mb-4">
@@ -122,6 +218,45 @@ export function CustomerDetailPage() {
           </div>
         </div>
 
+        {/* Addresses */}
+        <div className="bg-white rounded-2xl border border-gray-100">
+          <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900">Addresses</h3>
+            {canEdit && (
+              <button onClick={openAddAddress} className="flex items-center gap-1 text-xs text-blue-600 font-medium">
+                <Plus size={14} /> Add
+              </button>
+            )}
+          </div>
+          {addresses.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4 pb-5">No addresses saved</p>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {addresses.map(addr => (
+                <div key={addr.id} className="px-4 py-3 flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <MapPin size={12} className="text-gray-400 shrink-0" />
+                      {addr.is_primary && <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">Primary</span>}
+                    </div>
+                    <p className="text-sm text-gray-700">{[addr.address, addr.city, addr.state].filter(Boolean).join(', ')}</p>
+                  </div>
+                  {canEdit && (
+                    <div className="flex gap-1.5 shrink-0">
+                      <button onClick={() => openEditAddress(addr)} className="p-1.5 bg-gray-100 rounded-lg active:scale-95">
+                        <Edit size={13} className="text-gray-600" />
+                      </button>
+                      <button onClick={() => setDeleteAddrId(addr.id)} className="p-1.5 bg-red-50 rounded-lg active:scale-95">
+                        <Trash2 size={13} className="text-red-500" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Orders */}
         <div className="bg-white rounded-2xl border border-gray-100">
           <div className="px-4 pt-4 pb-2">
@@ -157,6 +292,57 @@ export function CustomerDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Edit customer modal */}
+      <Modal isOpen={showEditModal} onClose={() => setShowEditModal(false)} title="Edit Customer"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowEditModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={() => updateCustomer.mutate(editForm)} loading={updateCustomer.isPending} className="flex-1"
+              disabled={!editForm.name.trim()}>Save</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Input label="Name" required value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+          <Input label="Phone" type="tel" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Address modal */}
+      <Modal isOpen={showAddrModal} onClose={() => setShowAddrModal(false)} title={editingAddr ? 'Edit Address' : 'Add Address'}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowAddrModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={() => saveAddress.mutate(addrForm)} loading={saveAddress.isPending} className="flex-1">Save</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Input label="Street Address" value={addrForm.address} onChange={e => setAddrForm({ ...addrForm, address: e.target.value })} />
+          <Input label="City / LGA" value={addrForm.city} onChange={e => setAddrForm({ ...addrForm, city: e.target.value })} />
+          <Select label="State" value={addrForm.state} onChange={e => setAddrForm({ ...addrForm, state: e.target.value })}>
+            <option value="">Select state...</option>
+            {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={addrForm.is_primary} onChange={e => setAddrForm({ ...addrForm, is_primary: e.target.checked })}
+              className="w-4 h-4 rounded border-gray-300 text-blue-600" />
+            <span className="text-sm text-gray-700">Set as primary address</span>
+          </label>
+        </div>
+      </Modal>
+
+      {/* Delete address confirm */}
+      <ConfirmModal
+        isOpen={!!deleteAddrId}
+        onClose={() => setDeleteAddrId(null)}
+        onConfirm={() => deleteAddress.mutate(deleteAddrId)}
+        title="Remove Address"
+        message="Remove this address from the customer's profile?"
+        confirmLabel="Remove"
+        danger
+      />
     </div>
   )
 }

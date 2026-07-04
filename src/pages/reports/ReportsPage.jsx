@@ -80,12 +80,31 @@ export function ReportsPage() {
   })
 
   const inventoryReport = useQuery({
-    queryKey: ['report_inventory'],
+    queryKey: ['report_inventory', businessId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('inventory')
         .select('*, product:products(name, business:businesses(name)), warehouse:warehouses(name, state)')
         .order('quantity_available', { ascending: true })
+      if (businessId) query = query.eq('business_id', businessId)
+      const { data, error } = await query
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const inventoryMovements = useQuery({
+    queryKey: ['report_inventory_movements', dateFrom, dateTo, businessId],
+    enabled: tab === 'inventory',
+    queryFn: async () => {
+      let query = supabase
+        .from('inventory_movements')
+        .select('*, product:products(name), warehouse:warehouses(name)')
+        .gte('created_at', `${dateFrom}T00:00:00`)
+        .lte('created_at', `${dateTo}T23:59:59`)
+        .order('created_at', { ascending: false })
+      if (businessId) query = query.eq('business_id', businessId)
+      const { data, error } = await query
       if (error) throw error
       return data || []
     },
@@ -177,13 +196,29 @@ export function ReportsPage() {
       })
       downloadCSV(Object.values(byStaff), `staff-report-${dateFrom}-to-${dateTo}.csv`)
     } else if (tab === 'inventory') {
-      const rows = inventoryItems.map(i => ({
-        product: i.product?.name || '',
-        warehouse: i.warehouse?.name || '',
-        quantity_available: i.quantity_available,
-        quantity_reserved: i.quantity_reserved || 0,
-      }))
-      downloadCSV(rows, `inventory-snapshot.csv`)
+      const movements = inventoryMovements.data || []
+      if (movements.length > 0) {
+        const rows = movements.map(m => ({
+          date: m.created_at?.slice(0, 10) || '',
+          product: m.product?.name || '',
+          warehouse: m.warehouse?.name || '',
+          movement_type: m.movement_type || '',
+          quantity: m.quantity,
+          unit_cost: m.unit_cost || '',
+          total_cost: m.total_cost || '',
+          supplier: m.supplier || '',
+          notes: m.notes || '',
+        }))
+        downloadCSV(rows, `inventory-movements-${dateFrom}-to-${dateTo}.csv`)
+      } else {
+        const rows = inventoryItems.map(i => ({
+          product: i.product?.name || '',
+          warehouse: i.warehouse?.name || '',
+          quantity_available: i.quantity_available,
+          quantity_reserved: i.quantity_reserved || 0,
+        }))
+        downloadCSV(rows, `inventory-snapshot.csv`)
+      }
     }
   }
 
@@ -434,6 +469,7 @@ export function ReportsPage() {
 
         {tab === 'inventory' && (
           <div className="space-y-4">
+            {/* Current snapshot stats */}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white rounded-2xl p-3 border border-gray-100 text-center">
                 <p className="text-2xl font-bold text-gray-900">{inventoryItems.length}</p>
@@ -448,9 +484,59 @@ export function ReportsPage() {
                 <p className="text-xs text-gray-500">Out of Stock</p>
               </div>
             </div>
+
+            {/* Movements in date range */}
+            {(() => {
+              const movements = inventoryMovements.data || []
+              const totalUnits = movements.reduce((s, m) => s + Number(m.quantity || 0), 0)
+              const totalCost = movements.reduce((s, m) => s + Number(m.total_cost || 0), 0)
+              return (
+                <div className="bg-white rounded-2xl border border-gray-100">
+                  <div className="px-4 pt-4 pb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-gray-900">Stock In ({dateFrom} – {dateTo})</h3>
+                    <span className="text-xs text-gray-400">{movements.length} movements</span>
+                  </div>
+                  {movements.length > 0 && (
+                    <div className="px-4 pb-3 flex gap-4">
+                      <div>
+                        <p className="text-xs text-gray-500">Units received</p>
+                        <p className="text-base font-bold text-blue-600">{totalUnits}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Total cost</p>
+                        <p className="text-base font-bold text-gray-900">{formatCurrency(totalCost)}</p>
+                      </div>
+                    </div>
+                  )}
+                  <div className="divide-y divide-gray-50">
+                    {inventoryMovements.isLoading ? (
+                      <p className="text-sm text-gray-400 text-center py-6">Loading...</p>
+                    ) : movements.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-6">No stock movements in this period</p>
+                    ) : (
+                      movements.slice(0, 20).map(m => (
+                        <div key={m.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate">{m.product?.name}</p>
+                            <p className="text-xs text-gray-400">{m.warehouse?.name} · {m.created_at?.slice(0, 10)}</p>
+                            {m.supplier && <p className="text-xs text-gray-400">From: {m.supplier}</p>}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-bold text-blue-600">+{m.quantity}</p>
+                            {m.total_cost > 0 && <p className="text-xs text-gray-500">{formatCurrency(m.total_cost)}</p>}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* Current stock levels */}
             <div className="bg-white rounded-2xl border border-gray-100">
               <div className="px-4 pt-4 pb-2">
-                <h3 className="text-sm font-semibold text-gray-900">Stock Levels</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Current Stock Levels</h3>
               </div>
               <div className="divide-y divide-gray-50">
                 {inventoryItems.slice(0, 30).map(item => (
