@@ -9,22 +9,22 @@ const NAV_CONFIG = {
   ceo: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/inventory', icon: Package, label: 'Inventory' },
+    { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   super_admin: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/inventory', icon: Package, label: 'Inventory' },
+    { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   operations_manager: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/reports', icon: BarChart3, label: 'Reports' },
-    { to: '/customers', icon: Users, label: 'Customers' },
+    { to: '/waybill', icon: Truck, label: 'Waybill' },
+    { to: '/fulfillment', icon: Warehouse, label: 'Fulfillment' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   customer_support: [
