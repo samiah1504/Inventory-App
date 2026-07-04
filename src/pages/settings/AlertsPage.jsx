@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Bell, Save } from 'lucide-react'
+import { Bell, Save, AlertTriangle, AlertCircle, CheckCircle } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
 import { Button } from '../../components/ui/Button'
@@ -21,6 +22,7 @@ const ALERT_TYPES = [
 export function AlertsPage() {
   const { showToast } = useAppStore()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const { data: businesses } = useBusinesses()
   const [selectedBusiness, setSelectedBusiness] = useState('')
 
@@ -36,6 +38,52 @@ export function AlertsPage() {
   })
 
   const [thresholds, setThresholds] = useState({})
+
+  const liveAlerts = useQuery({
+    queryKey: ['live_alerts', configs, selectedBusiness],
+    enabled: Array.isArray(configs),
+    queryFn: async () => {
+      const now = new Date()
+      const getHours = (type) => {
+        const cfg = (configs || []).find(c => c.alert_type === type)
+        return cfg?.threshold_hours || ALERT_TYPES.find(a => a.key === type)?.default || 24
+      }
+
+      const alerts = []
+      const today = now.toISOString().split('T')[0]
+
+      const bFilter = (q) => selectedBusiness ? q.eq('business_id', selectedBusiness) : q
+
+      const newHours = getHours('new_order_stale_hours')
+      const newCutoff = new Date(now - newHours * 3600000).toISOString()
+      const { count: newCount } = await bFilter(
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'new').lt('created_at', newCutoff)
+      )
+      if (newCount > 0) alerts.push({ key: 'new', label: `${newCount} new order${newCount > 1 ? 's' : ''} stale >${newHours}h`, severity: newCount > 3 ? 'high' : 'medium', status: 'new' })
+
+      const awHours = getHours('awaiting_waybill_stale_hours')
+      const awCutoff = new Date(now - awHours * 3600000).toISOString()
+      const { count: awCount } = await bFilter(
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill').lt('updated_at', awCutoff)
+      )
+      if (awCount > 0) alerts.push({ key: 'awaiting_waybill', label: `${awCount} order${awCount > 1 ? 's' : ''} stuck awaiting waybill >${awHours}h`, severity: 'medium', status: 'awaiting_waybill' })
+
+      const { count: overdueCount } = await bFilter(
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing').lt('planned_delivery_date', today).not('planned_delivery_date', 'is', null)
+      )
+      if (overdueCount > 0) alerts.push({ key: 'overdue', label: `${overdueCount} order${overdueCount > 1 ? 's' : ''} overdue for delivery`, severity: 'high', status: 'processing' })
+
+      const dpHours = getHours('delivered_unpaid_hours')
+      const dpCutoff = new Date(now - dpHours * 3600000).toISOString()
+      const { count: dpCount } = await bFilter(
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'delivered').lt('updated_at', dpCutoff)
+      )
+      if (dpCount > 0) alerts.push({ key: 'delivered', label: `${dpCount} delivered order${dpCount > 1 ? 's' : ''} unpaid >${dpHours}h`, severity: 'medium', status: 'delivered' })
+
+      return alerts
+    },
+    staleTime: 60000,
+  })
 
   function getConfigValue(alertType) {
     if (thresholds[alertType] !== undefined) return thresholds[alertType]
@@ -93,6 +141,38 @@ export function AlertsPage() {
             <option value="">All Businesses (Default)</option>
             {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
+        </div>
+
+        {/* Live alerts */}
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle size={16} className="text-amber-600" />
+            <h3 className="text-sm font-semibold text-gray-900">Current Alerts</h3>
+            <span className="ml-auto text-xs text-gray-400">{liveAlerts.isLoading ? 'Checking...' : `${(liveAlerts.data || []).length} active`}</span>
+          </div>
+          {liveAlerts.isLoading ? (
+            <div className="h-8 shimmer rounded-lg" />
+          ) : (liveAlerts.data || []).length === 0 ? (
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle size={16} />
+              <span className="text-sm">All clear — no active alerts</span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(liveAlerts.data || []).map(alert => (
+                <button
+                  key={alert.key}
+                  onClick={() => navigate(`/orders?status=${alert.status}`)}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl text-left active:scale-[0.98] transition-all"
+                  style={{ background: alert.severity === 'high' ? '#FEF2F2' : '#FFFBEB' }}
+                >
+                  <AlertCircle size={16} className={alert.severity === 'high' ? 'text-red-600 shrink-0' : 'text-amber-600 shrink-0'} />
+                  <span className={`text-sm font-medium ${alert.severity === 'high' ? 'text-red-800' : 'text-amber-800'}`}>{alert.label}</span>
+                  <span className="ml-auto text-xs text-gray-400">View →</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-3">
