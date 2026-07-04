@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { MapPin, Package } from 'lucide-react'
-import { useOrders } from '../../hooks/useOrders'
+import { MapPin, Package, CheckCircle, XCircle } from 'lucide-react'
+import { useOrders, useUpdateOrderStatus } from '../../hooks/useOrders'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { OrderCard } from './OrderCard'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { NIGERIAN_STATES } from '../../utils/format'
+import { useAuthStore } from '../../stores/authStore'
 
 const TABS = [
   { key: 'new', label: 'New' },
@@ -21,16 +22,21 @@ const TABS = [
   { key: 'by_state', label: 'By State' },
 ]
 
+// Statuses where quick deliver/fail actions make sense
+const QUICK_ACTION_TABS = ['processing', 'today']
+
 export function FulfillmentPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState(searchParams.get('tab') || 'new')
   const [search, setSearch] = useState('')
   const [selectedState, setSelectedState] = useState('')
+  const [actingOrder, setActingOrder] = useState(null)
+  const { user } = useAuthStore()
+  const updateStatus = useUpdateOrderStatus()
 
   const today = new Date().toISOString().split('T')[0]
 
-  // Active operational statuses shown in by_state view (excludes completed/closed orders)
   const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing']
 
   const filters = {
@@ -49,6 +55,38 @@ export function FulfillmentPage() {
   const stateGroups = tab === 'by_state'
     ? NIGERIAN_STATES.filter(s => (orders || []).some(o => o.state === s))
     : []
+
+  const showQuickActions = QUICK_ACTION_TABS.includes(tab)
+
+  async function quickDeliver(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      await updateStatus.mutateAsync({
+        id: order.id,
+        status: 'delivered',
+        extra: { delivered_at: new Date().toISOString() },
+        timelineDesc: `Marked delivered by ${user?.name}`,
+      })
+    } finally {
+      setActingOrder(null)
+    }
+  }
+
+  async function quickFail(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      await updateStatus.mutateAsync({
+        id: order.id,
+        status: 'failed_delivery',
+        extra: { failed_reason: 'Failed delivery (marked from fulfillment board)' },
+        timelineDesc: `Marked failed delivery by ${user?.name}`,
+      })
+    } finally {
+      setActingOrder(null)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -111,8 +149,33 @@ export function FulfillmentPage() {
                 <span className="text-xs font-medium text-gray-700">{selectedState} ({displayOrders.length})</span>
               </div>
             )}
+            {displayOrders.length > 0 && (
+              <p className="text-xs text-gray-500">{displayOrders.length} order{displayOrders.length !== 1 ? 's' : ''}</p>
+            )}
             {displayOrders.map(order => (
-              <OrderCard key={order.id} order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+              <div key={order.id}>
+                <OrderCard order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+                {showQuickActions && (
+                  <div className="flex gap-2 mt-1 px-0.5">
+                    <button
+                      onClick={() => quickDeliver(order)}
+                      disabled={actingOrder === order.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-100 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <CheckCircle size={14} />
+                      {actingOrder === order.id ? 'Saving...' : 'Delivered'}
+                    </button>
+                    <button
+                      onClick={() => quickFail(order)}
+                      disabled={actingOrder === order.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <XCircle size={14} />
+                      Failed
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         )}
