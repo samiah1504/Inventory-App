@@ -2,11 +2,12 @@ import { useNavigate } from 'react-router-dom'
 import { ShoppingCart, DollarSign, Package, AlertTriangle, Users, Plus, BarChart3 } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useOrders } from '../../hooks/useOrders'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { StatusBadge } from '../../components/ui/Badge'
-import { Button } from '../../components/ui/Button'
 
 function today() {
   return new Date().toISOString().split('T')[0]
@@ -17,13 +18,22 @@ export function CeoDashboard() {
   const navigate = useNavigate()
 
   const todayOrders = useOrders({ date_from: `${today()}T00:00:00`, date_to: `${today()}T23:59:59` })
-  const allOrders = useOrders({ limit: 200 })
+  const recentOrders = useOrders({ limit: 8 })
   const paidToday = useOrders({ status: 'paid', date_from: `${today()}T00:00:00` })
   const partialOrders = useOrders({ status: 'partially_paid' })
 
+  const totalCount = useQuery({
+    queryKey: ['orders_total_count'],
+    queryFn: async () => {
+      const { count, error } = await supabase.from('orders').select('*', { count: 'exact', head: true })
+      if (error) throw error
+      return count || 0
+    },
+    staleTime: 60000,
+  })
+
   const totalSalesToday = (paidToday.data || []).reduce((s, o) => s + Number(o.total_amount), 0)
   const outstandingBalance = (partialOrders.data || []).reduce((s, o) => s + Number(o.balance_amount || 0), 0)
-  const recentOrders = (allOrders.data || []).slice(0, 8)
 
   return (
     <div className="overflow-y-auto h-full">
@@ -60,7 +70,7 @@ export function CeoDashboard() {
           />
           <StatCard
             label="Total Orders"
-            value={allOrders.isLoading ? '...' : (allOrders.data?.length || 0)}
+            value={totalCount.isLoading ? '...' : (totalCount.data || 0)}
             icon={<BarChart3 size={20} />}
             color="purple"
             onClick={() => navigate('/reports')}
@@ -97,11 +107,11 @@ export function CeoDashboard() {
             <h3 className="text-sm font-semibold text-gray-900">Recent Orders</h3>
             <button onClick={() => navigate('/orders')} className="text-xs text-blue-600 font-medium">View all</button>
           </div>
-          {allOrders.isLoading ? (
+          {recentOrders.isLoading ? (
             <div className="px-4 pb-4"><SkeletonList count={3} /></div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {recentOrders.map(order => (
+              {(recentOrders.data || []).map(order => (
                 <button
                   key={order.id}
                   onClick={() => navigate(`/orders/${order.id}`)}
@@ -123,7 +133,7 @@ export function CeoDashboard() {
                   </div>
                 </button>
               ))}
-              {recentOrders.length === 0 && (
+              {recentOrders.data?.length === 0 && (
                 <p className="text-sm text-gray-500 text-center py-8">No orders yet</p>
               )}
             </div>

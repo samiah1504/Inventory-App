@@ -33,6 +33,7 @@ export function useOrders(filters = {}) {
       if (filters.date_to) query = query.lte('created_at', filters.date_to)
       if (filters.limit) query = query.limit(filters.limit)
       if (filters.planned_delivery_date) query = query.eq('planned_delivery_date', filters.planned_delivery_date)
+      if (filters.planned_delivery_date_lt) query = query.lt('planned_delivery_date', filters.planned_delivery_date_lt)
 
       const { data, error } = await query
       if (error) throw error

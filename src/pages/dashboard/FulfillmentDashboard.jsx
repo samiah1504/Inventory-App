@@ -17,6 +17,7 @@ export function FulfillmentDashboard() {
   const processing = useOrders({ status: 'processing' })
   const todayDelivery = useOrders({ planned_delivery_date: today })
   const delivered = useOrders({ status: 'delivered' })
+  const overdue = useOrders({ status: 'processing', planned_delivery_date_lt: today })
 
   return (
     <div className="overflow-y-auto h-full">
@@ -42,22 +43,27 @@ export function FulfillmentDashboard() {
             onClick={() => navigate('/fulfillment?tab=delivered')} />
         </div>
 
-        {/* Scheduled Today */}
-        <button
-          onClick={() => navigate('/fulfillment?tab=today')}
-          className="w-full bg-white rounded-2xl p-4 border border-gray-100 text-left active:scale-[0.99] transition-all"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-gray-500">Scheduled Today</p>
-              <p className="text-3xl font-bold text-blue-600 mt-0.5">{todayDelivery.data?.length ?? '—'}</p>
-              <p className="text-xs text-gray-400 mt-0.5">{formatDate(new Date().toISOString())}</p>
-            </div>
-            <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center">
-              <Clock size={24} className="text-blue-600" />
-            </div>
-          </div>
-        </button>
+        {/* Scheduled Today + Overdue */}
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => navigate('/fulfillment?tab=today')}
+            className="bg-white rounded-2xl p-4 border border-gray-100 text-left active:scale-[0.99] transition-all"
+          >
+            <p className="text-xs text-gray-500 mb-1">Today</p>
+            <p className="text-3xl font-bold text-blue-600">{todayDelivery.data?.length ?? '—'}</p>
+            <p className="text-xs text-gray-400 mt-0.5">{formatDate(new Date().toISOString())}</p>
+          </button>
+          <button
+            onClick={() => navigate('/fulfillment?tab=processing')}
+            className={`rounded-2xl p-4 border text-left active:scale-[0.99] transition-all ${(overdue.data?.length ?? 0) > 0 ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}
+          >
+            <p className={`text-xs mb-1 ${(overdue.data?.length ?? 0) > 0 ? 'text-red-600 font-medium' : 'text-gray-500'}`}>Overdue</p>
+            <p className={`text-3xl font-bold ${(overdue.data?.length ?? 0) > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+              {overdue.data?.length ?? '—'}
+            </p>
+            <p className="text-xs text-gray-400 mt-0.5">Past delivery date</p>
+          </button>
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <button
