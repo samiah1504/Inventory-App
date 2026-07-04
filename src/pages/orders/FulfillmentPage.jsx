@@ -16,6 +16,8 @@ const TABS = [
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
   { key: 'today', label: 'Today' },
+  { key: 'delivered', label: 'Delivered' },
+  { key: 'failed_delivery', label: 'Failed' },
   { key: 'by_state', label: 'By State' },
 ]
 
