@@ -14,6 +14,8 @@ import { formatCurrency } from '../../utils/format'
 
 export function ProductsPage() {
   const [search, setSearch] = useState('')
+  const [filterBusiness, setFilterBusiness] = useState('')
+  const [filterTab, setFilterTab] = useState('all')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ name: '', business_id: '', category_id: '', selling_price: '', cost_price: '', is_verified: true })
@@ -22,12 +24,13 @@ export function ProductsPage() {
   const queryClient = useQueryClient()
 
   const { data: products } = useQuery({
-    queryKey: ['all_products', search],
+    queryKey: ['all_products', search, filterBusiness],
     queryFn: async () => {
       let query = supabase.from('products')
         .select('*, business:businesses(name), category:product_categories(name)')
         .order('name')
       if (search) query = query.ilike('name', `%${search}%`)
+      if (filterBusiness) query = query.eq('business_id', filterBusiness)
       const { data, error } = await query
       if (error) throw error
       return data || []
@@ -85,7 +88,13 @@ export function ProductsPage() {
     setShowModal(true)
   }
 
-  const unverified = (products || []).filter(p => !p.is_verified)
+  const allProducts = products || []
+  const unverified = allProducts.filter(p => !p.is_verified)
+  const visibleProducts = filterTab === 'unverified'
+    ? allProducts.filter(p => !p.is_verified)
+    : filterTab === 'inactive'
+    ? allProducts.filter(p => !p.is_active)
+    : allProducts
 
   return (
     <div className="flex flex-col h-full">
@@ -98,19 +107,32 @@ export function ProductsPage() {
           </button>
         }
       />
-      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20 space-y-2">
         <SearchBar value={search} onChange={setSearch} placeholder="Search products..." />
+        {businesses && businesses.length > 1 && (
+          <select value={filterBusiness} onChange={e => setFilterBusiness(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option value="">All Businesses</option>
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        <div className="flex gap-2">
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'unverified', label: `Unverified${unverified.length ? ` (${unverified.length})` : ''}` },
+            { key: 'inactive', label: 'Inactive' },
+          ].map(({ key, label }) => (
+            <button key={key} onClick={() => setFilterTab(key)}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium ${filterTab === key ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-        {unverified.length > 0 && (
-          <div className="bg-amber-50 rounded-2xl p-3 border border-amber-100">
-            <p className="text-xs font-medium text-amber-700 flex items-center gap-1">
-              <AlertCircle size={12} /> {unverified.length} product(s) need review
-            </p>
-          </div>
-        )}
-        {(products || []).map(p => (
+        <p className="text-xs text-gray-500">{visibleProducts.length} product{visibleProducts.length !== 1 ? 's' : ''}</p>
+        {visibleProducts.map(p => (
           <div key={p.id} className="bg-white rounded-2xl p-4 border border-gray-100">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
@@ -128,6 +150,13 @@ export function ProductsPage() {
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => openEdit(p)} className="p-2 bg-gray-100 rounded-xl active:scale-95">
                   <Edit size={16} className="text-gray-600" />
+                </button>
+                <button
+                  onClick={() => toggleActive.mutate({ id: p.id, is_active: p.is_active })}
+                  className={`p-2 rounded-xl active:scale-95 transition-all ${p.is_active ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}
+                  title={p.is_active ? 'Deactivate' : 'Activate'}
+                >
+                  {p.is_active ? <CheckCircle size={16} /> : <AlertCircle size={16} />}
                 </button>
               </div>
             </div>
