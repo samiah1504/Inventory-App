@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { Search, Plus, X } from 'lucide-react'
 import { TopBar } from '../../components/layout/TopBar'
@@ -15,6 +15,7 @@ import { useAppStore } from '../../stores/appStore'
 
 export function NewOrderPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const createOrder = useCreateOrder()
@@ -43,6 +44,11 @@ export function NewOrderPage() {
       source: 'WhatsApp',
       business_id: '',
       preferred_delivery_time: 'Anytime',
+      customer_phone: searchParams.get('phone') || '',
+      customer_name: searchParams.get('name') || '',
+      address: searchParams.get('address') || '',
+      city: searchParams.get('city') || '',
+      state: searchParams.get('state') || '',
     }
   })
 
