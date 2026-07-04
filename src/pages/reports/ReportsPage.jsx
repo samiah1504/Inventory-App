@@ -256,6 +256,33 @@ export function ReportsPage() {
                 ))}
               </div>
             </div>
+
+            {/* Top products */}
+            {(() => {
+              const byProduct = {}
+              orders.forEach(o => {
+                if (o.product_name) {
+                  if (!byProduct[o.product_name]) byProduct[o.product_name] = { count: 0, revenue: 0 }
+                  byProduct[o.product_name].count++
+                  byProduct[o.product_name].revenue += Number(o.total_amount)
+                }
+              })
+              const topProducts = Object.entries(byProduct).sort(([,a],[,b]) => b.count - a.count).slice(0, 8)
+              return topProducts.length > 0 ? (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Top Products</h3>
+                  <div className="space-y-2">
+                    {topProducts.map(([name, stats]) => (
+                      <div key={name} className="flex items-center justify-between gap-2 py-1 border-b border-gray-50 last:border-0">
+                        <p className="text-sm text-gray-700 truncate flex-1">{name}</p>
+                        <span className="text-xs text-gray-500 shrink-0">{stats.count} orders</span>
+                        <span className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(stats.revenue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            })()}
           </>
         )}
 
@@ -300,6 +327,33 @@ export function ReportsPage() {
               <StatCard label="Total Revenue" value={formatCurrency(totalSales)} icon={<DollarSign size={20} />} color="green" />
               <StatCard label="Outstanding" value={formatCurrency(outstanding)} icon={<AlertCircle size={20} />} color="amber" />
             </div>
+
+            {/* Revenue by state */}
+            {(() => {
+              const byStateRevenue = {}
+              orders.filter(o => ['paid', 'partially_paid'].includes(o.status)).forEach(o => {
+                const s = o.state || 'Unknown'
+                byStateRevenue[s] = (byStateRevenue[s] || 0) + Number(o.amount_paid || o.total_amount)
+              })
+              const stateEntries = Object.entries(byStateRevenue).sort(([,a],[,b]) => b - a)
+              const maxRevenue = stateEntries[0]?.[1] || 1
+              return stateEntries.length > 0 ? (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by State</h3>
+                  <div className="space-y-2">
+                    {stateEntries.slice(0, 10).map(([state, amount]) => (
+                      <div key={state} className="flex items-center justify-between gap-3">
+                        <span className="text-sm text-gray-700 w-28 truncate">{state}</span>
+                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full">
+                          <div className="h-full bg-green-500 rounded-full" style={{ width: `${(amount / maxRevenue) * 100}%` }} />
+                        </div>
+                        <span className="text-sm font-bold text-gray-900 w-24 text-right">{formatCurrency(amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            })()}
 
             <div className="bg-white rounded-2xl p-4 border border-gray-100">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Outstanding Balances</h3>
