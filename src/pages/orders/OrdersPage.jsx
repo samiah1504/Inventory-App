@@ -12,17 +12,38 @@ import { OrderCard } from './OrderCard'
 import { formatCurrency, formatDate, ORDER_STATUSES, statusLabel } from '../../utils/format'
 import { ShoppingCart } from 'lucide-react'
 
-const STATUS_TABS = [
+const ALL_STATUS_TABS = [
   { key: 'all', label: 'All' },
   { key: 'new', label: 'New' },
-  { key: 'awaiting_waybill', label: 'Awaiting Waybill' },
+  { key: 'awaiting_waybill', label: 'Awaiting' },
   { key: 'waybilled', label: 'Waybilled' },
+  { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
   { key: 'partially_paid', label: 'Partial' },
   { key: 'failed_delivery', label: 'Failed' },
   { key: 'cancelled', label: 'Cancelled' },
+  { key: 'returned', label: 'Returned' },
+]
+
+// Customer Support only sees their own active orders
+const CS_STATUS_TABS = [
+  { key: 'all', label: 'All Mine' },
+  { key: 'new', label: 'New' },
+  { key: 'awaiting_waybill', label: 'Awaiting' },
+  { key: 'cancelled', label: 'Cancelled' },
+]
+
+const FULFILLMENT_STATUS_TABS = [
+  { key: 'new', label: 'New' },
+  { key: 'awaiting_waybill', label: 'Awaiting' },
+  { key: 'waybilled', label: 'Waybilled' },
+  { key: 'received_at_warehouse', label: 'At Warehouse' },
+  { key: 'processing', label: 'Processing' },
+  { key: 'delivered', label: 'Delivered' },
+  { key: 'paid', label: 'Paid' },
+  { key: 'failed_delivery', label: 'Failed' },
 ]
 
 export function OrdersPage() {
@@ -30,7 +51,14 @@ export function OrdersPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuthStore()
 
-  const statusParam = searchParams.get('status') || 'all'
+  const role = user?.role
+  const isCS = role === 'customer_support'
+  const isFulfillment = role === 'fulfillment'
+
+  const statusTabs = isCS ? CS_STATUS_TABS : isFulfillment ? FULFILLMENT_STATUS_TABS : ALL_STATUS_TABS
+  const defaultTab = isFulfillment ? 'new' : 'all'
+
+  const statusParam = searchParams.get('status') || defaultTab
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState(statusParam)
 
@@ -52,7 +80,7 @@ export function OrdersPage() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Orders"
+        title={isCS ? 'My Orders' : 'Orders'}
         back={false}
         actions={canCreate && (
           <button
@@ -72,7 +100,7 @@ export function OrdersPage() {
         />
         {/* Status tabs */}
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scroll-smooth" style={{ scrollbarWidth: 'none' }}>
-          {STATUS_TABS.map(({ key, label }) => (
+          {statusTabs.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => handleTabChange(key)}

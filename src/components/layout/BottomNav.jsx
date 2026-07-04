@@ -13,33 +13,44 @@ const NAV_CONFIG = {
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
+  super_admin: [
+    { to: '/', icon: Home, label: 'Home' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
+    { to: '/reports', icon: BarChart3, label: 'Reports' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
+  ],
   operations_manager: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/documents', icon: FileText, label: 'Docs' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/customers', icon: Users, label: 'Customers' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   customer_support: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders/new', icon: ShoppingCart, label: 'New Order' },
     { to: '/orders', icon: ClipboardList, label: 'My Orders' },
     { to: '/customers', icon: Users, label: 'Customers' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   fulfillment: [
     { to: '/', icon: Home, label: 'Home' },
-    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
     { to: '/fulfillment', icon: Truck, label: 'Fulfillment' },
+    { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   waybill: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   inventory: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/inventory', icon: Package, label: 'Inventory' },
-    { to: '/inventory/transfers', icon: Warehouse, label: 'Transfers' },
+    { to: '/customers', icon: Users, label: 'Customers' },
+    { to: '/settings', icon: Settings, label: 'Settings' },
   ],
 }
 

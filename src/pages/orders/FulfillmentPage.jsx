@@ -28,9 +28,13 @@ export function FulfillmentPage() {
 
   const today = new Date().toISOString().split('T')[0]
 
+  // Active operational statuses shown in by_state view (excludes completed/closed orders)
+  const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing']
+
   const filters = {
     search: search || undefined,
     status: ['today', 'by_state'].includes(tab) ? undefined : tab,
+    statuses: tab === 'by_state' ? ACTIVE_STATUSES : undefined,
     planned_delivery_date: tab === 'today' ? today : undefined,
   }
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Phone, MessageCircle, Copy, FileText, Edit, ChevronDown, Plus, Clock, AlertTriangle } from 'lucide-react'
+import { Phone, MessageCircle, Copy, FileText, Edit, ChevronDown, Plus, Clock, AlertTriangle, Pencil } from 'lucide-react'
 import { useOrder, useUpdateOrderStatus } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
 import { TopBar } from '../../components/layout/TopBar'
@@ -15,8 +15,9 @@ import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from 
 import { supabase } from '../../lib/supabase'
 
 const STATUS_TRANSITIONS = {
-  ceo: ['awaiting_waybill', 'waybilled', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
-  operations_manager: ['awaiting_waybill', 'waybilled', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled'],
+  ceo: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
+  super_admin: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
+  operations_manager: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled'],
   customer_support: ['cancelled'],
   fulfillment: ['processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery'],
   waybill: ['awaiting_waybill', 'waybilled', 'received_at_warehouse'],
@@ -64,6 +65,7 @@ export function OrderDetailPage() {
   const allowedTransitions = STATUS_TRANSITIONS[user?.role] || []
   const canChangeStatus = allowedTransitions.length > 0
   const canViewDocs = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
+  const canEdit = user?.role === 'customer_support' && order.status === 'new' && order.created_by === user?.id
 
   function handleCopyOrder() {
     const msg = buildOrderMessage(order)
@@ -183,6 +185,14 @@ export function OrderDetailPage() {
         title={order.order_number}
         actions={
           <div className="flex gap-2">
+            {canEdit && (
+              <button
+                onClick={() => navigate(`/orders/${order.id}/edit`)}
+                className="p-2 bg-gray-100 text-gray-700 rounded-xl active:scale-95 transition-all"
+              >
+                <Pencil size={18} />
+              </button>
+            )}
             {canChangeStatus && (
               <Button size="sm" onClick={() => setShowStatusModal(true)}>
                 Status
