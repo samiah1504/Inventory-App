@@ -1,16 +1,33 @@
 import { useNavigate } from 'react-router-dom'
 import { Truck, Package, ArrowRight, ClipboardList } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
-import { useOrders } from '../../hooks/useOrders'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 
 export function WaybillDashboard() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
 
-  const awaitingWaybill = useOrders({ status: 'awaiting_waybill' })
-  const waybilled = useOrders({ status: 'waybilled' })
-  const atWarehouse = useOrders({ status: 'received_at_warehouse' })
+  const counts = useQuery({
+    queryKey: ['waybill_counts'],
+    queryFn: async () => {
+      const [awaitingR, waybilledR, atWarehouseR] = await Promise.all([
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill'),
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'waybilled'),
+        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'received_at_warehouse'),
+      ])
+      return {
+        awaiting_waybill: awaitingR.count || 0,
+        waybilled: waybilledR.count || 0,
+        at_warehouse: atWarehouseR.count || 0,
+      }
+    },
+    staleTime: 30000,
+  })
+
+  const c = counts.data
+  const loading = counts.isLoading
 
   return (
     <div className="overflow-y-auto h-full">
@@ -23,21 +40,21 @@ export function WaybillDashboard() {
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             label="Awaiting Waybill"
-            value={awaitingWaybill.data?.length ?? '...'}
+            value={loading ? '...' : c.awaiting_waybill}
             icon={<Package size={20} />}
             color="amber"
             onClick={() => navigate('/waybill?tab=awaiting')}
           />
           <StatCard
             label="In Transit"
-            value={waybilled.data?.length ?? '...'}
+            value={loading ? '...' : c.waybilled}
             icon={<Truck size={20} />}
             color="blue"
             onClick={() => navigate('/waybill?tab=waybilled')}
           />
           <StatCard
             label="At Warehouse"
-            value={atWarehouse.data?.length ?? '...'}
+            value={loading ? '...' : c.at_warehouse}
             icon={<ClipboardList size={20} />}
             color="green"
             onClick={() => navigate('/orders?status=received_at_warehouse')}
