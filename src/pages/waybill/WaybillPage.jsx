@@ -185,6 +185,15 @@ export function WaybillPage() {
     )
   }
 
+  function toggleSelectAll() {
+    const allIds = (awaitingOrders.data || []).map(o => o.id)
+    if (selectedOrders.length === allIds.length) {
+      setSelectedOrders([])
+    } else {
+      setSelectedOrders(allIds)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
       <TopBar
@@ -215,6 +224,17 @@ export function WaybillPage() {
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {tab === 'awaiting' && (
           <div className="space-y-3">
+            {awaitingOrders.data && awaitingOrders.data.length > 0 && (
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-500">{awaitingOrders.data.length} order{awaitingOrders.data.length !== 1 ? 's' : ''}</p>
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-xs font-medium text-blue-600 active:scale-95"
+                >
+                  {selectedOrders.length === awaitingOrders.data.length ? 'Deselect All' : 'Select All'}
+                </button>
+              </div>
+            )}
             {awaitingOrders.isLoading ? <SkeletonList count={4} /> :
              awaitingOrders.data?.length === 0 ? <EmptyState title="No orders awaiting waybill" icon={<Truck size={28} />} /> :
              awaitingOrders.data.map(order => (
