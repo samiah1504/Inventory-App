@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Plus, Truck } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -26,6 +26,7 @@ const TABS = [
 ]
 
 export function WaybillPage() {
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [tab, setTab] = useState(searchParams.get('tab') || 'awaiting')
   const [search, setSearch] = useState('')
@@ -81,8 +82,10 @@ export function WaybillPage() {
   async function createBatch() {
     if (selectedOrders.length === 0) { showToast('Select at least one order', 'error'); return }
     const year = new Date().getFullYear()
-    const { count } = await supabase.from('waybill_batches').select('*', { count: 'exact', head: true })
-    const batchNumber = `WB-${year}-${String((count || 0) + 1).padStart(5, '0')}`
+    const { data: lastBatch } = await supabase
+      .from('waybill_batches').select('batch_number').order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const lastNum = lastBatch?.batch_number ? parseInt(lastBatch.batch_number.split('-').pop()) || 0 : 0
+    const batchNumber = `WB-${year}-${String(lastNum + 1).padStart(5, '0')}`
 
     const { data: batch, error } = await supabase.from('waybill_batches').insert({
       ...batchForm,
@@ -145,8 +148,10 @@ export function WaybillPage() {
       showToast('Source and destination must be different', 'error'); return
     }
     const year = new Date().getFullYear()
-    const { count } = await supabase.from('warehouse_transfers').select('*', { count: 'exact', head: true })
-    const transferNumber = `TR-${year}-${String((count || 0) + 1).padStart(5, '0')}`
+    const { data: lastTransfer } = await supabase
+      .from('warehouse_transfers').select('transfer_number').order('created_at', { ascending: false }).limit(1).maybeSingle()
+    const lastTrNum = lastTransfer?.transfer_number ? parseInt(lastTransfer.transfer_number.split('-').pop()) || 0 : 0
+    const transferNumber = `TR-${year}-${String(lastTrNum + 1).padStart(5, '0')}`
     const { error } = await supabase.from('warehouse_transfers').insert({
       transfer_number: transferNumber,
       product_id: transferForm.product_id,
