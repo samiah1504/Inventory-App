@@ -277,6 +277,20 @@ export function WaybillPage() {
                 <p className="text-sm font-semibold text-gray-900">{t.product?.name || t.product_name}</p>
                 <p className="text-xs text-gray-500">Qty: {t.quantity} · {t.from_wh?.name} → {t.to_wh?.name}</p>
                 <p className="text-xs text-gray-400">{formatDate(t.created_at)}</p>
+                {t.status === 'in_transit' && (
+                  <button
+                    onClick={async () => {
+                      await supabase.from('warehouse_transfers').update({
+                        status: 'received', received_at: new Date().toISOString(), received_by: user?.id
+                      }).eq('id', t.id)
+                      showToast('Transfer marked as received', 'success')
+                      queryClient.invalidateQueries({ queryKey: ['warehouse_transfers'] })
+                    }}
+                    className="mt-3 w-full py-2 bg-green-600 text-white text-sm font-medium rounded-xl active:scale-95 transition-all"
+                  >
+                    Mark Received
+                  </button>
+                )}
               </div>
             ))}
           </div>
