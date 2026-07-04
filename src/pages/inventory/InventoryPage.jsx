@@ -28,13 +28,17 @@ export function InventoryPage() {
   const [search, setSearch] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedWarehouse, setSelectedWarehouse] = useState('')
+  const [selectedBusiness, setSelectedBusiness] = useState('')
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const { data: businesses } = useBusinesses()
   const { data: warehouses } = useWarehouses()
   const addStock = useAddStock()
 
-  const { data: allInventory, isLoading } = useInventory({ low_stock: tab === 'low' })
+  const { data: allInventory, isLoading } = useInventory({
+    low_stock: tab === 'low',
+    business_id: selectedBusiness || undefined,
+  })
   const { data: products } = useProducts()
 
   const [stockForm, setStockForm] = useState({
@@ -83,6 +87,12 @@ export function InventoryPage() {
 
       <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20 px-4 pt-3 pb-2 space-y-2">
         <SearchBar value={search} onChange={setSearch} placeholder="Search products..." />
+        {businesses && businesses.length > 1 && (
+          <Select value={selectedBusiness} onChange={e => setSelectedBusiness(e.target.value)}>
+            <option value="">All Businesses</option>
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select>
+        )}
         <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}

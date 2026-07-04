@@ -19,7 +19,8 @@ export function CeoDashboard() {
 
   const todayOrders = useOrders({ date_from: `${today()}T00:00:00`, date_to: `${today()}T23:59:59` })
   const recentOrders = useOrders({ limit: 8 })
-  const paidToday = useOrders({ status: 'paid', date_from: `${today()}T00:00:00` })
+  const paidToday = useOrders({ status: 'paid', date_from: `${today()}T00:00:00`, date_to: `${today()}T23:59:59` })
+  const partialToday = useOrders({ status: 'partially_paid', date_from: `${today()}T00:00:00`, date_to: `${today()}T23:59:59` })
   const partialOrders = useOrders({ status: 'partially_paid' })
 
   const totalCount = useQuery({
@@ -33,6 +34,7 @@ export function CeoDashboard() {
   })
 
   const totalSalesToday = (paidToday.data || []).reduce((s, o) => s + Number(o.total_amount), 0)
+    + (partialToday.data || []).reduce((s, o) => s + Number(o.amount_paid || 0), 0)
   const outstandingBalance = (partialOrders.data || []).reduce((s, o) => s + Number(o.balance_amount || 0), 0)
 
   return (
@@ -56,7 +58,7 @@ export function CeoDashboard() {
           />
           <StatCard
             label="Sales Today"
-            value={paidToday.isLoading ? '...' : formatCurrency(totalSalesToday)}
+            value={(paidToday.isLoading || partialToday.isLoading) ? '...' : formatCurrency(totalSalesToday)}
             icon={<DollarSign size={20} />}
             color="green"
           />

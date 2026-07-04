@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ShoppingCart, Truck, Package, FileText, BarChart3, Users } from 'lucide-react'
+import { ShoppingCart, Truck, Package, FileText, BarChart3, Users, DollarSign } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useOrders } from '../../hooks/useOrders'
 import { StatCard } from '../../components/ui/Card'
@@ -82,6 +82,13 @@ export function OperationsManagerDashboard() {
           >
             <Truck size={20} className="text-amber-600" />
             Fulfillment
+          </button>
+          <button
+            onClick={() => navigate('/accounting')}
+            className="py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-medium text-gray-700 flex flex-col items-center gap-1.5 active:scale-95 transition-all"
+          >
+            <DollarSign size={20} className="text-teal-600" />
+            Accounting
           </button>
         </div>
       </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell } from 'lucide-react'
+import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -98,21 +98,36 @@ function NonAdminSettings({ user, logout }) {
           </button>
         </div>
 
-        {/* Ops Manager gets access to alert config */}
+        {/* Ops Manager gets access to alert config and accounting */}
         {isOpsManager && (
-          <button
-            onClick={() => navigate('/settings/alerts')}
-            className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
-          >
-            <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
-              <Bell size={20} />
-            </div>
-            <div className="flex-1 text-left min-w-0">
-              <p className="text-sm font-semibold text-gray-900">Alert Thresholds</p>
-              <p className="text-xs text-gray-500">Configure order stale/delay alerts</p>
-            </div>
-            <ChevronRight size={18} className="text-gray-400 shrink-0" />
-          </button>
+          <>
+            <button
+              onClick={() => navigate('/accounting')}
+              className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+            >
+              <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shrink-0">
+                <DollarSign size={20} />
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Accounting</p>
+                <p className="text-xs text-gray-500">Log operational expenses</p>
+              </div>
+              <ChevronRight size={18} className="text-gray-400 shrink-0" />
+            </button>
+            <button
+              onClick={() => navigate('/settings/alerts')}
+              className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+            >
+              <div className="w-10 h-10 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
+                <Bell size={20} />
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Alert Thresholds</p>
+                <p className="text-xs text-gray-500">Configure order stale/delay alerts</p>
+              </div>
+              <ChevronRight size={18} className="text-gray-400 shrink-0" />
+            </button>
+          </>
         )}
       </div>
     </div>
