@@ -10,7 +10,7 @@ import { StatusBadge } from '../../components/ui/Badge'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { OrderCard } from './OrderCard'
-import { formatCurrency, formatDate, ORDER_STATUSES, statusLabel } from '../../utils/format'
+import { formatCurrency, formatDate, ORDER_STATUSES, statusLabel, NIGERIAN_STATES } from '../../utils/format'
 import { ShoppingCart } from 'lucide-react'
 
 const ALL_STATUS_TABS = [
@@ -63,6 +63,7 @@ export function OrdersPage() {
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState(statusParam)
   const [businessFilter, setBusinessFilter] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
 
   const canFilterBusiness = ['ceo', 'super_admin', 'operations_manager'].includes(role)
   const { data: businesses } = useBusinesses()
@@ -71,6 +72,7 @@ export function OrdersPage() {
     search: search || undefined,
     status: activeTab !== 'all' ? activeTab : undefined,
     business_id: businessFilter || undefined,
+    state: stateFilter || undefined,
   }
 
   const { data: orders, isLoading } = useOrders(filters)
@@ -112,6 +114,16 @@ export function OrdersPage() {
           >
             <option value="">All Businesses</option>
             {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        {canFilterBusiness && (
+          <select
+            value={stateFilter}
+            onChange={e => setStateFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All States</option>
+            {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         )}
         {/* Status tabs */}
