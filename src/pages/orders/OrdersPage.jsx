@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Filter, SlidersHorizontal } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useOrders } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
+import { useBusinesses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { StatusBadge } from '../../components/ui/Badge'
@@ -61,10 +62,15 @@ export function OrdersPage() {
   const statusParam = searchParams.get('status') || defaultTab
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState(statusParam)
+  const [businessFilter, setBusinessFilter] = useState('')
+
+  const canFilterBusiness = ['ceo', 'super_admin', 'operations_manager'].includes(role)
+  const { data: businesses } = useBusinesses()
 
   const filters = {
     search: search || undefined,
     status: activeTab !== 'all' ? activeTab : undefined,
+    business_id: businessFilter || undefined,
   }
 
   const { data: orders, isLoading } = useOrders(filters)
@@ -98,6 +104,16 @@ export function OrdersPage() {
           onChange={setSearch}
           placeholder="Search orders, customer, phone..."
         />
+        {canFilterBusiness && businesses && businesses.length > 1 && (
+          <select
+            value={businessFilter}
+            onChange={e => setBusinessFilter(e.target.value)}
+            className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">All Businesses</option>
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
         {/* Status tabs */}
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 scroll-smooth" style={{ scrollbarWidth: 'none' }}>
           {statusTabs.map(({ key, label }) => (
