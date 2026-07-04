@@ -3,6 +3,45 @@
 -- These are additive changes on top of schema.sql
 -- ===================================================
 
+-- ===================================================
+-- Waybill Batch Enhancements (packing, expenses, timeline)
+-- ===================================================
+
+ALTER TABLE waybill_batches
+  ADD COLUMN IF NOT EXISTS waybill_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS packaging_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS loading_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS transport_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS dispatch_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS other_cost DECIMAL(15,2) DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS expense_notes TEXT,
+  ADD COLUMN IF NOT EXISTS expenses_saved BOOLEAN DEFAULT false;
+
+ALTER TABLE waybill_batch_orders
+  ADD COLUMN IF NOT EXISTS allocated_logistics_cost DECIMAL(15,2) DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS waybill_batch_packing_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  batch_id UUID REFERENCES waybill_batches(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  is_packed BOOLEAN DEFAULT false,
+  packed_at TIMESTAMPTZ,
+  packed_by UUID REFERENCES staff_users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS waybill_batch_timeline (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  batch_id UUID REFERENCES waybill_batches(id) ON DELETE CASCADE,
+  event TEXT NOT NULL,
+  notes TEXT,
+  staff_id UUID REFERENCES staff_users(id),
+  staff_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Add internal_note to orders if missing
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS internal_note TEXT;
 

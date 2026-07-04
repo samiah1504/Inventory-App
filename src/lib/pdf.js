@@ -2,7 +2,7 @@ import jsPDF from 'jspdf'
 import { formatCurrency, formatDate } from '../utils/format'
 
 function addHeader(doc, business, title, number) {
-  doc.setFillColor(30, 64, 175)
+  doc.setFillColor(17, 24, 39)
   doc.rect(0, 0, 210, 28, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(16)
@@ -207,6 +207,157 @@ export function generateDeliveryNote(order, business) {
   doc.text('Received by: ___________________________', 14, y)
   doc.text('Signature: ___________________________', 14, y + 12)
   doc.text('Date: ___________________________', 14, y + 24)
+
+  addFooter(doc, 1)
+  return doc
+}
+
+export function generatePackingList(batch, packingItems, batchOrders) {
+  const doc = new jsPDF()
+  doc.setFillColor(17, 24, 39)
+  doc.rect(0, 0, 210, 28, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(16)
+  doc.setFont('helvetica', 'bold')
+  doc.text('PACKING LIST', 14, 12)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text(batch.batch_number, 14, 19)
+  doc.setFontSize(10)
+  doc.text(batch.courier_company || '', 196, 12, { align: 'right' })
+  doc.text(batch.destination_state || '', 196, 19, { align: 'right' })
+  doc.setTextColor(0, 0, 0)
+
+  let y = 38
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text(`Date: ${formatDate(batch.date_shipped || batch.created_at)}`, 14, y)
+  doc.text(`Orders: ${batchOrders.length}`, 120, y)
+  y += 10
+
+  // Group packing items by state
+  const states = [...new Set(packingItems.map(i => i.state))]
+  for (const state of states) {
+    const items = packingItems.filter(i => i.state === state)
+
+    doc.setFillColor(243, 244, 246)
+    doc.rect(14, y, 182, 8, 'F')
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(10)
+    doc.text(state, 16, y + 5.5)
+    y += 12
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(9)
+    for (const item of items) {
+      const check = item.is_packed ? '[X]' : '[ ]'
+      doc.text(check, 16, y)
+      doc.text(item.product_name, 28, y)
+      doc.text(`Qty: ${item.quantity}`, 170, y, { align: 'right' })
+      y += 8
+      if (y > 270) { doc.addPage(); y = 20 }
+    }
+    y += 4
+  }
+
+  y += 10
+  doc.setFont('helvetica', 'normal')
+  doc.setFontSize(9)
+  doc.text('Packed by: ______________________________', 14, y)
+  doc.text('Date: ______________________________', 120, y)
+
+  addFooter(doc, 1)
+  return doc
+}
+
+export function generateWaybillSummary(batch, batchOrders, expenses) {
+  const doc = new jsPDF()
+  doc.setFillColor(17, 24, 39)
+  doc.rect(0, 0, 210, 28, 'F')
+  doc.setTextColor(255, 255, 255)
+  doc.setFontSize(16)
+  doc.setFont('helvetica', 'bold')
+  doc.text('WAYBILL SUMMARY', 14, 12)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'normal')
+  doc.text(batch.batch_number, 14, 19)
+  doc.text(batch.courier_company || '', 196, 12, { align: 'right' })
+  doc.text(batch.tracking_number || '', 196, 19, { align: 'right' })
+  doc.setTextColor(0, 0, 0)
+
+  let y = 38
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Batch Info', 14, y)
+  doc.setFont('helvetica', 'normal')
+  y += 7
+  doc.text(`Destination: ${batch.destination_state || '—'}`, 14, y)
+  doc.text(`Date Shipped: ${formatDate(batch.date_shipped || batch.created_at)}`, 120, y)
+  y += 6
+  doc.text(`Status: ${batch.status}`, 14, y)
+  doc.text(`Orders: ${batchOrders.length}`, 120, y)
+  y += 12
+
+  // Orders table
+  doc.setFillColor(243, 244, 246)
+  doc.rect(14, y, 182, 8, 'F')
+  doc.setFont('helvetica', 'bold')
+  doc.setFontSize(9)
+  doc.text('#', 16, y + 5.5)
+  doc.text('Customer', 24, y + 5.5)
+  doc.text('Product', 90, y + 5.5)
+  doc.text('State', 140, y + 5.5)
+  doc.text('Amount', 196, y + 5.5, { align: 'right' })
+  y += 12
+
+  doc.setFont('helvetica', 'normal')
+  let total = 0
+  batchOrders.forEach((bo, idx) => {
+    const o = bo.order || bo
+    doc.text(String(idx + 1), 16, y)
+    doc.text(doc.splitTextToSize(o.customer_name || '', 62)[0], 24, y)
+    doc.text(doc.splitTextToSize(o.product_name || '', 46)[0], 90, y)
+    doc.text(o.state || '', 140, y)
+    doc.text(formatCurrency(o.total_amount || 0), 196, y, { align: 'right' })
+    total += Number(o.total_amount || 0)
+    y += 7
+    if (y > 265) { doc.addPage(); y = 20 }
+  })
+
+  y += 4
+  doc.setDrawColor(229, 231, 235)
+  doc.line(14, y, 196, y)
+  y += 6
+  doc.setFont('helvetica', 'bold')
+  doc.text('Orders Total:', 140, y)
+  doc.text(formatCurrency(total), 196, y, { align: 'right' })
+
+  // Expenses
+  if (expenses && Object.values(expenses).some(v => Number(v) > 0)) {
+    y += 12
+    doc.text('Logistics Expenses', 14, y)
+    y += 8
+    doc.setFont('helvetica', 'normal')
+    const expenseRows = [
+      ['Waybill Fee', expenses.waybill_cost],
+      ['Packaging', expenses.packaging_cost],
+      ['Loading', expenses.loading_cost],
+      ['Transport', expenses.transport_cost],
+      ['Dispatch', expenses.dispatch_cost],
+      ['Other', expenses.other_cost],
+    ]
+    for (const [label, val] of expenseRows) {
+      if (Number(val) > 0) {
+        doc.text(label, 24, y)
+        doc.text(formatCurrency(val), 196, y, { align: 'right' })
+        y += 7
+      }
+    }
+    const expTotal = expenseRows.reduce((s, [, v]) => s + (Number(v) || 0), 0)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Logistics Total:', 140, y)
+    doc.text(formatCurrency(expTotal), 196, y, { align: 'right' })
+  }
 
   addFooter(doc, 1)
   return doc

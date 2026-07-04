@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Plus, Truck } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { Plus, Truck, ChevronRight } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useOrders } from '../../hooks/useOrders'
+import { useCreateWaybillBatch } from '../../hooks/useWaybillBatches'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { OrderCard } from '../orders/OrderCard'
@@ -16,7 +17,6 @@ import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { useWarehouses, useProducts } from '../../hooks/useBusinesses'
 import { NIGERIAN_STATES, formatDate } from '../../utils/format'
-import { useQueryClient } from '@tanstack/react-query'
 
 const TABS = [
   { key: 'awaiting', label: 'Awaiting Waybill' },
@@ -76,78 +76,26 @@ export function WaybillPage() {
   const [batchForm, setBatchForm] = useState({
     courier_company: '', waybill_type: 'external', tracking_number: '',
     date_shipped: new Date().toISOString().split('T')[0],
-    destination_state: '', destination_warehouse_id: '', total_cost: '', notes: ''
+    destination_state: '', destination_warehouse_id: '', notes: ''
   })
+
+  const createWaybillBatch = useCreateWaybillBatch()
 
   async function createBatch() {
     if (selectedOrders.length === 0) { showToast('Select at least one order', 'error'); return }
-    const year = new Date().getFullYear()
-    const { data: lastBatch } = await supabase
-      .from('waybill_batches').select('batch_number').order('created_at', { ascending: false }).limit(1).maybeSingle()
-    const lastNum = lastBatch?.batch_number ? parseInt(lastBatch.batch_number.split('-').pop()) || 0 : 0
-    const batchNumber = `WB-${year}-${String(lastNum + 1).padStart(5, '0')}`
-
-    const { data: batch, error } = await supabase.from('waybill_batches').insert({
-      ...batchForm,
-      batch_number: batchNumber,
-      total_cost: Number(batchForm.total_cost) || 0,
-      business_id: awaitingOrders.data?.find(o => selectedOrders.includes(o.id))?.business_id || null,
-      created_by: user?.id,
-    }).select().single()
-
-    if (error) { showToast(error.message, 'error'); return }
-
-    const costPerOrder = Number(batchForm.total_cost) / selectedOrders.length
-
-    for (const orderId of selectedOrders) {
-      await supabase.from('waybill_batch_orders').insert({
-        batch_id: batch.id, order_id: orderId, allocated_cost: costPerOrder
+    try {
+      const { batch, batchNumber } = await createWaybillBatch.mutateAsync({
+        form: batchForm,
+        selectedOrders,
+        awaitingOrders: awaitingOrders.data,
       })
-      await supabase.from('orders').update({
-        status: 'waybilled',
-        has_waybill: true,
-        updated_at: new Date().toISOString()
-      }).eq('id', orderId)
-      await supabase.from('order_timeline').insert({
-        order_id: orderId,
-        action: 'waybilled',
-        description: `Waybilled in batch ${batchNumber} via ${batchForm.courier_company || 'courier'}`,
-        staff_id: user?.id,
-        staff_name: user?.name,
-      })
+      showToast(`Batch ${batchNumber} created`, 'success')
+      setShowBatchModal(false)
+      setSelectedOrders([])
+      navigate(`/waybill/batches/${batch.id}`)
+    } catch (err) {
+      showToast(err.message, 'error')
     }
-
-    showToast(`Batch ${batchNumber} created`, 'success')
-    setShowBatchModal(false)
-    setSelectedOrders([])
-    queryClient.invalidateQueries({ queryKey: ['orders'] })
-    queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
-  }
-
-  async function markReceived(batchId, batchNumber) {
-    await supabase.from('waybill_batches').update({
-      status: 'received', received_at: new Date().toISOString(), received_by: user?.id
-    }).eq('id', batchId)
-
-    const { data: batchOrders } = await supabase
-      .from('waybill_batch_orders').select('order_id').eq('batch_id', batchId)
-
-    for (const bo of batchOrders || []) {
-      await supabase.from('orders').update({
-        status: 'received_at_warehouse',
-        updated_at: new Date().toISOString(),
-      }).eq('id', bo.order_id)
-      await supabase.from('order_timeline').insert({
-        order_id: bo.order_id,
-        action: 'received_at_warehouse',
-        description: `Received at warehouse from batch ${batchNumber} by ${user?.name}`,
-        staff_id: user?.id,
-        staff_name: user?.name,
-      })
-    }
-    showToast('Marked as received', 'success')
-    queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
-    queryClient.invalidateQueries({ queryKey: ['orders'] })
   }
 
   async function createTransfer() {
@@ -259,27 +207,33 @@ export function WaybillPage() {
           <div className="space-y-3">
             {batches.isLoading ? <SkeletonList count={3} /> :
              batches.data?.length === 0 ? <EmptyState title="No waybill batches" icon={<Truck size={28} />} /> :
-             batches.data.map(batch => (
-              <div key={batch.id} className="bg-white rounded-2xl p-4 border border-gray-100">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <span className="text-xs font-mono text-gray-400">{batch.batch_number}</span>
-                    <span className={`ml-2 text-xs px-2 py-0.5 rounded-full font-medium ${batch.status === 'received' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
-                      {batch.status === 'received' ? 'Received' : 'In Transit'}
-                    </span>
-                  </div>
-                  <span className="text-xs text-gray-400">{formatDate(batch.created_at)}</span>
-                </div>
-                <p className="text-sm font-medium text-gray-900">{batch.courier_company}</p>
-                <p className="text-xs text-gray-500">{batch.warehouse?.name || batch.destination_state} · {batch.tracking_number}</p>
-                {batch.status === 'in_transit' && (
-                  <button onClick={() => markReceived(batch.id, batch.batch_number)}
-                    className="mt-3 w-full py-2 bg-green-600 text-white text-sm font-medium rounded-xl active:scale-95 transition-all">
-                    Mark Received at Warehouse
-                  </button>
-                )}
-              </div>
-            ))}
+             batches.data.map(batch => {
+               const statusColor = batch.status === 'received' ? 'bg-green-100 text-green-700'
+                 : batch.status === 'packed' ? 'bg-purple-100 text-purple-700'
+                 : batch.status === 'created' ? 'bg-blue-100 text-blue-700'
+                 : 'bg-amber-100 text-amber-700'
+               const statusLabel = batch.status === 'received' ? 'Received'
+                 : batch.status === 'packed' ? 'Packed'
+                 : batch.status === 'created' ? 'Created'
+                 : 'In Transit'
+               return (
+                 <button key={batch.id} onClick={() => navigate(`/waybill/batches/${batch.id}`)}
+                   className="w-full bg-white rounded-2xl p-4 border border-gray-100 text-left active:bg-gray-50 transition-colors">
+                   <div className="flex items-start justify-between mb-2">
+                     <div>
+                       <span className="text-xs font-mono text-gray-400">{batch.batch_number}</span>
+                       <span className={`ml-2 text-xs px-2 py-0.5 rounded-full font-medium ${statusColor}`}>
+                         {statusLabel}
+                       </span>
+                     </div>
+                     <ChevronRight size={16} className="text-gray-300 mt-0.5" />
+                   </div>
+                   <p className="text-sm font-medium text-gray-900">{batch.courier_company}</p>
+                   <p className="text-xs text-gray-500">{batch.warehouse?.name || batch.destination_state}{batch.tracking_number ? ` · ${batch.tracking_number}` : ''}</p>
+                   <p className="text-xs text-gray-400 mt-0.5">{formatDate(batch.created_at)}</p>
+                 </button>
+               )
+             })}
           </div>
         )}
 
@@ -367,8 +321,6 @@ export function WaybillPage() {
             <option value="">Select warehouse...</option>
             {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
           </Select>
-          <Input label="Total Waybill Cost (₦)" type="number" inputMode="decimal"
-            value={batchForm.total_cost} onChange={e => setBatchForm({ ...batchForm, total_cost: e.target.value })} />
           <Textarea label="Notes" rows={2}
             value={batchForm.notes} onChange={e => setBatchForm({ ...batchForm, notes: e.target.value })} />
         </div>
