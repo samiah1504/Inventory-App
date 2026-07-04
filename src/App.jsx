@@ -26,6 +26,7 @@ import { useAuthStore } from './stores/authStore'
 import { useAppStore } from './stores/appStore'
 import { getQueuedActions, removeQueuedAction } from './lib/offline'
 import { supabase } from './lib/supabase'
+import { PWAUpdateBanner } from './components/ui/PWAUpdateBanner'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -93,6 +94,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <PWAUpdateBanner />
         <AppInit />
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
