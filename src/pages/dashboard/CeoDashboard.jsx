@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { ShoppingCart, DollarSign, TrendingUp, Package, AlertTriangle, Users, Plus, BarChart3 } from 'lucide-react'
+import { ShoppingCart, DollarSign, Package, AlertTriangle, Users, Plus, BarChart3 } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useOrders } from '../../hooks/useOrders'
 import { StatCard } from '../../components/ui/Card'
@@ -13,7 +13,7 @@ function today() {
 }
 
 export function CeoDashboard() {
-  const { user, logout } = useAuthStore()
+  const { user } = useAuthStore()
   const navigate = useNavigate()
 
   const todayOrders = useOrders({ date_from: `${today()}T00:00:00`, date_to: `${today()}T23:59:59` })
@@ -130,9 +130,6 @@ export function CeoDashboard() {
           )}
         </div>
 
-        <button onClick={logout} className="w-full py-3 text-sm text-red-600 font-medium">
-          Sign Out
-        </button>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, AlertTriangle, Package, ArrowRightLeft } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, AlertTriangle, Package } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useInventory, useAddStock } from '../../hooks/useInventory'
@@ -28,7 +28,6 @@ export function InventoryPage() {
   const [search, setSearch] = useState('')
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedWarehouse, setSelectedWarehouse] = useState('')
-  const navigate = useNavigate()
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const { data: businesses } = useBusinesses()
@@ -75,16 +74,10 @@ export function InventoryPage() {
         title="Inventory"
         back={false}
         actions={
-          <div className="flex gap-2">
-            <button onClick={() => navigate('/inventory/transfers')}
-              className="p-2 bg-gray-100 text-gray-600 rounded-xl active:scale-95 transition-all">
-              <ArrowRightLeft size={18} />
-            </button>
-            <button onClick={() => setShowAddModal(true)}
-              className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all">
-              <Plus size={20} />
-            </button>
-          </div>
+          <button onClick={() => setShowAddModal(true)}
+            className="p-2 bg-blue-600 text-white rounded-xl active:scale-95 transition-all">
+            <Plus size={20} />
+          </button>
         }
       />
 

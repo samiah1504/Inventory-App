@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Plus, Truck } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -14,7 +14,7 @@ import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
-import { useWarehouses } from '../../hooks/useBusinesses'
+import { useWarehouses, useProducts } from '../../hooks/useBusinesses'
 import { NIGERIAN_STATES, formatDate } from '../../utils/format'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -30,12 +30,16 @@ export function WaybillPage() {
   const [tab, setTab] = useState(searchParams.get('tab') || 'awaiting')
   const [search, setSearch] = useState('')
   const [showBatchModal, setShowBatchModal] = useState(false)
+  const [showTransferModal, setShowTransferModal] = useState(false)
   const [selectedOrders, setSelectedOrders] = useState([])
-  const navigate = useNavigate()
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const queryClient = useQueryClient()
   const { data: warehouses } = useWarehouses()
+  const { data: products } = useProducts()
+  const [transferForm, setTransferForm] = useState({
+    product_id: '', from_warehouse_id: '', to_warehouse_id: '', quantity: '', notes: ''
+  })
 
   const awaitingOrders = useOrders({ status: 'awaiting_waybill' })
   const waybilledOrders = useOrders({ status: 'waybilled' })
@@ -131,6 +135,33 @@ export function WaybillPage() {
     showToast('Marked as received', 'success')
     queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
     queryClient.invalidateQueries({ queryKey: ['orders'] })
+  }
+
+  async function createTransfer() {
+    if (!transferForm.product_id || !transferForm.from_warehouse_id || !transferForm.to_warehouse_id || !transferForm.quantity) {
+      showToast('Fill in all required fields', 'error'); return
+    }
+    if (transferForm.from_warehouse_id === transferForm.to_warehouse_id) {
+      showToast('Source and destination must be different', 'error'); return
+    }
+    const year = new Date().getFullYear()
+    const { count } = await supabase.from('warehouse_transfers').select('*', { count: 'exact', head: true })
+    const transferNumber = `TR-${year}-${String((count || 0) + 1).padStart(5, '0')}`
+    const { error } = await supabase.from('warehouse_transfers').insert({
+      transfer_number: transferNumber,
+      product_id: transferForm.product_id,
+      from_warehouse_id: transferForm.from_warehouse_id,
+      to_warehouse_id: transferForm.to_warehouse_id,
+      quantity: Number(transferForm.quantity),
+      notes: transferForm.notes,
+      status: 'in_transit',
+      created_by: user?.id,
+    })
+    if (error) { showToast(error.message, 'error'); return }
+    showToast(`Transfer ${transferNumber} created`, 'success')
+    setShowTransferModal(false)
+    setTransferForm({ product_id: '', from_warehouse_id: '', to_warehouse_id: '', quantity: '', notes: '' })
+    queryClient.invalidateQueries({ queryKey: ['warehouse_transfers'] })
   }
 
   function toggleOrder(orderId) {
@@ -229,7 +260,7 @@ export function WaybillPage() {
 
         {tab === 'transfers' && (
           <div className="space-y-3">
-            <button onClick={() => navigate('/waybill/new-transfer')}
+            <button onClick={() => setShowTransferModal(true)}
               className="w-full py-3 bg-blue-600 text-white rounded-2xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 transition-all">
               <Plus size={16} /> New Warehouse Transfer
             </button>
@@ -291,6 +322,43 @@ export function WaybillPage() {
             value={batchForm.total_cost} onChange={e => setBatchForm({ ...batchForm, total_cost: e.target.value })} />
           <Textarea label="Notes" rows={2}
             value={batchForm.notes} onChange={e => setBatchForm({ ...batchForm, notes: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Create Transfer Modal */}
+      <Modal
+        isOpen={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        title="New Warehouse Transfer"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowTransferModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={createTransfer} className="flex-1">Create Transfer</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Select label="Product" required value={transferForm.product_id}
+            onChange={e => setTransferForm({ ...transferForm, product_id: e.target.value })}>
+            <option value="">Select product...</option>
+            {(products || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+          <Select label="From Warehouse" required value={transferForm.from_warehouse_id}
+            onChange={e => setTransferForm({ ...transferForm, from_warehouse_id: e.target.value })}>
+            <option value="">Select source...</option>
+            {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
+          </Select>
+          <Select label="To Warehouse" required value={transferForm.to_warehouse_id}
+            onChange={e => setTransferForm({ ...transferForm, to_warehouse_id: e.target.value })}>
+            <option value="">Select destination...</option>
+            {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
+          </Select>
+          <Input label="Quantity" type="number" inputMode="numeric" required
+            value={transferForm.quantity}
+            onChange={e => setTransferForm({ ...transferForm, quantity: e.target.value })} />
+          <Textarea label="Notes" rows={2}
+            value={transferForm.notes}
+            onChange={e => setTransferForm({ ...transferForm, notes: e.target.value })} />
         </div>
       </Modal>
     </div>

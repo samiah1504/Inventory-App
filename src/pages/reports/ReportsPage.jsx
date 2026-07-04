@@ -70,9 +70,21 @@ export function ReportsPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('orders')
-        .select('created_by, staff_code, status')
+        .select('created_by, status, staff:staff_users!orders_created_by_fkey(name, staff_code)')
         .gte('created_at', `${dateFrom}T00:00:00`)
         .lte('created_at', `${dateTo}T23:59:59`)
+      if (error) throw error
+      return data || []
+    },
+  })
+
+  const inventoryReport = useQuery({
+    queryKey: ['report_inventory'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('inventory')
+        .select('*, product:products(name, business:businesses(name)), warehouse:warehouses(name, state)')
+        .order('quantity_available', { ascending: true })
       if (error) throw error
       return data || []
     },
@@ -81,6 +93,7 @@ export function ReportsPage() {
   const orders = ordersReport.data || []
   const expenses = expensesReport.data || []
   const staffOrders = staffReport.data || []
+  const inventoryItems = inventoryReport.data || []
 
   // Compute stats
   const totalOrders = orders.length
@@ -250,8 +263,10 @@ export function ReportsPage() {
             {(() => {
               const byStaff = {}
               staffOrders.forEach(o => {
-                const key = o.staff_code || o.created_by || 'Unknown'
-                if (!byStaff[key]) byStaff[key] = { total: 0, paid: 0, failed: 0, cancelled: 0 }
+                const name = o.staff?.name || o.created_by || 'Unknown'
+                const code = o.staff?.staff_code || ''
+                const key = name
+                if (!byStaff[key]) byStaff[key] = { name, code, total: 0, paid: 0, failed: 0, cancelled: 0 }
                 byStaff[key].total++
                 if (['paid', 'partially_paid'].includes(o.status)) byStaff[key].paid++
                 if (o.status === 'failed_delivery') byStaff[key].failed++
@@ -259,10 +274,13 @@ export function ReportsPage() {
               })
               return (
                 <div className="space-y-3">
-                  {Object.entries(byStaff).sort(([,a],[,b]) => b.total - a.total).map(([staff, stats]) => (
-                    <div key={staff} className="py-2 border-b border-gray-50 last:border-0">
+                  {Object.values(byStaff).sort((a, b) => b.total - a.total).map(stats => (
+                    <div key={stats.name} className="py-2 border-b border-gray-50 last:border-0">
                       <div className="flex justify-between mb-1">
-                        <span className="text-sm font-medium text-gray-900">{staff}</span>
+                        <div>
+                          <span className="text-sm font-medium text-gray-900">{stats.name}</span>
+                          {stats.code && <span className="ml-1.5 text-xs text-gray-400">{stats.code}</span>}
+                        </div>
                         <span className="text-sm font-bold text-gray-900">{stats.total} orders</span>
                       </div>
                       <div className="flex gap-3 text-xs text-gray-500">
@@ -279,9 +297,45 @@ export function ReportsPage() {
         )}
 
         {tab === 'inventory' && (
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900">Inventory Report</h3>
-            <p className="text-sm text-gray-500 mt-2">View full inventory details in the Inventory section.</p>
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-white rounded-2xl p-3 border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-gray-900">{inventoryItems.length}</p>
+                <p className="text-xs text-gray-500">Stock Lines</p>
+              </div>
+              <div className="bg-white rounded-2xl p-3 border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-amber-600">{inventoryItems.filter(i => i.quantity_available > 0 && i.quantity_available <= 5).length}</p>
+                <p className="text-xs text-gray-500">Low Stock</p>
+              </div>
+              <div className="bg-white rounded-2xl p-3 border border-gray-100 text-center">
+                <p className="text-2xl font-bold text-red-600">{inventoryItems.filter(i => i.quantity_available <= 0).length}</p>
+                <p className="text-xs text-gray-500">Out of Stock</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100">
+              <div className="px-4 pt-4 pb-2">
+                <h3 className="text-sm font-semibold text-gray-900">Stock Levels</h3>
+              </div>
+              <div className="divide-y divide-gray-50">
+                {inventoryItems.slice(0, 30).map(item => (
+                  <div key={item.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900 truncate">{item.product?.name}</p>
+                      <p className="text-xs text-gray-400">{item.warehouse?.name}</p>
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className={`text-sm font-bold ${item.quantity_available <= 0 ? 'text-red-600' : item.quantity_available <= 5 ? 'text-amber-600' : 'text-green-600'}`}>
+                        {item.quantity_available}
+                      </span>
+                      <span className="text-xs text-gray-400">avail</span>
+                    </div>
+                  </div>
+                ))}
+                {inventoryItems.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">No inventory records</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
