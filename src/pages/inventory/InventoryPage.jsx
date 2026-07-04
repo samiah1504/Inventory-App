@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, AlertTriangle, Package } from 'lucide-react'
+import { Plus, AlertTriangle, Package, Sliders } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { useInventory, useAddStock } from '../../hooks/useInventory'
+import { useInventory, useAddStock, useAdjustStock } from '../../hooks/useInventory'
 import { useBusinesses, useProducts, useWarehouses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
@@ -40,6 +40,11 @@ export function InventoryPage() {
     business_id: selectedBusiness || undefined,
   })
   const { data: products } = useProducts()
+  const adjustStock = useAdjustStock()
+
+  const [showAdjustModal, setShowAdjustModal] = useState(false)
+  const [adjustingItem, setAdjustingItem] = useState(null)
+  const [adjustForm, setAdjustForm] = useState({ adjustment: '', reason: '' })
 
   const [stockForm, setStockForm] = useState({
     product_id: '', warehouse_id: '', business_id: '',
@@ -64,6 +69,24 @@ export function InventoryPage() {
     })
     setShowAddModal(false)
     setStockForm({ product_id: '', warehouse_id: '', business_id: '', quantity: '', unit_cost: '', supplier: '', notes: '' })
+  }
+
+  async function handleAdjust() {
+    const adj = Number(adjustForm.adjustment)
+    if (!adj || !adjustForm.reason.trim()) {
+      showToast('Enter adjustment amount and reason', 'error'); return
+    }
+    await adjustStock.mutateAsync({
+      inventory_id: adjustingItem.id,
+      product_id: adjustingItem.product_id,
+      warehouse_id: adjustingItem.warehouse_id,
+      business_id: adjustingItem.business_id,
+      adjustment: adj,
+      reason: adjustForm.reason,
+    })
+    setShowAdjustModal(false)
+    setAdjustingItem(null)
+    setAdjustForm({ adjustment: '', reason: '' })
   }
 
   function getStockColor(item) {
@@ -128,9 +151,18 @@ export function InventoryPage() {
                      <p className="text-sm font-semibold text-gray-900 leading-tight">{item.product?.name}</p>
                      <p className="text-xs text-gray-500">{item.warehouse?.name} · {item.warehouse?.state}</p>
                    </div>
-                   {item.quantity_available <= 5 && (
-                     <AlertTriangle size={16} className="text-amber-500 shrink-0" />
-                   )}
+                   <div className="flex items-center gap-2 shrink-0">
+                     {item.quantity_available <= 5 && (
+                       <AlertTriangle size={16} className="text-amber-500" />
+                     )}
+                     <button
+                       onClick={() => { setAdjustingItem(item); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
+                       className="p-1.5 bg-gray-100 rounded-lg active:scale-95 transition-all"
+                       title="Adjust stock"
+                     >
+                       <Sliders size={14} className="text-gray-600" />
+                     </button>
+                   </div>
                  </div>
                  <div className="grid grid-cols-4 gap-2">
                    {[
@@ -151,6 +183,46 @@ export function InventoryPage() {
          )
         }
       </div>
+
+      <Modal
+        isOpen={showAdjustModal}
+        onClose={() => { setShowAdjustModal(false); setAdjustingItem(null) }}
+        title={adjustingItem ? `Adjust Stock — ${adjustingItem.product?.name}` : 'Adjust Stock'}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => { setShowAdjustModal(false); setAdjustingItem(null) }} className="flex-1">Cancel</Button>
+            <Button onClick={handleAdjust} loading={adjustStock.isPending} className="flex-1">Save Adjustment</Button>
+          </div>
+        }
+      >
+        {adjustingItem && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-xl p-3 text-sm">
+              <p className="text-gray-500 text-xs">Current available stock</p>
+              <p className="text-2xl font-bold text-gray-900">{adjustingItem.quantity_available}</p>
+              <p className="text-xs text-gray-400">{adjustingItem.warehouse?.name} · {adjustingItem.warehouse?.state}</p>
+            </div>
+            <Input
+              label="Adjustment"
+              type="number"
+              inputMode="numeric"
+              placeholder="e.g. +10 or -3"
+              value={adjustForm.adjustment}
+              onChange={e => setAdjustForm({ ...adjustForm, adjustment: e.target.value })}
+              hint={adjustForm.adjustment && !isNaN(Number(adjustForm.adjustment))
+                ? `New quantity: ${adjustingItem.quantity_available + Number(adjustForm.adjustment)}`
+                : 'Positive to add, negative to remove'}
+            />
+            <Input
+              label="Reason"
+              required
+              placeholder="e.g. Damaged goods, stocktake correction"
+              value={adjustForm.reason}
+              onChange={e => setAdjustForm({ ...adjustForm, reason: e.target.value })}
+            />
+          </div>
+        )}
+      </Modal>
 
       <Modal
         isOpen={showAddModal}

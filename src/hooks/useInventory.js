@@ -84,6 +84,50 @@ export function useAddStock() {
   })
 }
 
+export function useAdjustStock() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+
+  return useMutation({
+    mutationFn: async ({ inventory_id, product_id, warehouse_id, business_id, adjustment, reason }) => {
+      const { data: existing, error: fetchErr } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('id', inventory_id)
+        .single()
+      if (fetchErr) throw fetchErr
+
+      const newAvailable = existing.quantity_available + adjustment
+      const newPhysical = existing.quantity_physical + adjustment
+      if (newAvailable < 0) throw new Error('Adjustment would result in negative stock')
+
+      const { error: updateErr } = await supabase
+        .from('inventory')
+        .update({
+          quantity_available: newAvailable,
+          quantity_physical: newPhysical,
+        })
+        .eq('id', inventory_id)
+      if (updateErr) throw updateErr
+
+      const { error: movErr } = await supabase.from('inventory_movements').insert({
+        product_id, warehouse_id, business_id,
+        movement_type: adjustment > 0 ? 'adjustment_in' : 'adjustment_out',
+        quantity: Math.abs(adjustment),
+        notes: reason,
+        staff_id: user?.id,
+      })
+      if (movErr) throw movErr
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      showToast('Stock adjusted', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+}
+
 export function useWarehouseTransfers(filters = {}) {
   return useQuery({
     queryKey: ['warehouse_transfers', filters],

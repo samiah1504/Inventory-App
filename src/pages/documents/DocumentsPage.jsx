@@ -15,13 +15,9 @@ export function DocumentsPage() {
   const [activeTab, setActiveTab] = useState('invoices')
   const navigate = useNavigate()
 
-  const statusFilter = activeTab === 'receipts'
-    ? 'paid'
-    : undefined
-
   const { data: orders, isLoading } = useOrders({
     search: search || undefined,
-    status: statusFilter,
+    statuses: activeTab === 'receipts' ? ['paid', 'partially_paid'] : undefined,
     limit: 100,
   })
 
@@ -78,8 +74,7 @@ export function DocumentsPage() {
                   )}
                   {activeTab === 'receipts' && (
                     <button onClick={() => handleDoc('receipt', order)}
-                      disabled={order.status !== 'paid'}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-green-700 bg-green-50 rounded-xl active:scale-95 transition-all disabled:opacity-40">
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-green-700 bg-green-50 rounded-xl active:scale-95 transition-all">
                       <Download size={14} /> Receipt
                     </button>
                   )}
