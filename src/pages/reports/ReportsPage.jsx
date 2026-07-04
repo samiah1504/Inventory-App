@@ -6,7 +6,7 @@ import { StatCard } from '../../components/ui/Card'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { formatCurrency, formatDate, NIGERIAN_STATES } from '../../utils/format'
 import { useAuthStore } from '../../stores/authStore'
-import { BarChart3, TrendingUp, Package, Truck, Users, DollarSign, AlertCircle } from 'lucide-react'
+import { BarChart3, TrendingUp, Package, Truck, Users, DollarSign, AlertCircle, Download } from 'lucide-react'
 import { Select, Input } from '../../components/ui/Input'
 import { useBusinesses } from '../../hooks/useBusinesses'
 
@@ -36,9 +36,10 @@ export function ReportsPage() {
     queryFn: async () => {
       let query = supabase
         .from('orders')
-        .select('status, state, source, total_amount, amount_paid, balance_amount, created_by, created_at, business_id')
+        .select('order_number, customer_name, customer_phone, status, state, source, product_name, total_amount, amount_paid, balance_amount, created_by, created_at, business_id')
         .gte('created_at', `${dateFrom}T00:00:00`)
         .lte('created_at', `${dateTo}T23:59:59`)
+        .order('created_at', { ascending: false })
       if (businessId) query = query.eq('business_id', businessId)
       const { data, error } = await query
       if (error) throw error
@@ -117,9 +118,90 @@ export function ReportsPage() {
   const outstandingOrders = orders.filter(o => o.status === 'partially_paid')
   const outstanding = outstandingOrders.reduce((s, o) => s + Number(o.balance_amount || 0), 0)
 
+  function downloadCSV(rows, filename) {
+    if (!rows.length) return
+    const headers = Object.keys(rows[0])
+    const csv = [
+      headers.join(','),
+      ...rows.map(row =>
+        headers.map(h => {
+          const val = row[h] === null || row[h] === undefined ? '' : String(row[h])
+          return val.includes(',') || val.includes('"') || val.includes('\n')
+            ? `"${val.replace(/"/g, '""')}"` : val
+        }).join(',')
+      )
+    ].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = filename; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function handleExport() {
+    if (tab === 'orders' || tab === 'overview' || tab === 'sales') {
+      const rows = orders.map(o => ({
+        order_number: o.order_number || '',
+        customer_name: o.customer_name || '',
+        customer_phone: o.customer_phone || '',
+        status: o.status,
+        state: o.state || '',
+        source: o.source || '',
+        product: o.product_name || '',
+        total_amount: o.total_amount,
+        amount_paid: o.amount_paid || '',
+        balance: o.balance_amount || '',
+        created_at: o.created_at ? o.created_at.slice(0, 10) : '',
+      }))
+      downloadCSV(rows, `orders-${dateFrom}-to-${dateTo}.csv`)
+    } else if (tab === 'expenses') {
+      const rows = expenses.map(e => ({
+        date: e.date,
+        expense_type: e.expense_type,
+        amount: e.amount,
+        description: e.description || '',
+        category: e.category || '',
+        notes: e.notes || '',
+      }))
+      downloadCSV(rows, `expenses-${dateFrom}-to-${dateTo}.csv`)
+    } else if (tab === 'staff') {
+      const byStaff = {}
+      staffOrders.forEach(o => {
+        const name = o.staff?.name || o.created_by || 'Unknown'
+        const code = o.staff?.staff_code || ''
+        if (!byStaff[name]) byStaff[name] = { name, staff_code: code, total: 0, paid: 0, failed: 0, cancelled: 0 }
+        byStaff[name].total++
+        if (['paid', 'partially_paid'].includes(o.status)) byStaff[name].paid++
+        if (o.status === 'failed_delivery') byStaff[name].failed++
+        if (o.status === 'cancelled') byStaff[name].cancelled++
+      })
+      downloadCSV(Object.values(byStaff), `staff-report-${dateFrom}-to-${dateTo}.csv`)
+    } else if (tab === 'inventory') {
+      const rows = inventoryItems.map(i => ({
+        product: i.product?.name || '',
+        warehouse: i.warehouse?.name || '',
+        quantity_available: i.quantity_available,
+        quantity_reserved: i.quantity_reserved || 0,
+      }))
+      downloadCSV(rows, `inventory-snapshot.csv`)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Reports" back={false} />
+      <TopBar
+        title="Reports"
+        back={false}
+        actions={
+          <button
+            onClick={handleExport}
+            className="p-2 bg-gray-100 text-gray-700 rounded-xl active:scale-95 transition-all"
+            title="Export CSV"
+          >
+            <Download size={18} />
+          </button>
+        }
+      />
 
       {/* Filters */}
       <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 sticky top-[57px] z-20">

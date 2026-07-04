@@ -41,6 +41,7 @@ export function OrderDetailPage() {
   const [note, setNote] = useState('')
   const [failedReason, setFailedReason] = useState('')
   const [cancelReason, setCancelReason] = useState('')
+  const [returnReason, setReturnReason] = useState('')
   const [pendingStatus, setPendingStatus] = useState(null)
   const [showReasonModal, setShowReasonModal] = useState(false)
   const [showProcessingModal, setShowProcessingModal] = useState(false)
@@ -78,7 +79,7 @@ export function OrderDetailPage() {
   }
 
   async function handleStatusChange(newStatus) {
-    if (newStatus === 'cancelled' || newStatus === 'failed_delivery') {
+    if (newStatus === 'cancelled' || newStatus === 'failed_delivery' || newStatus === 'returned') {
       setPendingStatus(newStatus)
       setShowReasonModal(true)
       setShowStatusModal(false)
@@ -161,18 +162,27 @@ export function OrderDetailPage() {
   }
 
   async function handleReasonSubmit() {
-    const reason = pendingStatus === 'cancelled' ? cancelReason : failedReason
+    let reason, extra
+    if (pendingStatus === 'cancelled') {
+      reason = cancelReason
+      extra = { cancellation_reason: reason }
+    } else if (pendingStatus === 'failed_delivery') {
+      reason = failedReason
+      extra = { failed_reason: reason }
+    } else {
+      reason = returnReason
+      extra = { return_reason: reason }
+    }
     await updateStatus.mutateAsync({
       id: order.id,
       status: pendingStatus,
-      extra: pendingStatus === 'cancelled'
-        ? { cancellation_reason: reason }
-        : { failed_reason: reason },
+      extra,
       timelineDesc: `${statusLabel(pendingStatus)}: ${reason} — by ${user?.name}`
     })
     setShowReasonModal(false)
     setCancelReason('')
     setFailedReason('')
+    setReturnReason('')
   }
 
   async function handleAddNote() {
@@ -240,10 +250,13 @@ export function OrderDetailPage() {
               </div>
             )}
             {order.cancellation_reason && (
-              <p className="text-xs text-red-700 bg-red-50 rounded-lg p-2 mt-2">Reason: {order.cancellation_reason}</p>
+              <p className="text-xs text-red-700 bg-red-50 rounded-lg p-2 mt-2">Cancelled: {order.cancellation_reason}</p>
             )}
             {order.failed_reason && (
               <p className="text-xs text-red-700 bg-red-50 rounded-lg p-2 mt-2">Failed: {order.failed_reason}</p>
+            )}
+            {order.return_reason && (
+              <p className="text-xs text-orange-700 bg-orange-50 rounded-lg p-2 mt-2">Returned: {order.return_reason}</p>
             )}
           </div>
 
@@ -514,7 +527,7 @@ export function OrderDetailPage() {
       <Modal
         isOpen={showReasonModal}
         onClose={() => setShowReasonModal(false)}
-        title={pendingStatus === 'cancelled' ? 'Cancel Order' : 'Mark Failed Delivery'}
+        title={pendingStatus === 'cancelled' ? 'Cancel Order' : pendingStatus === 'failed_delivery' ? 'Mark Failed Delivery' : 'Mark as Returned'}
         footer={
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setShowReasonModal(false)} className="flex-1">Back</Button>
@@ -523,7 +536,7 @@ export function OrderDetailPage() {
               onClick={handleReasonSubmit}
               loading={updateStatus.isPending}
               className="flex-1"
-              disabled={!(pendingStatus === 'cancelled' ? cancelReason : failedReason).trim()}
+              disabled={!(pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason).trim()}
             >
               Confirm
             </Button>
@@ -531,10 +544,14 @@ export function OrderDetailPage() {
         }
       >
         <Textarea
-          label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : 'Reason for failed delivery'}
+          label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : pendingStatus === 'failed_delivery' ? 'Reason for failed delivery' : 'Reason for return'}
           placeholder="Describe what happened..."
-          value={pendingStatus === 'cancelled' ? cancelReason : failedReason}
-          onChange={e => pendingStatus === 'cancelled' ? setCancelReason(e.target.value) : setFailedReason(e.target.value)}
+          value={pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason}
+          onChange={e => {
+            if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
+            else if (pendingStatus === 'failed_delivery') setFailedReason(e.target.value)
+            else setReturnReason(e.target.value)
+          }}
           rows={4}
           required
         />

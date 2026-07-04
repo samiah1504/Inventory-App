@@ -15,6 +15,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS preferred_delivery_time TEXT;
 -- Add failed_reason to orders if missing
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS failed_reason TEXT;
 
+-- Add return_reason to orders if missing
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS return_reason TEXT;
+
 -- Add has_waybill to orders if missing
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS has_waybill BOOLEAN DEFAULT false;
 
