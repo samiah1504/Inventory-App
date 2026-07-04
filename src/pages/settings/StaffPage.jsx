@@ -33,7 +33,7 @@ export function StaffPage() {
   const { showToast } = useAppStore()
   const queryClient = useQueryClient()
 
-  const [form, setForm] = useState({ name: '', phone: '', pin: '', staff_code: '', role: 'customer_support' })
+  const [form, setForm] = useState({ name: '', username: '', password: '', phone: '', staff_code: '', role: 'customer_support' })
 
   const { data: staff, isLoading } = useQuery({
     queryKey: ['staff'],
@@ -46,11 +46,15 @@ export function StaffPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      // Don't overwrite password if left blank during edit
+      const payload = editingStaff && !data.password
+        ? { name: data.name, username: data.username, phone: data.phone, staff_code: data.staff_code, role: data.role }
+        : data
       if (editingStaff) {
-        const { error } = await supabase.from('staff_users').update(data).eq('id', editingStaff.id)
+        const { error } = await supabase.from('staff_users').update(payload).eq('id', editingStaff.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('staff_users').insert(data)
+        const { error } = await supabase.from('staff_users').insert(payload)
         if (error) throw error
       }
     },
@@ -59,7 +63,7 @@ export function StaffPage() {
       showToast(editingStaff ? 'Staff updated' : 'Staff created', 'success')
       setShowModal(false)
       setEditingStaff(null)
-      setForm({ name: '', phone: '', pin: '', staff_code: '', role: 'customer_support' })
+      setForm({ name: '', username: '', password: '', phone: '', staff_code: '', role: 'customer_support' })
     },
     onError: (err) => showToast(err.message, 'error'),
   })
@@ -74,13 +78,13 @@ export function StaffPage() {
 
   function openEdit(member) {
     setEditingStaff(member)
-    setForm({ name: member.name, phone: member.phone, pin: member.pin, staff_code: member.staff_code, role: member.role })
+    setForm({ name: member.name, username: member.username, password: '', phone: member.phone || '', staff_code: member.staff_code, role: member.role })
     setShowModal(true)
   }
 
   function openNew() {
     setEditingStaff(null)
-    setForm({ name: '', phone: '', pin: '', staff_code: '', role: 'customer_support' })
+    setForm({ name: '', username: '', password: '', phone: '', staff_code: '', role: 'customer_support' })
     setShowModal(true)
   }
 
@@ -109,7 +113,8 @@ export function StaffPage() {
                       <p className="text-sm font-semibold text-gray-900">{member.name}</p>
                       {!member.is_active && <Badge color="red">Inactive</Badge>}
                     </div>
-                    <p className="text-xs text-gray-500">{member.phone} · {member.staff_code}</p>
+                    <p className="text-xs text-gray-500">@{member.username} · {member.staff_code}</p>
+                    {member.phone && <p className="text-xs text-gray-400">{member.phone}</p>}
                     <div className="mt-1">
                       <Badge color={roleColors[member.role] || 'gray'}>
                         {ROLES.find(r => r.value === member.role)?.label || member.role}
@@ -146,7 +151,7 @@ export function StaffPage() {
               onClick={() => saveMutation.mutate(form)}
               loading={saveMutation.isPending}
               className="flex-1"
-              disabled={!form.name || !form.phone || (!editingStaff && !form.pin) || !form.staff_code}
+              disabled={!form.name || !form.username || (!editingStaff && !form.password) || !form.staff_code}
             >
               {editingStaff ? 'Save' : 'Create'}
             </Button>
@@ -155,9 +160,14 @@ export function StaffPage() {
       >
         <div className="space-y-4">
           <Input label="Full Name" required value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-          <Input label="Phone Number" type="tel" required value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
-          <Input label="PIN (4-6 digits)" type="password" placeholder={editingStaff ? 'Leave blank to keep current' : 'Enter PIN'}
-            value={form.pin} onChange={e => setForm({ ...form, pin: e.target.value })} maxLength={6} />
+          <Input label="Username" placeholder="e.g. john.doe" required
+            autoCapitalize="none" autoCorrect="off"
+            value={form.username} onChange={e => setForm({ ...form, username: e.target.value.toLowerCase() })} />
+          <Input label="Password" type="password"
+            placeholder={editingStaff ? 'Leave blank to keep current' : 'Enter password'}
+            value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+          <Input label="Phone Number (optional)" type="tel"
+            value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
           <Input label="Staff Code" placeholder="e.g. STF001" required
             value={form.staff_code} onChange={e => setForm({ ...form, staff_code: e.target.value.toUpperCase() })} />
           <Select label="Role" required value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>

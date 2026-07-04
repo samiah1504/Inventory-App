@@ -1,38 +1,34 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Phone, Lock, Eye, EyeOff } from 'lucide-react'
+import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 
 export function LoginPage() {
-  const [phone, setPhone] = useState('')
-  const [pin, setPin] = useState('')
-  const [showPin, setShowPin] = useState(false)
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
   const { login, loading, error } = useAuthStore()
   const navigate = useNavigate()
-  const pinRef = useRef(null)
+  const passwordRef = useRef(null)
 
   useEffect(() => {
     // Demo: prefill for easy testing
-    setPhone('08000000000')
-    setPin('1234')
+    setUsername('admin')
+    setPassword('admin123')
   }, [])
 
   async function handleSubmit(e) {
     e.preventDefault()
     const errs = {}
-    if (!phone.trim()) errs.phone = 'Phone number is required'
-    if (!pin.trim()) errs.pin = 'PIN is required'
+    if (!username.trim()) errs.username = 'Username is required'
+    if (!password.trim()) errs.password = 'Password is required'
     if (Object.keys(errs).length) { setErrors(errs); return }
 
-    const result = await login(phone.trim(), pin.trim())
+    const result = await login(username.trim(), password.trim())
     if (result.success) navigate('/')
-  }
-
-  function handlePinKey(e) {
-    if (e.key === 'Enter') handleSubmit(e)
   }
 
   return (
@@ -49,38 +45,37 @@ export function LoginPage() {
       {/* Form card */}
       <div className="bg-white rounded-t-3xl px-6 py-8 pb-10 shadow-xl">
         <h2 className="text-xl font-bold text-gray-900 mb-1">Staff Login</h2>
-        <p className="text-sm text-gray-500 mb-6">Sign in with your phone number and PIN</p>
+        <p className="text-sm text-gray-500 mb-6">Sign in with your username and password</p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
-            label="Phone Number"
-            type="tel"
-            placeholder="e.g. 08012345678"
-            value={phone}
-            onChange={(e) => { setPhone(e.target.value); setErrors({}) }}
-            error={errors.phone}
-            leftIcon={<Phone size={16} />}
-            inputMode="tel"
-            autoComplete="tel"
+            label="Username"
+            type="text"
+            placeholder="Enter your username"
+            value={username}
+            onChange={(e) => { setUsername(e.target.value); setErrors({}) }}
+            error={errors.username}
+            leftIcon={<User size={16} />}
+            autoCapitalize="none"
+            autoCorrect="off"
+            autoComplete="username"
             required
           />
           <Input
-            ref={pinRef}
-            label="PIN"
-            type={showPin ? 'text' : 'password'}
-            placeholder="Enter your PIN"
-            value={pin}
-            onChange={(e) => { setPin(e.target.value); setErrors({}) }}
-            onKeyDown={handlePinKey}
-            error={errors.pin}
+            ref={passwordRef}
+            label="Password"
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Enter your password"
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setErrors({}) }}
+            error={errors.password}
             leftIcon={<Lock size={16} />}
             rightIcon={
-              <button type="button" onClick={() => setShowPin(!showPin)} className="text-gray-400">
-                {showPin ? <EyeOff size={16} /> : <Eye size={16} />}
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-gray-400">
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             }
-            inputMode="numeric"
-            maxLength={6}
+            autoComplete="current-password"
             required
           />
 
@@ -102,7 +97,7 @@ export function LoginPage() {
 
         <div className="mt-6 p-4 bg-blue-50 rounded-xl">
           <p className="text-xs text-blue-700 font-medium">Demo credentials:</p>
-          <p className="text-xs text-blue-600">Phone: 08000000000 · PIN: 1234</p>
+          <p className="text-xs text-blue-600">Username: admin · Password: admin123</p>
         </div>
       </div>
     </div>

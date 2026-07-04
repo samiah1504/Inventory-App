@@ -10,18 +10,18 @@ export const useAuthStore = create(
       loading: false,
       error: null,
 
-      login: async (phone, pin) => {
+      login: async (username, password) => {
         set({ loading: true, error: null })
         try {
           const { data, error } = await supabase
             .from('staff_users')
             .select('*, roles(name, permissions)')
-            .eq('phone', phone)
-            .eq('pin', pin)
+            .eq('username', username)
+            .eq('password', password)
             .eq('is_active', true)
             .single()
 
-          if (error || !data) throw new Error('Invalid phone or PIN')
+          if (error || !data) throw new Error('Invalid username or password')
 
           await supabase
             .from('staff_users')

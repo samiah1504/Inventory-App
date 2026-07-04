@@ -56,7 +56,7 @@ export function SettingsPage() {
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-900">{user?.name}</p>
-              <p className="text-xs text-gray-500">{user?.role} · {user?.staff_code}</p>
+              <p className="text-xs text-gray-500">@{user?.username} · {user?.role} · {user?.staff_code}</p>
             </div>
           </div>
           <button
@@ -83,8 +83,7 @@ function NonAdminSettings({ user, logout }) {
             </div>
             <div>
               <p className="text-base font-bold text-gray-900">{user?.name}</p>
-              <p className="text-sm text-gray-500">{user?.role?.replace('_', ' ')} · {user?.staff_code}</p>
-              <p className="text-sm text-gray-500">{user?.phone}</p>
+              <p className="text-sm text-gray-500">@{user?.username} · {user?.role?.replace('_', ' ')} · {user?.staff_code}</p>
             </div>
           </div>
           <button

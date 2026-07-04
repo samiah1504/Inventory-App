@@ -40,8 +40,9 @@ CREATE TABLE roles (
 CREATE TABLE staff_users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
-  phone TEXT NOT NULL UNIQUE,
-  pin TEXT NOT NULL,  -- 4-6 digit PIN stored as text (hash in production)
+  username TEXT NOT NULL UNIQUE,
+  password TEXT NOT NULL,  -- store hashed in production (e.g. bcrypt)
+  phone TEXT,
   staff_code TEXT NOT NULL UNIQUE,  -- e.g. STF001
   role TEXT NOT NULL DEFAULT 'customer_support',
   extra_permissions JSONB DEFAULT '[]',
@@ -415,8 +416,8 @@ INSERT INTO product_categories (name) VALUES
   ('Chairs'), ('Tables'), ('Toys'), ('Bicycles'), ('Tricycles'), ('Other');
 
 -- Default demo admin staff
-INSERT INTO staff_users (name, phone, pin, staff_code, role) VALUES
-  ('Admin User', '08000000000', '1234', 'ADM001', 'ceo');
+INSERT INTO staff_users (name, username, password, staff_code, role) VALUES
+  ('Admin User', 'admin', 'admin123', 'ADM001', 'ceo');
 
 -- ===================================================
 -- FUNCTIONS & TRIGGERS
