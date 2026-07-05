@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Package, DollarSign, Clock, ChevronRight, CheckCircle } from 'lucide-react'
 import { useWaybillBatch, useSaveBatchExpenses, useTogglePackingItem, useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
 import { TopBar } from '../../components/layout/TopBar'
@@ -48,8 +48,9 @@ const TABS = [
 export function WaybillBatchDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { showToast } = useAppStore()
-  const [tab, setTab] = useState('orders')
+  const [tab, setTab] = useState(searchParams.get('tab') || 'orders')
   // { [state]: { destination_city, waybill_cost, ..., expense_notes } }
   const [stateExpenses, setStateExpenses] = useState({})
   // Track which states we've already initialised so user edits aren't overwritten on refetch
@@ -112,6 +113,8 @@ export function WaybillBatchDetailPage() {
   const status = batch.status
   const isTransit = status === 'waybilled' || status === 'in_transit'
   const isDone = status === 'received'
+  // Lock expenses once saved — can't edit again after that
+  const expensesLocked = batch.expenses_saved
 
   const grandExpenseTotal = Object.values(stateExpenses).reduce((sum, exp) =>
     sum + COST_KEYS.reduce((s, { key }) => s + (Number(exp[key]) || 0), 0), 0)
@@ -125,9 +128,10 @@ export function WaybillBatchDetailPage() {
     })
     showToast(
       newStatus === 'packed' ? 'Packing confirmed' :
-      newStatus === 'waybilled' ? 'Batch dispatched' :
+      newStatus === 'waybilled' ? 'Batch dispatched — add expenses below' :
       'Marked as received', 'success'
     )
+    if (newStatus === 'waybilled' || newStatus === 'received') setTab('expenses')
   }
 
   async function handleSaveExpenses() {
@@ -369,10 +373,17 @@ export function WaybillBatchDetailPage() {
         {/* Expenses Tab */}
         {tab === 'expenses' && (
           <div className="space-y-4">
-            {batch.expenses_saved && (
+            {batch.expenses_saved ? (
               <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2">
                 <CheckCircle size={14} className="text-green-600 shrink-0" />
-                <p className="text-xs text-green-700 font-medium">Expenses saved · Grand total: {formatCurrency(batch.total_cost)}</p>
+                <p className="text-xs text-green-700 font-medium">Expenses saved · Grand total: {formatCurrency(batch.total_cost)} · Locked</p>
+              </div>
+            ) : (isTransit || isDone) && (
+              <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+                <p className="text-xs font-semibold text-blue-800 mb-0.5">
+                  {isDone ? 'Waybill received — enter expenses' : 'Batch dispatched — enter expenses'}
+                </p>
+                <p className="text-xs text-blue-600">Optional. Fill in now or save after the waybill fee is paid on delivery.</p>
               </div>
             )}
 
@@ -396,7 +407,7 @@ export function WaybillBatchDetailPage() {
                       placeholder="e.g. Ibadan"
                       value={exp.destination_city}
                       onChange={e => updateStateExpense(state, 'destination_city', e.target.value)}
-                      disabled={isDone}
+                      disabled={expensesLocked}
                     />
                     {COST_KEYS.map(({ key, label }) => (
                       <Input
@@ -406,7 +417,7 @@ export function WaybillBatchDetailPage() {
                         inputMode="decimal"
                         value={exp[key]}
                         onChange={e => updateStateExpense(state, key, e.target.value)}
-                        disabled={isDone}
+                        disabled={expensesLocked}
                       />
                     ))}
                     <Textarea
@@ -414,7 +425,7 @@ export function WaybillBatchDetailPage() {
                       rows={2}
                       value={exp.expense_notes}
                       onChange={e => updateStateExpense(state, 'expense_notes', e.target.value)}
-                      disabled={isDone}
+                      disabled={expensesLocked}
                     />
                     {stateTotal > 0 && (
                       <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
@@ -440,13 +451,13 @@ export function WaybillBatchDetailPage() {
               </div>
             )}
 
-            {!isDone && Object.keys(stateExpenses).length > 0 && (
+            {!expensesLocked && Object.keys(stateExpenses).length > 0 && (
               <Button
                 onClick={handleSaveExpenses}
                 disabled={saveBatchExpenses.isPending}
                 className="w-full"
               >
-                Save Expenses
+                {saveBatchExpenses.isPending ? 'Saving...' : 'Save Expenses'}
               </Button>
             )}
           </div>

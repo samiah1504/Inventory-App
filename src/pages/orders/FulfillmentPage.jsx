@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { MapPin, Package, CheckCircle, XCircle } from 'lucide-react'
+import { MapPin, Package, CheckCircle, XCircle, Inbox } from 'lucide-react'
 import { useOrders, useUpdateOrderStatus } from '../../hooks/useOrders'
+import { useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { OrderCard } from './OrderCard'
@@ -9,6 +10,8 @@ import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { NIGERIAN_STATES } from '../../utils/format'
 import { useAuthStore } from '../../stores/authStore'
+import { useAppStore } from '../../stores/appStore'
+import { supabase } from '../../lib/supabase'
 
 const TABS = [
   { key: 'new', label: 'New' },
@@ -33,7 +36,9 @@ export function FulfillmentPage() {
   const [selectedState, setSelectedState] = useState('')
   const [actingOrder, setActingOrder] = useState(null)
   const { user } = useAuthStore()
+  const { showToast } = useAppStore()
   const updateStatus = useUpdateOrderStatus()
+  const advanceBatch = useAdvanceBatchStatus()
 
   const today = new Date().toISOString().split('T')[0]
 
@@ -83,6 +88,55 @@ export function FulfillmentPage() {
         extra: { failed_reason: 'Failed delivery (marked from fulfillment board)' },
         timelineDesc: `Marked failed delivery by ${user?.name}`,
       })
+    } finally {
+      setActingOrder(null)
+    }
+  }
+
+  async function receiveBatch(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      // Look up the active batch for this order
+      const { data: batchOrderData } = await supabase
+        .from('waybill_batch_orders')
+        .select('batch_id, batch:waybill_batches(id, batch_number, status)')
+        .eq('order_id', order.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (!batchOrderData?.batch_id) {
+        showToast('No waybill batch found for this order', 'error')
+        return
+      }
+
+      const batchInfo = batchOrderData.batch
+      if (batchInfo.status === 'received') {
+        // Already received — just open expenses
+        navigate(`/waybill/batches/${batchOrderData.batch_id}?tab=expenses`)
+        return
+      }
+
+      // Get all order IDs in this batch
+      const { data: allBatchOrders } = await supabase
+        .from('waybill_batch_orders')
+        .select('order_id')
+        .eq('batch_id', batchOrderData.batch_id)
+
+      const orderIds = (allBatchOrders || []).map(bo => bo.order_id).filter(Boolean)
+
+      await advanceBatch.mutateAsync({
+        batchId: batchOrderData.batch_id,
+        newStatus: 'received',
+        batchNumber: batchInfo.batch_number,
+        orderIds,
+      })
+
+      showToast(`Batch ${batchInfo.batch_number} received — add expenses`, 'success')
+      navigate(`/waybill/batches/${batchOrderData.batch_id}?tab=expenses`)
+    } catch (err) {
+      showToast(err.message, 'error')
     } finally {
       setActingOrder(null)
     }
@@ -172,6 +226,18 @@ export function FulfillmentPage() {
                     >
                       <XCircle size={14} />
                       Failed
+                    </button>
+                  </div>
+                )}
+                {tab === 'waybilled' && (
+                  <div className="mt-1 px-0.5">
+                    <button
+                      onClick={() => receiveBatch(order)}
+                      disabled={actingOrder === order.id}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-green-800 bg-green-50 border border-green-200 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <Inbox size={14} />
+                      {actingOrder === order.id ? 'Processing...' : 'Waybill Received'}
                     </button>
                   </div>
                 )}
