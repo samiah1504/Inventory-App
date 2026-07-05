@@ -15,10 +15,7 @@ import { formatCurrency, formatDate } from '../../utils/format'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const REVENUE_STATUSES = [
-  'paid', 'partially_paid', 'delivered', 'received_at_warehouse',
-  'processing', 'waybilled', 'batch_processing',
-]
+const REVENUE_STATUSES = ['paid', 'partially_paid']
 
 const EXPENSE_TYPES = [
   'delivery', 'installation', 'offloading', 'waybill',

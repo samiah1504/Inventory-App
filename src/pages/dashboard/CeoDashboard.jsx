@@ -15,10 +15,7 @@ import { StatusBadge } from '../../components/ui/Badge'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const REVENUE_STATUSES = [
-  'paid', 'partially_paid', 'delivered', 'received_at_warehouse',
-  'processing', 'waybilled', 'batch_processing',
-]
+const REVENUE_STATUSES = ['paid', 'partially_paid']
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
