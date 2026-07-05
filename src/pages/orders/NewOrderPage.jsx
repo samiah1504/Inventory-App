@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { Search, Plus, X, Trash2 } from 'lucide-react'
+import { Trash2 } from 'lucide-react'
 import { TopBar } from '../../components/layout/TopBar'
 import { Input, Select, Textarea } from '../../components/ui/Input'
 import { Button } from '../../components/ui/Button'
-import { Modal } from '../../components/ui/Modal'
 import { useCreateOrder } from '../../hooks/useOrders'
 import { useBusinesses, useProducts } from '../../hooks/useBusinesses'
 import { useAuthStore } from '../../stores/authStore'
@@ -14,7 +13,11 @@ import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../stores/appStore'
 
 function newItem() {
-  return { key: Date.now() + Math.random(), product_id: '', product_name: '', business_id: '', quantity: 1, unit_price: '', color: '', size: '' }
+  return {
+    key: Date.now() + Math.random(),
+    product_id: '', product_name: '', business_id: '',
+    quantity: 1, unit_price: '', color: '', size: '',
+  }
 }
 
 export function NewOrderPage() {
@@ -27,13 +30,7 @@ export function NewOrderPage() {
   const { data: allProducts } = useProducts()
 
   const [items, setItems] = useState([newItem()])
-  const [activeSearchIdx, setActiveSearchIdx] = useState(null)
-  const [searchQuery, setSearchQuery] = useState('')
   const [customerHistory, setCustomerHistory] = useState(null)
-
-  const [showCustomModal, setShowCustomModal] = useState(false)
-  const [customForm, setCustomForm] = useState({ name: '', business_id: '', selling_price: '' })
-  const [savingCustom, setSavingCustom] = useState(false)
 
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm({
     defaultValues: {
@@ -52,13 +49,10 @@ export function NewOrderPage() {
   const grandTotal = items.reduce((s, item) =>
     s + (Number(item.quantity) || 0) * (Number(item.unit_price) || 0), 0)
 
-  const firstBusinessId = items.find(i => i.business_id)?.business_id || ''
+  const firstBusinessId = items.find(i => i.business_id)?.business_id
+    || businesses?.[0]?.id
+    || ''
   const firstBusinessName = businesses?.find(b => b.id === firstBusinessId)?.name || ''
-
-  const filteredProducts = (allProducts || []).filter(p =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.business?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -89,29 +83,14 @@ export function NewOrderPage() {
     setItems(prev => prev.map((item, i) => i === idx ? { ...item, ...updates } : item))
   }
 
-  function removeItem(idx) {
-    setItems(prev => prev.filter((_, i) => i !== idx))
-  }
-
-  function selectProduct(product) {
-    updateItem(activeSearchIdx, {
-      product_id: product.id,
-      product_name: product.name,
-      business_id: product.business_id,
-      unit_price: product.selling_price || '',
-    })
-    setActiveSearchIdx(null)
-    setSearchQuery('')
-  }
-
   async function onSubmit(data) {
     const validItems = items.filter(i => i.product_name.trim())
     if (validItems.length === 0) {
-      showToast('Please add at least one product', 'error')
+      showToast('Please enter at least one product', 'error')
       return
     }
     if (!firstBusinessId) {
-      showToast('Please select a product from the list first', 'error')
+      showToast('No business found. Contact admin.', 'error')
       return
     }
 
@@ -143,38 +122,6 @@ export function NewOrderPage() {
     if (result) navigate(`/orders/${result.id}`)
   }
 
-  async function saveCustomProduct() {
-    if (!customForm.name.trim() || !customForm.business_id) {
-      showToast('Product name and business are required', 'error')
-      return
-    }
-    setSavingCustom(true)
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .insert({
-          name: customForm.name.trim(),
-          business_id: customForm.business_id,
-          selling_price: customForm.selling_price ? Number(customForm.selling_price) : null,
-          created_by: user?.id,
-          is_active: true,
-          is_verified: false,
-        })
-        .select('*, business:businesses(name)')
-        .single()
-      if (error) throw error
-      // Re-open search so user can select the new product
-      setShowCustomModal(false)
-      setCustomForm({ name: '', business_id: '', selling_price: '' })
-      showToast('Product added — select it below', 'success')
-      setSearchQuery(data.name)
-    } catch (err) {
-      showToast(err.message, 'error')
-    } finally {
-      setSavingCustom(false)
-    }
-  }
-
   return (
     <div className="flex flex-col h-full">
       <TopBar title="New Order" />
@@ -184,7 +131,6 @@ export function NewOrderPage() {
           {/* Customer Info */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-3">
             <h3 className="text-sm font-semibold text-gray-900">Customer Details</h3>
-
             {customerHistory && (
               <div className="bg-blue-50 rounded-xl p-3">
                 <p className="text-xs text-blue-700 font-medium">Returning customer</p>
@@ -194,7 +140,6 @@ export function NewOrderPage() {
                 </p>
               </div>
             )}
-
             <Input label="Phone Number" type="tel" placeholder="08012345678" inputMode="tel" required
               error={errors.customer_phone?.message}
               {...register('customer_phone', { required: 'Phone is required' })} />
@@ -229,9 +174,9 @@ export function NewOrderPage() {
                 item={item}
                 idx={idx}
                 canRemove={items.length > 1}
-                onOpenSearch={() => { setActiveSearchIdx(idx); setSearchQuery(item.product_name || '') }}
+                allProducts={allProducts}
                 onUpdate={updates => updateItem(idx, updates)}
-                onRemove={() => removeItem(idx)}
+                onRemove={() => setItems(prev => prev.filter((_, i) => i !== idx))}
               />
             ))}
 
@@ -240,7 +185,7 @@ export function NewOrderPage() {
               onClick={() => setItems(prev => [...prev, newItem()])}
               className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-sm text-gray-500 font-medium flex items-center justify-center gap-2 active:scale-[0.99] transition-all hover:border-yellow-400 hover:text-yellow-600"
             >
-              <Plus size={16} /> Add Another Product
+              + Add Another Product
             </button>
 
             {grandTotal > 0 && (
@@ -278,108 +223,86 @@ export function NewOrderPage() {
           </Button>
         </form>
       </div>
-
-      {/* Product Search Modal */}
-      <Modal
-        isOpen={activeSearchIdx !== null}
-        onClose={() => { setActiveSearchIdx(null); setSearchQuery('') }}
-        title="Select Product"
-      >
-        <div className="space-y-3">
-          <Input
-            placeholder="Search products..."
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            leftIcon={<Search size={16} />}
-            autoFocus
-          />
-          <div className="space-y-0.5 max-h-64 overflow-y-auto -mx-2">
-            {filteredProducts.length === 0 && searchQuery && (
-              <p className="text-xs text-gray-400 text-center py-6">No products found</p>
-            )}
-            {filteredProducts.map(p => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => selectProduct(p)}
-                className="w-full px-3 py-2.5 text-left hover:bg-gray-50 rounded-xl flex items-center justify-between gap-3 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{p.name}</p>
-                  <p className="text-xs text-gray-400">{p.business?.name}{p.category?.name ? ` · ${p.category.name}` : ''}</p>
-                </div>
-                {p.selling_price && (
-                  <span className="text-sm font-semibold text-gray-700 shrink-0">{formatCurrency(p.selling_price)}</span>
-                )}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setShowCustomModal(true)
-              setCustomForm(f => ({ ...f, name: searchQuery }))
-              setActiveSearchIdx(null)
-            }}
-            className="w-full py-2.5 text-sm text-blue-600 font-medium flex items-center justify-center gap-2 border-t border-gray-100 pt-3"
-          >
-            <Plus size={14} /> Add "{searchQuery || 'new product'}" as new product
-          </button>
-        </div>
-      </Modal>
-
-      {/* Custom Product Modal */}
-      <Modal
-        isOpen={showCustomModal}
-        onClose={() => setShowCustomModal(false)}
-        title="Add New Product"
-        footer={
-          <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => setShowCustomModal(false)} className="flex-1">Cancel</Button>
-            <Button onClick={saveCustomProduct} loading={savingCustom} className="flex-1"
-              disabled={!customForm.name.trim() || !customForm.business_id}>
-              Add Product
-            </Button>
-          </div>
-        }
-      >
-        <div className="space-y-4">
-          <Input label="Product Name" required value={customForm.name}
-            onChange={e => setCustomForm(f => ({ ...f, name: e.target.value }))} />
-          <Select label="Business" required value={customForm.business_id}
-            onChange={e => setCustomForm(f => ({ ...f, business_id: e.target.value }))}>
-            <option value="">Select business...</option>
-            {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </Select>
-          <Input label="Selling Price (₦) — optional" type="number" min="0" step="0.01" inputMode="decimal"
-            value={customForm.selling_price}
-            onChange={e => setCustomForm(f => ({ ...f, selling_price: e.target.value }))} />
-          <p className="text-xs text-gray-400">This product will be saved and reviewed by an admin.</p>
-        </div>
-      </Modal>
     </div>
   )
 }
 
-function ItemRow({ item, idx, canRemove, onOpenSearch, onUpdate, onRemove }) {
+function ItemRow({ item, idx, canRemove, allProducts, onUpdate, onRemove }) {
+  const [search, setSearch] = useState(item.product_name || '')
+  const [showDropdown, setShowDropdown] = useState(false)
+
+  const filtered = search.length > 0
+    ? (allProducts || []).filter(p =>
+        p.name.toLowerCase().includes(search.toLowerCase()) ||
+        p.business?.name?.toLowerCase().includes(search.toLowerCase())
+      ).slice(0, 8)
+    : []
+
+  function handleType(value) {
+    setSearch(value)
+    // Always keep product_name in sync with what's typed
+    onUpdate({ product_name: value, product_id: '' })
+    setShowDropdown(true)
+  }
+
+  function handleSelect(product) {
+    setSearch(product.name)
+    setShowDropdown(false)
+    onUpdate({
+      product_id: product.id,
+      product_name: product.name,
+      business_id: product.business_id,
+      unit_price: product.selling_price || item.unit_price || '',
+    })
+  }
+
   const itemTotal = (Number(item.quantity) || 0) * (Number(item.unit_price) || 0)
+
   return (
     <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-bold text-gray-400 shrink-0">#{idx + 1}</span>
-        <button
-          type="button"
-          onClick={onOpenSearch}
-          className="flex-1 flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-left active:scale-[0.99] transition-all min-w-0"
-        >
-          <Search size={14} className="text-gray-400 shrink-0" />
-          <span className={`text-sm flex-1 truncate ${item.product_name ? 'text-gray-900 font-medium' : 'text-gray-400'}`}>
-            {item.product_name || 'Select product...'}
-          </span>
-        </button>
+      <div className="flex items-start gap-2">
+        <span className="text-xs font-bold text-gray-400 shrink-0 pt-3">#{idx + 1}</span>
+        <div className="flex-1 relative min-w-0">
+          <input
+            type="text"
+            value={search}
+            onChange={e => handleType(e.target.value)}
+            onFocus={() => setShowDropdown(true)}
+            onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+            placeholder="Type product name..."
+            className="w-full bg-white border border-gray-200 rounded-xl px-3 py-2.5 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent"
+          />
+          {showDropdown && search.length > 0 && (
+            <div className="absolute z-30 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden">
+              {filtered.length === 0 && (
+                <p className="px-3 py-2.5 text-xs text-gray-400 italic">
+                  "{search}" — will be saved as a custom product
+                </p>
+              )}
+              {filtered.map(p => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onMouseDown={() => handleSelect(p)}
+                  className="w-full px-3 py-2.5 text-left hover:bg-gray-50 flex items-center justify-between gap-3 border-b border-gray-50 last:border-0"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
+                    <p className="text-xs text-gray-400">{p.business?.name}</p>
+                  </div>
+                  {p.selling_price && (
+                    <span className="text-xs font-semibold text-gray-600 shrink-0">
+                      {formatCurrency(p.selling_price)}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {canRemove && (
           <button type="button" onClick={onRemove}
-            className="p-2 text-red-400 hover:bg-red-50 rounded-xl active:scale-95 transition-all shrink-0">
+            className="p-2 text-red-400 hover:bg-red-50 rounded-xl active:scale-95 transition-all shrink-0 mt-0.5">
             <Trash2 size={16} />
           </button>
         )}
@@ -387,11 +310,9 @@ function ItemRow({ item, idx, canRemove, onOpenSearch, onUpdate, onRemove }) {
 
       <div className="grid grid-cols-2 gap-2">
         <Input label="Qty" type="number" min="1" inputMode="numeric"
-          value={item.quantity}
-          onChange={e => onUpdate({ quantity: e.target.value })} />
+          value={item.quantity} onChange={e => onUpdate({ quantity: e.target.value })} />
         <Input label="Unit Price (₦)" type="number" min="0" step="0.01" inputMode="decimal"
-          value={item.unit_price}
-          onChange={e => onUpdate({ unit_price: e.target.value })} />
+          value={item.unit_price} onChange={e => onUpdate({ unit_price: e.target.value })} />
       </div>
 
       <div className="grid grid-cols-2 gap-2">
