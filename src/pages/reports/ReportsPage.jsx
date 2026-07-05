@@ -765,10 +765,10 @@ export function ReportsPage() {
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by State</h3>
               <div className="divide-y divide-gray-50">
                 {Object.entries(byState).sort(([, a], [, b]) => b - a).map(([state, count], i) => (
-                  <div key={state} className="flex items-center gap-2 py-2.5 first:pt-0 last:pb-0">
+                  <div key={state} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                     <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
-                    <span className="text-sm text-gray-700 flex-1 min-w-0 truncate">{state}</span>
-                    <span className="text-sm font-bold text-gray-900 shrink-0">{count}</span>
+                    <span className="text-lg font-bold text-gray-900 w-8 shrink-0">{count}</span>
+                    <span className="text-sm text-gray-600 truncate">{state}</span>
                   </div>
                 ))}
                 {Object.keys(byState).length === 0 && (
