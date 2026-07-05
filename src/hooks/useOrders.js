@@ -56,13 +56,25 @@ export function useOrder(id) {
           created_by_staff:staff_users!orders_created_by_fkey(id, name, staff_code),
           timeline:order_timeline(*, staff:staff_users(name)),
           notes:order_notes(*, staff:staff_users(name)),
-          expenses:expenses(*),
-          items:order_items(id, product_id, product_name, quantity, unit_price, total_amount, color, size)
+          expenses:expenses(*)
         `)
         .eq('id', id)
         .single()
       if (error) throw error
-      return data
+
+      // Load items separately so a missing table doesn't break order loading
+      let items = []
+      try {
+        const { data: itemsData } = await supabase
+          .from('order_items')
+          .select('id, product_id, product_name, quantity, unit_price, total_amount, color, size')
+          .eq('order_id', id)
+        items = itemsData || []
+      } catch {
+        items = []
+      }
+
+      return { ...data, items }
     },
     enabled: !!id,
   })
