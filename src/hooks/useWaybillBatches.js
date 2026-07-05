@@ -94,6 +94,11 @@ export function useCreateWaybillBatch() {
         })
       }
 
+      // Mark orders as batch_processing so they stay visible but can't be double-batched
+      await supabase.from('orders').update({
+        status: 'batch_processing', updated_at: new Date().toISOString(),
+      }).in('id', selectedOrders)
+
       // Load order_items for all selected orders so multi-product orders are expanded
       const { data: orderItemsRows } = await supabase
         .from('order_items')

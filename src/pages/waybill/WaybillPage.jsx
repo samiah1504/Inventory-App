@@ -42,7 +42,7 @@ export function WaybillPage() {
     product_id: '', from_warehouse_id: '', to_warehouse_id: '', quantity: '', notes: ''
   })
 
-  const awaitingOrders = useOrders({ status: 'awaiting_waybill' })
+  const awaitingOrders = useOrders({ statuses: ['awaiting_waybill', 'batch_processing'] })
   const waybilledOrders = useOrders({ status: 'waybilled' })
 
   const batches = useQuery({
@@ -134,11 +134,11 @@ export function WaybillPage() {
   }
 
   function toggleSelectAll() {
-    const allIds = (awaitingOrders.data || []).map(o => o.id)
-    if (selectedOrders.length === allIds.length) {
+    const selectableIds = (awaitingOrders.data || []).filter(o => o.status === 'awaiting_waybill').map(o => o.id)
+    if (selectedOrders.length === selectableIds.length) {
       setSelectedOrders([])
     } else {
-      setSelectedOrders(allIds)
+      setSelectedOrders(selectableIds)
     }
   }
 
@@ -170,38 +170,62 @@ export function WaybillPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
-        {tab === 'awaiting' && (
-          <div className="space-y-3">
-            {awaitingOrders.data && awaitingOrders.data.length > 0 && (
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-gray-500">{awaitingOrders.data.length} order{awaitingOrders.data.length !== 1 ? 's' : ''}</p>
-                <button
-                  onClick={toggleSelectAll}
-                  className="text-xs font-medium text-blue-600 active:scale-95"
-                >
-                  {selectedOrders.length === awaitingOrders.data.length ? 'Deselect All' : 'Select All'}
-                </button>
-              </div>
-            )}
-            {awaitingOrders.isLoading ? <SkeletonList count={4} /> :
-             awaitingOrders.data?.length === 0 ? <EmptyState title="No orders awaiting waybill" icon={<Truck size={28} />} /> :
-             awaitingOrders.data.map(order => (
-              <div key={order.id} className="relative">
-                <button
-                  onClick={() => toggleOrder(order.id)}
-                  className={`absolute top-3 left-3 z-10 w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                    selectedOrders.includes(order.id) ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'
-                  }`}
-                >
-                  {selectedOrders.includes(order.id) && <svg viewBox="0 0 10 10" className="w-3 h-3 fill-white"><path d="M1 5l3 3 5-6" stroke="white" strokeWidth="1.5" fill="none"/></svg>}
-                </button>
-                <div className="pl-8">
-                  <OrderCard order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+        {tab === 'awaiting' && (() => {
+          const orders = awaitingOrders.data || []
+          const selectableOrders = orders.filter(o => o.status === 'awaiting_waybill')
+          const inBatchCount = orders.filter(o => o.status === 'batch_processing').length
+          return (
+            <div className="space-y-3">
+              {orders.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    {selectableOrders.length} ready
+                    {inBatchCount > 0 ? ` · ${inBatchCount} in batch` : ''}
+                  </p>
+                  {selectableOrders.length > 0 && (
+                    <button onClick={toggleSelectAll} className="text-xs font-medium text-blue-600 active:scale-95">
+                      {selectedOrders.length === selectableOrders.length ? 'Deselect All' : 'Select All'}
+                    </button>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+              {awaitingOrders.isLoading ? <SkeletonList count={4} /> :
+               orders.length === 0 ? <EmptyState title="No orders awaiting waybill" icon={<Truck size={28} />} /> :
+               orders.map(order => {
+                const inBatch = order.status === 'batch_processing'
+                return (
+                  <div key={order.id} className="relative">
+                    <div className="absolute top-3 left-3 z-10">
+                      {inBatch ? (
+                        <div className="w-5 h-5 rounded-md border-2 border-amber-400 bg-amber-50 flex items-center justify-center">
+                          <div className="w-2 h-2 rounded-full bg-amber-400" />
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => toggleOrder(order.id)}
+                          className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
+                            selectedOrders.includes(order.id) ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'
+                          }`}
+                        >
+                          {selectedOrders.includes(order.id) && <svg viewBox="0 0 10 10" className="w-3 h-3 fill-white"><path d="M1 5l3 3 5-6" stroke="white" strokeWidth="1.5" fill="none"/></svg>}
+                        </button>
+                      )}
+                    </div>
+                    <div className="pl-8">
+                      {inBatch && (
+                        <p className="text-xs text-amber-600 font-medium mb-1 flex items-center gap-1">
+                          <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
+                          Waybill in Process
+                        </p>
+                      )}
+                      <OrderCard order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
 
         {tab === 'batches' && (
           <div className="space-y-3">
