@@ -62,7 +62,7 @@ export function useOrder(id) {
         .single()
       if (error) throw error
 
-      // Load items separately so a missing table doesn't break order loading
+      // Load items: prefer order_items table, fall back to items_data JSONB column on the order
       let items = []
       try {
         const { data: itemsData } = await supabase
@@ -72,6 +72,11 @@ export function useOrder(id) {
         items = itemsData || []
       } catch {
         items = []
+      }
+
+      // Fall back to items_data column (always available once migration runs)
+      if (items.length === 0 && Array.isArray(data.items_data) && data.items_data.length > 0) {
+        items = data.items_data
       }
 
       return { ...data, items }
@@ -108,6 +113,17 @@ export function useCreateOrder() {
         .select()
         .single()
 
+      // Build clean items array
+      const cleanItems = (items || []).map(item => ({
+        product_id: item.product_id || null,
+        product_name: item.product_name,
+        quantity: Number(item.quantity) || 1,
+        unit_price: Number(item.unit_price) || 0,
+        total_amount: (Number(item.quantity) || 1) * (Number(item.unit_price) || 0),
+        color: item.color || null,
+        size: item.size || null,
+      }))
+
       const payload = {
         ...orderFields,
         order_number: orderNumber,
@@ -115,14 +131,17 @@ export function useCreateOrder() {
         staff_code: user?.staff_code,
         created_by: user?.id,
         status: 'new',
+        // Store all items as JSON directly on the order — always works, no extra table needed
+        items_data: cleanItems.length > 0 ? cleanItems : null,
       }
 
       const { data, error } = await supabase.from('orders').insert(payload).select().single()
       if (error) throw error
 
-      // Insert order items if provided
-      if (items && items.length > 0) {
-        for (const item of items) {
+      // Also insert into order_items table when it exists (for waybill packing queries)
+      if (cleanItems.length > 0) {
+        for (const item of cleanItems) {
+          // Silently ignore if table doesn't exist yet
           await supabase.from('order_items').insert({ order_id: data.id, ...item })
         }
       }

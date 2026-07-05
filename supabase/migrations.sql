@@ -135,3 +135,7 @@ CREATE TABLE IF NOT EXISTS waybill_batch_state_expenses (
 );
 
 CREATE INDEX IF NOT EXISTS idx_wbse_batch ON waybill_batch_state_expenses(batch_id);
+
+-- Store all order line items as JSON directly on the order row
+-- This is the primary storage; order_items table is kept for joins/querying
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS items_data JSONB;

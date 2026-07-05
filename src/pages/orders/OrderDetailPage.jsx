@@ -291,15 +291,19 @@ export function OrderDetailPage() {
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Order Details</h3>
             <Row label="Business" value={order.business?.name} />
 
-            {/* Multi-item display */}
-            {order.items && order.items.length > 1 ? (
+            {/* Items display — uses items array when available, falls back to order summary */}
+            {order.items && order.items.length > 0 ? (
               <div className="space-y-2">
-                <p className="text-xs text-gray-500">{order.items.length} products</p>
+                {order.items.length > 1 && (
+                  <p className="text-xs text-gray-500">{order.items.length} products</p>
+                )}
                 {order.items.map((item, idx) => (
-                  <div key={item.id} className="bg-gray-50 rounded-xl p-3 space-y-1">
+                  <div key={item.id || idx} className="bg-gray-50 rounded-xl p-3 space-y-1">
                     <div className="flex items-start justify-between gap-2">
                       <p className="text-sm font-semibold text-gray-900">{item.product_name}</p>
-                      <p className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(item.total_amount)}</p>
+                      <p className="text-sm font-bold text-gray-900 shrink-0">
+                        {formatCurrency(item.total_amount || (Number(item.quantity) * Number(item.unit_price)))}
+                      </p>
                     </div>
                     <p className="text-xs text-gray-500">
                       {item.quantity} × {formatCurrency(item.unit_price)}
