@@ -280,8 +280,8 @@ export function ReportsPage() {
     staleTime: 60000,
   })
 
-  // Products query — only run when tab = products, orders loaded, and ≤500 orders
-  const canQueryItems = tab === 'products' && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
+  // Products query — run when tab = products OR sales, orders loaded, and ≤500 orders
+  const canQueryItems = (tab === 'products' || tab === 'sales') && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
   const productsReport = useQuery({
     queryKey: ['report_products', dateFrom, dateTo, businessId],
     enabled: canQueryItems,
@@ -811,40 +811,26 @@ export function ReportsPage() {
               ) : null
             })()}
 
-            {/* Revenue by product */}
-            {(() => {
-              const byProductRev = {}
-              orders.filter(o => REVENUE_STATUSES.includes(o.status)).forEach(o => {
-                const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
-                if (fromJson) {
-                  fromJson.forEach(item => {
-                    const name = (item.product_name || item.name || 'Unknown').trim()
-                    const rev = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
-                    byProductRev[name] = (byProductRev[name] || 0) + rev
-                  })
-                } else if (o.product_name && !o.product_name.includes('+')) {
-                  const name = o.product_name.trim()
-                  byProductRev[name] = (byProductRev[name] || 0) + Number(o.amount_paid || o.total_amount || 0)
-                }
-              })
-              const entries = Object.entries(byProductRev).sort(([, a], [, b]) => b - a)
-              return entries.length > 0 ? (
-                <div className="bg-white rounded-2xl p-4 border border-gray-100">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by Product</h3>
-                  <div className="divide-y divide-gray-50">
-                    {entries.map(([product, amt], i) => (
-                      <div key={product} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
-                          <span className="text-sm text-gray-800 truncate">{product}</span>
-                        </div>
-                        <span className="text-sm font-bold text-gray-900 shrink-0 ml-2">{formatCurrency(amt)}</span>
+            {/* Revenue by product — uses the same 3-priority logic as the Products tab */}
+            {productStats.length > 0 && (
+              <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by Product</h3>
+                <div className="divide-y divide-gray-50">
+                  {productStats.map((p, i) => (
+                    <div key={p.name} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
+                        <span className="text-sm text-gray-800 truncate">{p.name}</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="text-right shrink-0 ml-2">
+                        <p className="text-sm font-bold text-gray-900">{formatCurrency(p.revenue)}</p>
+                        <p className="text-xs text-gray-400">{p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ) : null
-            })()}
+              </div>
+            )}
 
             <div className="bg-white rounded-2xl p-4 border border-gray-100">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Outstanding Balances</h3>
