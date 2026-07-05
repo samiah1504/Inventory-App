@@ -107,7 +107,7 @@ export function WaybillBatchDetailPage() {
     </div>
   )
 
-  const { batch, orders, packingItems, timeline } = data
+  const { batch, orders, packingItems, orderItems, timeline } = data
   const orderIds = orders.map(bo => bo.order?.id).filter(Boolean)
   const status = batch.status
   const isTransit = status === 'waybilled' || status === 'in_transit'
@@ -151,7 +151,6 @@ export function WaybillBatchDetailPage() {
     })
   }
 
-  const allPacked = packingItems.length > 0 && packingItems.every(i => i.is_packed)
 
   return (
     <div className="flex flex-col h-full">
@@ -181,7 +180,7 @@ export function WaybillBatchDetailPage() {
             {status === 'created' && (
               <Button size="sm" onClick={() => handleAdvance('packed')} disabled={advanceBatchStatus.isPending}
                 className="flex-1">
-                {allPacked ? 'Confirm Packing Done' : 'Confirm Packing Done'}
+                Confirm Packing Done
               </Button>
             )}
             {status === 'packed' && (
@@ -197,7 +196,7 @@ export function WaybillBatchDetailPage() {
               </Button>
             )}
             <button
-              onClick={() => savePdf(generatePackingList(batch, packingItems, orders), `${batch.batch_number}-packing.pdf`)}
+              onClick={() => savePdf(generatePackingList(batch, packingItems, orders, orderItems), `${batch.batch_number}-packing.pdf`)}
               className="px-3 py-2 bg-gray-800 text-gray-300 rounded-xl text-xs font-medium active:scale-95 transition-all"
             >
               Packing PDF
@@ -262,64 +261,103 @@ export function WaybillBatchDetailPage() {
         )}
 
         {/* Pack Tab */}
-        {tab === 'pack' && (
-          <div className="space-y-4">
-            {packingItems.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-8">No packing items</p>
-            )}
-            {packingItems.length > 0 && (
-              <>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-gray-500">{packingItems.filter(i => i.is_packed).length}/{packingItems.length} packed</p>
-                  {allPacked && (
-                    <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                      <CheckCircle size={12} /> All packed
-                    </span>
-                  )}
-                </div>
+        {tab === 'pack' && (() => {
+          // Build display items from actual order_items when available,
+          // so multi-product orders show each product separately.
+          const itemsByOrder = {}
+          for (const oi of (orderItems || [])) {
+            if (!itemsByOrder[oi.order_id]) itemsByOrder[oi.order_id] = []
+            itemsByOrder[oi.order_id].push(oi)
+          }
 
-                {/* Group by state */}
-                {Array.from(new Set(packingItems.map(i => i.state))).map(state => (
-                  <div key={state} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
-                      <p className="text-xs font-semibold text-gray-700">{state}</p>
-                    </div>
-                    {packingItems.filter(i => i.state === state).map(item => (
-                      <button
-                        key={item.id}
-                        onClick={() => !isDone && handleTogglePack(item)}
-                        disabled={isDone || togglePackingItem.isPending}
-                        className="w-full px-4 py-3 flex items-center gap-3 active:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0"
-                      >
-                        <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
-                          item.is_packed ? 'bg-green-500 border-green-500' : 'border-gray-300'
-                        }`}>
-                          {item.is_packed && <svg viewBox="0 0 10 10" className="w-3 h-3"><path d="M1 5l3 3 5-6" stroke="white" strokeWidth="1.5" fill="none"/></svg>}
-                        </div>
-                        <div className="flex-1 text-left">
-                          <p className={`text-sm font-medium ${item.is_packed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
-                            {item.product_name}
-                          </p>
-                          <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
-                        </div>
-                      </button>
-                    ))}
+          const grouped = {}
+          for (const bo of orders) {
+            if (!bo.order) continue
+            const state = bo.order.state
+            if (!state) continue
+            const items = itemsByOrder[bo.order.id]
+            const lineItems = (items && items.length > 0)
+              ? items
+              : [{ product_name: bo.order.product_name, quantity: bo.order.quantity || 1, color: bo.order.color, size: bo.order.size }]
+
+            for (const li of lineItems) {
+              const key = `${state}||${li.product_name}`
+              if (!grouped[key]) {
+                const storedItem = packingItems.find(pi => pi.state === state && pi.product_name === li.product_name)
+                grouped[key] = {
+                  id: storedItem?.id,
+                  state,
+                  product_name: li.product_name,
+                  color: li.color,
+                  size: li.size,
+                  quantity: 0,
+                  is_packed: storedItem?.is_packed || false,
+                }
+              }
+              grouped[key].quantity += Number(li.quantity) || 1
+            }
+          }
+
+          const displayItems = Object.values(grouped)
+          const destStates = [...new Set(displayItems.map(i => i.state))].sort()
+          const packedCount = displayItems.filter(i => i.is_packed).length
+
+          return (
+            <div className="space-y-4">
+              {displayItems.length === 0 && (
+                <p className="text-sm text-gray-400 text-center py-8">No packing items</p>
+              )}
+              {displayItems.length > 0 && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-500">{packedCount}/{displayItems.length} packed</p>
+                    {packedCount === displayItems.length && (
+                      <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                        <CheckCircle size={12} /> All packed
+                      </span>
+                    )}
                   </div>
-                ))}
 
-                {status === 'created' && (
-                  <Button
-                    onClick={() => handleAdvance('packed')}
-                    disabled={advanceBatchStatus.isPending}
-                    className="w-full"
-                  >
-                    Confirm Packing Done
-                  </Button>
-                )}
-              </>
-            )}
-          </div>
-        )}
+                  {destStates.map(state => (
+                    <div key={state} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                      <div className="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                        <p className="text-xs font-semibold text-gray-700">{state}</p>
+                      </div>
+                      {displayItems.filter(i => i.state === state).map((item, idx) => (
+                        <button
+                          key={item.id || idx}
+                          onClick={() => !isDone && item.id && handleTogglePack(item)}
+                          disabled={isDone || togglePackingItem.isPending || !item.id}
+                          className="w-full px-4 py-3 flex items-center gap-3 active:bg-gray-50 transition-colors border-b border-gray-50 last:border-b-0"
+                        >
+                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${
+                            item.is_packed ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                          }`}>
+                            {item.is_packed && <svg viewBox="0 0 10 10" className="w-3 h-3"><path d="M1 5l3 3 5-6" stroke="white" strokeWidth="1.5" fill="none"/></svg>}
+                          </div>
+                          <div className="flex-1 text-left">
+                            <p className={`text-sm font-medium ${item.is_packed ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                              {item.product_name}
+                              {item.color ? ` · ${item.color}` : ''}
+                              {item.size ? ` · ${item.size}` : ''}
+                            </p>
+                            <p className="text-xs text-gray-400">Qty: {item.quantity}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ))}
+
+                  {status === 'created' && (
+                    <Button onClick={() => handleAdvance('packed')} disabled={advanceBatchStatus.isPending} className="w-full">
+                      Confirm Packing Done
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
+          )
+        })()}
 
         {/* Expenses Tab */}
         {tab === 'expenses' && (

@@ -212,7 +212,7 @@ export function generateDeliveryNote(order, business) {
   return doc
 }
 
-export function generatePackingList(batch, packingItems, batchOrders) {
+export function generatePackingList(batch, packingItems, batchOrders, orderItems = []) {
   const doc = new jsPDF()
   doc.setFillColor(17, 24, 39)
   doc.rect(0, 0, 210, 28, 'F')
@@ -223,7 +223,6 @@ export function generatePackingList(batch, packingItems, batchOrders) {
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   doc.text(batch.batch_number, 14, 19)
-  doc.setFontSize(10)
   doc.text(batch.courier_company || '', 196, 12, { align: 'right' })
   doc.text(batch.destination_state || '', 196, 19, { align: 'right' })
   doc.setTextColor(0, 0, 0)
@@ -235,10 +234,40 @@ export function generatePackingList(batch, packingItems, batchOrders) {
   doc.text(`Orders: ${batchOrders.length}`, 120, y)
   y += 10
 
-  // Group packing items by state
-  const states = [...new Set(packingItems.map(i => i.state))]
+  // Build per-state item list from actual order_items when available,
+  // falling back to the stored packingItems for older batches.
+  const itemsByOrderId = {}
+  for (const oi of orderItems) {
+    if (!itemsByOrderId[oi.order_id]) itemsByOrderId[oi.order_id] = []
+    itemsByOrderId[oi.order_id].push(oi)
+  }
+
+  // Derive destination states from orders
+  const states = [...new Set(batchOrders.map(bo => bo.order?.state).filter(Boolean))].sort()
+
+  // Packed status lookup from stored packingItems (keyed by state+product_name)
+  const packedLookup = {}
+  for (const pi of packingItems) {
+    packedLookup[`${pi.state}||${pi.product_name}`] = pi.is_packed
+  }
+
   for (const state of states) {
-    const items = packingItems.filter(i => i.state === state)
+    const stateOrders = batchOrders.filter(bo => bo.order?.state === state)
+
+    // Aggregate items for this state
+    const grouped = {}
+    for (const bo of stateOrders) {
+      const items = itemsByOrderId[bo.order?.id]
+      const lineItems = (items && items.length > 0)
+        ? items
+        : [{ product_name: bo.order?.product_name, quantity: bo.order?.quantity || 1, color: bo.order?.color, size: bo.order?.size }]
+
+      for (const li of lineItems) {
+        const label = [li.product_name, li.color, li.size].filter(Boolean).join(' — ')
+        if (!grouped[label]) grouped[label] = { label, quantity: 0, isPacked: packedLookup[`${state}||${li.product_name}`] || false }
+        grouped[label].quantity += Number(li.quantity) || 1
+      }
+    }
 
     doc.setFillColor(243, 244, 246)
     doc.rect(14, y, 182, 8, 'F')
@@ -249,12 +278,13 @@ export function generatePackingList(batch, packingItems, batchOrders) {
 
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
-    for (const item of items) {
-      const check = item.is_packed ? '[X]' : '[ ]'
+    for (const { label, quantity, isPacked } of Object.values(grouped)) {
+      const check = isPacked ? '[X]' : '[ ]'
       doc.text(check, 16, y)
-      doc.text(item.product_name, 28, y)
-      doc.text(`Qty: ${item.quantity}`, 170, y, { align: 'right' })
-      y += 8
+      const nameLines = doc.splitTextToSize(label, 130)
+      nameLines.forEach((line, i) => doc.text(line, 28, y + i * 5))
+      doc.text(`Qty: ${quantity}`, 196, y, { align: 'right' })
+      y += Math.max(nameLines.length * 5, 7) + 2
       if (y > 270) { doc.addPage(); y = 20 }
     }
     y += 4

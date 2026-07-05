@@ -19,6 +19,20 @@ export function useWaybillBatch(id) {
       ])
       if (batchR.error) throw batchR.error
 
+      const orderIds = (batchOrdersR.data || []).map(bo => bo.order_id).filter(Boolean)
+
+      // Load actual order items so packing list shows individual products, not summaries
+      let orderItems = []
+      try {
+        if (orderIds.length > 0) {
+          const { data } = await supabase
+            .from('order_items')
+            .select('order_id, product_name, quantity, color, size')
+            .in('order_id', orderIds)
+          orderItems = data || []
+        }
+      } catch { orderItems = [] }
+
       // Load separately — table may not exist if migration hasn't been run
       let stateExpenses = []
       try {
@@ -31,6 +45,7 @@ export function useWaybillBatch(id) {
         batch: batchR.data,
         orders: batchOrdersR.data || [],
         packingItems: packingR.data || [],
+        orderItems,
         timeline: timelineR.data || [],
         stateExpenses,
       }
