@@ -702,18 +702,16 @@ export function ReportsPage() {
             {(() => {
               const byProductRev = {}
               orders.filter(o => REVENUE_STATUSES.includes(o.status)).forEach(o => {
-                const amt = Number(o.amount_paid || o.total_amount || 0)
                 const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
                 if (fromJson) {
-                  const totalQty = fromJson.reduce((s, i) => s + (Number(i.quantity) || 1), 0)
                   fromJson.forEach(item => {
                     const name = (item.product_name || 'Unknown').trim()
-                    const share = totalQty > 0 ? (Number(item.quantity) || 1) / totalQty * amt : amt / fromJson.length
-                    byProductRev[name] = (byProductRev[name] || 0) + share
+                    const rev = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
+                    byProductRev[name] = (byProductRev[name] || 0) + rev
                   })
                 } else if (o.product_name && !o.product_name.includes('+')) {
                   const name = o.product_name.trim()
-                  byProductRev[name] = (byProductRev[name] || 0) + amt
+                  byProductRev[name] = (byProductRev[name] || 0) + Number(o.amount_paid || o.total_amount || 0)
                 }
               })
               const entries = Object.entries(byProductRev).sort(([, a], [, b]) => b - a)
