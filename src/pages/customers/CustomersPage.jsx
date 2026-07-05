@@ -33,13 +33,13 @@ export function CustomersPage() {
   })
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Customers" back={false} />
-      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20 overflow-x-hidden w-full">
         <SearchBar value={search} onChange={setSearch} placeholder="Search by name or phone..." />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {isLoading ? <SkeletonList count={5} /> :
          customers?.length === 0 ? (
            <EmptyState title="No customers yet" description="Customers are created automatically when orders are placed" />

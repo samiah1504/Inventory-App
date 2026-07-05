@@ -155,7 +155,7 @@ export function AccountingPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Expenses"
         actions={
@@ -186,7 +186,7 @@ export function AccountingPage() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 
         {/* ── P&L Summary ── */}
         <div className="bg-gray-900 rounded-2xl p-4 text-white">
@@ -210,11 +210,11 @@ export function AccountingPage() {
                 <span className="text-sm text-gray-300">(-) Expenses</span>
                 <span className="text-sm font-bold text-red-400">{formatCurrency(totalExpenses)}</span>
               </div>
-              <div className="border-t border-gray-700 pt-2 flex justify-between items-center">
-                <span className="text-sm font-semibold text-white">Net Profit</span>
-                <span className={`text-lg font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+              <div className="border-t border-gray-700 pt-2">
+                <p className="text-xs text-gray-400 mb-0.5">Net Profit</p>
+                <p className={`text-lg font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {formatCurrency(plNetProfit)}
-                </span>
+                </p>
               </div>
               {grossSales > 0 && (
                 <div className="flex justify-between items-center">

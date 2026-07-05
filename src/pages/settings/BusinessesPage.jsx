@@ -52,7 +52,7 @@ export function BusinessesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Businesses"
         actions={
@@ -62,7 +62,7 @@ export function BusinessesPage() {
           </button>
         }
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
         {(businesses || []).map(b => (
           <div key={b.id} className="bg-white rounded-2xl p-4 border border-gray-100">
             <div className="flex items-start justify-between">

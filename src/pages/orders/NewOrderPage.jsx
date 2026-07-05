@@ -123,7 +123,7 @@ export function NewOrderPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="New Order" />
       <div className="flex-1 overflow-y-auto">
         <form onSubmit={handleSubmit(onSubmit)} className="px-4 py-4 space-y-4 pb-8">
@@ -190,9 +190,9 @@ export function NewOrderPage() {
             </button>
 
             {grandTotal > 0 && (
-              <div className="bg-yellow-50 rounded-xl p-3 flex justify-between items-center">
-                <span className="text-sm font-semibold text-yellow-800">Grand Total</span>
-                <span className="text-xl font-bold text-yellow-800">{formatCurrency(grandTotal)}</span>
+              <div className="bg-yellow-50 rounded-xl p-3">
+                <p className="text-xs text-yellow-700 mb-0.5">Grand Total</p>
+                <p className="text-xl font-bold text-yellow-800">{formatCurrency(grandTotal)}</p>
               </div>
             )}
           </div>

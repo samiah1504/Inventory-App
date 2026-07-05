@@ -136,7 +136,7 @@ export function ProductsPage() {
     : allProducts
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Products"
         actions={
@@ -189,7 +189,7 @@ export function ProductsPage() {
       </div>
 
       {mainTab === 'products' ? (
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
           <p className="text-xs text-gray-500">{visibleProducts.length} product{visibleProducts.length !== 1 ? 's' : ''}</p>
           {visibleProducts.map(p => (
             <div key={p.id} className="bg-white rounded-2xl p-4 border border-gray-100">
@@ -231,7 +231,7 @@ export function ProductsPage() {
           ))}
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
           <p className="text-xs text-gray-500">{(categories || []).length} categor{(categories || []).length !== 1 ? 'ies' : 'y'}</p>
           {(categories || []).length === 0 && (
             <div className="text-center py-12 text-gray-400">

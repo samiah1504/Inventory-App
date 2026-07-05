@@ -126,9 +126,9 @@ export function AlertsPage() {
   })
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Alert Thresholds" />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 
         {/* Business filter */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100">

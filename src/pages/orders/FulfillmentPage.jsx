@@ -143,10 +143,10 @@ export function FulfillmentPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Fulfillment Board" back={false} />
 
-      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20 overflow-x-hidden w-full">
         <div className="px-4 pt-3">
           <SearchBar value={search} onChange={setSearch} placeholder="Search orders..." />
         </div>
@@ -165,7 +165,7 @@ export function FulfillmentPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {tab === 'by_state' && !selectedState ? (
           <div className="space-y-2">
             <p className="text-sm font-medium text-gray-700 mb-3">Select a state</p>

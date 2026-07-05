@@ -224,7 +224,7 @@ export function CeoDashboard() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="overflow-y-auto h-full">
+    <div className="overflow-y-auto overflow-x-hidden h-full w-full">
 
       {/* ── Dark Header ── */}
       <div className="bg-gray-900 text-white px-4 pt-12 pb-5">
@@ -234,11 +234,11 @@ export function CeoDashboard() {
 
         {/* Today stats */}
         <div className="mt-4 bg-gray-800 rounded-2xl p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-gray-400">Orders Today</span>
-            <span className="text-2xl font-bold text-white">
+          <div>
+            <p className="text-xs text-gray-400 mb-0.5">Orders Today</p>
+            <p className="text-2xl font-bold text-white">
               {todayOrdersQ.isLoading ? '—' : todayOrders.length}
-            </span>
+            </p>
           </div>
           <div className="grid grid-cols-2 gap-3 border-t border-gray-700 pt-3">
             <div>
@@ -271,20 +271,20 @@ export function CeoDashboard() {
           {monthOrdersQ.isLoading ? (
             <div className="h-20 bg-gray-50 rounded-xl animate-pulse" />
           ) : (
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Orders</span>
-                <span className="text-2xl font-bold text-gray-900">{monthOrders.length}</span>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-gray-50 rounded-xl px-2 py-2">
+                <p className="text-xs text-gray-500 mb-0.5">Orders</p>
+                <p className="text-lg font-bold text-gray-900">{monthOrders.length}</p>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-gray-500">Sales</span>
-                <span className="text-base font-bold text-green-600">{formatCurrency(salesMonth)}</span>
+              <div className="bg-gray-50 rounded-xl px-2 py-2">
+                <p className="text-xs text-gray-500 mb-0.5">Sales</p>
+                <p className="text-sm font-bold text-green-600">{formatCurrency(salesMonth)}</p>
               </div>
-              <div className="flex items-center justify-between border-t border-gray-100 pt-2">
-                <span className="text-xs font-semibold text-gray-700">Net Profit</span>
-                <span className={`text-base font-bold ${profitMonth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div className="bg-gray-50 rounded-xl px-2 py-2">
+                <p className="text-xs text-gray-500 mb-0.5">Net Profit</p>
+                <p className={`text-sm font-bold ${profitMonth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatCurrency(profitMonth)}
-                </span>
+                </p>
               </div>
             </div>
           )}

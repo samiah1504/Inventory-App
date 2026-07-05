@@ -117,7 +117,7 @@ export function CustomerDetailPage() {
   }
 
   if (isLoading) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Customer" />
       <div className="p-4 space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 shimmer rounded-2xl" />)}</div>
     </div>
@@ -144,7 +144,7 @@ export function CustomerDetailPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title={customer.name}
         actions={canEdit && (
@@ -153,7 +153,7 @@ export function CustomerDetailPage() {
           </button>
         )}
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 pb-8">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 pb-8">
 
         {/* Profile */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100">

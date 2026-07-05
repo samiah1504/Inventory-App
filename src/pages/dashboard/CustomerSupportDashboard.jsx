@@ -16,7 +16,7 @@ export function CustomerSupportDashboard() {
   const myNew = useOrders({ status: 'new' })
 
   return (
-    <div className="overflow-y-auto h-full">
+    <div className="overflow-y-auto overflow-x-hidden h-full w-full">
       <div className="bg-gray-900 text-white px-4 pt-12 pb-6">
         <p className="text-yellow-400 text-sm font-medium">Customer Support</p>
         <h1 className="text-2xl font-bold">{user?.name}</h1>

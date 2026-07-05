@@ -123,7 +123,7 @@ export function EditOrderPage() {
   }
 
   if (isLoading) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Edit Order" />
       <div className="flex-1 p-4 space-y-3">{[1,2,3].map(i => <div key={i} className="h-20 shimmer rounded-2xl" />)}</div>
     </div>
@@ -131,7 +131,7 @@ export function EditOrderPage() {
 
   if (!order || order.status !== 'new') {
     return (
-      <div className="flex flex-col h-full">
+      <div className="flex flex-col h-full overflow-x-hidden w-full">
         <TopBar title="Edit Order" />
         <div className="flex-1 flex items-center justify-center px-4">
           <p className="text-gray-500 text-center">This order can no longer be edited.</p>
@@ -141,7 +141,7 @@ export function EditOrderPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title={`Edit ${order.order_number}`} />
       <div className="flex-1 overflow-y-auto">
         <form onSubmit={handleSubmit(onSubmit)} className="px-4 py-4 space-y-4 pb-8">
@@ -220,9 +220,9 @@ export function EditOrderPage() {
                 {...register('unit_price', { required: 'Price is required', valueAsNumber: true })} />
             </div>
             {total > 0 && (
-              <div className="bg-blue-50 rounded-xl p-3 flex justify-between items-center">
-                <span className="text-sm font-medium text-blue-700">Total Amount</span>
-                <span className="text-lg font-bold text-blue-700">{formatCurrency(total)}</span>
+              <div className="bg-blue-50 rounded-xl p-3">
+                <p className="text-xs text-blue-600 mb-0.5">Total Amount</p>
+                <p className="text-lg font-bold text-blue-700">{formatCurrency(total)}</p>
               </div>
             )}
           </div>

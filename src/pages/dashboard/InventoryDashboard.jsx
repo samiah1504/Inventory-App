@@ -14,7 +14,7 @@ export function InventoryDashboard() {
   const lowStockCount = lowStock?.length || 0
 
   return (
-    <div className="overflow-y-auto h-full">
+    <div className="overflow-y-auto overflow-x-hidden h-full w-full">
       <div className="bg-gray-900 text-white px-4 pt-12 pb-6">
         <p className="text-yellow-400 text-sm font-medium">Inventory</p>
         <h1 className="text-2xl font-bold">{user?.name}</h1>

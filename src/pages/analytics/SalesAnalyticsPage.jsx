@@ -127,7 +127,7 @@ export function SalesAnalyticsPage() {
   const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i)
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Sales Analytics" />
 
       <div className="flex-1 overflow-y-auto">

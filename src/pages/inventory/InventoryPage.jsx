@@ -96,7 +96,7 @@ export function InventoryPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Inventory"
         back={false}
@@ -131,7 +131,7 @@ export function InventoryPage() {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {isLoading ? <SkeletonList count={5} /> :
          filteredInventory.length === 0 ? (
            <EmptyState
@@ -164,16 +164,16 @@ export function InventoryPage() {
                      </button>
                    </div>
                  </div>
-                 <div className="grid grid-cols-4 gap-2">
+                 <div className="grid grid-cols-2 gap-2">
                    {[
                      { label: 'Available', value: item.quantity_available, className: getStockColor(item) },
-                     { label: 'Physical', value: item.quantity_physical },
-                     { label: 'Reserved', value: item.quantity_reserved },
-                     { label: 'Sold', value: item.quantity_sold },
+                     { label: 'Physical',  value: item.quantity_physical },
+                     { label: 'Reserved',  value: item.quantity_reserved },
+                     { label: 'Sold',      value: item.quantity_sold },
                    ].map(({ label, value, className }) => (
-                     <div key={label} className="text-center">
-                       <p className={`text-lg font-bold ${className || 'text-gray-900'}`}>{value}</p>
-                       <p className="text-xs text-gray-400">{label}</p>
+                     <div key={label} className="bg-gray-50 rounded-xl px-3 py-2">
+                       <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+                       <p className={`text-base font-bold ${className || 'text-gray-900'}`}>{value}</p>
                      </div>
                    ))}
                  </div>

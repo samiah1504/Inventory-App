@@ -48,7 +48,7 @@ export function OrderDetailPage() {
   const [processingDate, setProcessingDate] = useState(new Date().toISOString().split('T')[0])
 
   if (isLoading) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Order Details" />
       <div className="flex-1 p-4 space-y-3">
         {[1,2,3].map(i => <div key={i} className="h-24 shimmer rounded-2xl" />)}
@@ -57,7 +57,7 @@ export function OrderDetailPage() {
   )
 
   if (!order) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Order Not Found" />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-gray-500">Order not found</p>
@@ -213,7 +213,7 @@ export function OrderDetailPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title={order.order_number}
         actions={

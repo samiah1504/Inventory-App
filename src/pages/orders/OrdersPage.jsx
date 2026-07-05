@@ -95,7 +95,7 @@ export function OrdersPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title={isCS ? 'My Orders' : 'Orders'}
         back={false}
@@ -121,7 +121,7 @@ export function OrdersPage() {
         }
       />
 
-      <div className="px-4 py-3 space-y-3 bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="px-4 py-3 space-y-3 bg-white border-b border-gray-100 sticky top-[57px] z-20 overflow-x-hidden w-full">
         <SearchBar
           value={search}
           onChange={setSearch}
@@ -179,7 +179,7 @@ export function OrdersPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
         {isLoading ? (
           <SkeletonList count={5} />
         ) : orders?.length === 0 ? (

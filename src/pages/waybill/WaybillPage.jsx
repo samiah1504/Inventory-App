@@ -143,7 +143,7 @@ export function WaybillPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Waybill"
         back={false}
@@ -156,7 +156,7 @@ export function WaybillPage() {
         }
       />
 
-      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20 overflow-x-hidden w-full">
         <div className="px-4 pt-3">
           <SearchBar value={search} onChange={setSearch} placeholder="Search..." />
         </div>
@@ -169,7 +169,7 @@ export function WaybillPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {tab === 'awaiting' && (() => {
           const orders = awaitingOrders.data || []
           const selectableOrders = orders.filter(o => o.status === 'awaiting_waybill')

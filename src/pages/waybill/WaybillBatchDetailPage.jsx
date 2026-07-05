@@ -91,7 +91,7 @@ export function WaybillBatchDetailPage() {
   }, [data])
 
   if (isLoading) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Batch Detail" />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-gray-400 text-sm">Loading...</p>
@@ -100,7 +100,7 @@ export function WaybillBatchDetailPage() {
   )
 
   if (error || !data) return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Batch Detail" />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-red-500 text-sm">Failed to load batch</p>
@@ -157,7 +157,7 @@ export function WaybillBatchDetailPage() {
 
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title={batch.batch_number} />
 
       {/* Batch Header */}
@@ -226,7 +226,7 @@ export function WaybillBatchDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20">
+      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20 overflow-x-hidden w-full">
         <div className="flex gap-0">
           {TABS.map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
@@ -237,7 +237,7 @@ export function WaybillBatchDetailPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
 
         {/* Orders Tab */}
         {tab === 'orders' && (
@@ -449,9 +449,9 @@ export function WaybillBatchDetailPage() {
 
             {/* Grand total */}
             {grandExpenseTotal > 0 && (
-              <div className="bg-yellow-50 rounded-2xl px-4 py-3 flex justify-between items-center">
-                <span className="text-sm font-semibold text-yellow-800">Grand Total</span>
-                <span className="text-xl font-bold text-yellow-800">{formatCurrency(grandExpenseTotal)}</span>
+              <div className="bg-yellow-50 rounded-2xl px-4 py-3">
+                <p className="text-xs text-yellow-700 mb-0.5">Grand Total</p>
+                <p className="text-xl font-bold text-yellow-800">{formatCurrency(grandExpenseTotal)}</p>
               </div>
             )}
 

@@ -20,9 +20,9 @@ export function SettingsPage() {
   if (!isCeo) return <NonAdminSettings user={user} logout={logout} />
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Settings" back={false} />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
 
         {/* Admin sections */}
         {[
@@ -76,9 +76,9 @@ function NonAdminSettings({ user, logout }) {
   const isOpsManager = user?.role === 'operations_manager'
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar title="Settings" back={false} />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
         {/* Profile card */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
           <div className="flex items-center gap-3 mb-4">

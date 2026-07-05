@@ -45,7 +45,7 @@ export function WarehousesPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Warehouses"
         actions={
@@ -55,7 +55,7 @@ export function WarehousesPage() {
           </button>
         }
       />
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
         {(warehouses || []).map(w => (
           <div key={w.id} className="bg-white rounded-2xl p-4 border border-gray-100">
             <div className="flex items-start justify-between">
