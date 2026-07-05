@@ -20,6 +20,7 @@ import { BusinessesPage } from './pages/settings/BusinessesPage'
 import { WarehousesPage } from './pages/settings/WarehousesPage'
 import { ProductsPage } from './pages/settings/ProductsPage'
 import { AccountingPage } from './pages/accounting/AccountingPage'
+import { SalesAnalyticsPage } from './pages/analytics/SalesAnalyticsPage'
 import { DocumentsPage } from './pages/documents/DocumentsPage'
 import { EditOrderPage } from './pages/orders/EditOrderPage'
 import { AlertsPage } from './pages/settings/AlertsPage'
@@ -113,6 +114,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/accounting" element={<AccountingPage />} />
+            <Route path="/analytics" element={<SalesAnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/staff" element={<StaffPage />} />
             <Route path="/settings/businesses" element={<BusinessesPage />} />

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, DollarSign, Package, AlertTriangle, Users, Plus,
-  BarChart3, TrendingUp, ChevronRight, Star, Briefcase,
+  BarChart3, TrendingUp, ChevronRight, Star, Briefcase, LineChart,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
@@ -416,8 +416,8 @@ export function CeoDashboard() {
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h3>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { label: 'New Order',  icon: Plus,     action: () => navigate('/orders/new'),       color: 'bg-blue-50 text-blue-600' },
-              { label: 'Reports',   icon: BarChart3,  action: () => navigate('/reports'),          color: 'bg-purple-50 text-purple-600' },
+              { label: 'New Order',  icon: Plus,       action: () => navigate('/orders/new'),       color: 'bg-blue-50 text-blue-600' },
+              { label: 'Analytics', icon: LineChart,  action: () => navigate('/analytics'),        color: 'bg-purple-50 text-purple-600' },
               { label: 'Staff',     icon: Users,      action: () => navigate('/settings/staff'),   color: 'bg-green-50 text-green-600' },
               { label: 'Inventory', icon: Package,    action: () => navigate('/inventory'),        color: 'bg-amber-50 text-amber-600' },
               { label: 'Customers', icon: Users,      action: () => navigate('/customers'),        color: 'bg-pink-50 text-pink-600' },
