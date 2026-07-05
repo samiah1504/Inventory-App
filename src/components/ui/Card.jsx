@@ -21,18 +21,16 @@ export function StatCard({ label, value, icon, color = 'blue', sub, onClick }) {
   }
   return (
     <Card className={`p-4 ${onClick ? 'cursor-pointer active:scale-[0.98] transition-transform' : ''}`} onClick={onClick}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
-          <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
-          {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
-        </div>
+      <div className="flex items-start justify-between gap-1 mb-2">
+        <p className="text-xs font-medium text-gray-500 leading-snug">{label}</p>
         {icon && (
-          <div className={`p-2 rounded-xl ${colors[color]} shrink-0`}>
+          <div className={`p-1.5 rounded-lg ${colors[color]} shrink-0`}>
             {icon}
           </div>
         )}
       </div>
+      <p className="text-2xl font-bold text-gray-900 leading-tight">{value}</p>
+      {sub && <p className="text-xs text-gray-500 mt-0.5">{sub}</p>}
     </Card>
   )
 }
