@@ -4,10 +4,23 @@ export function buildOrderMessage(order) {
     `Customer: ${order.customer_name}`,
     `Phone: ${order.customer_phone}`,
     `Address: ${[order.address, order.city, order.state].filter(Boolean).join(', ')}`,
-    `Product: ${order.product_name}${order.color ? ` (${order.color})` : ''}${order.size ? ` - ${order.size}` : ''}`,
-    `Qty: ${order.quantity}`,
-    `Amount: ₦${Number(order.total_amount).toLocaleString()}`,
   ]
+
+  if (order.items && order.items.length > 0) {
+    lines.push(`Products:`)
+    for (const item of order.items) {
+      const detail = [
+        item.color ? `(${item.color})` : '',
+        item.size ? `Size: ${item.size}` : '',
+      ].filter(Boolean).join(' ')
+      lines.push(`  • ${item.product_name}${detail ? ' ' + detail : ''} × ${item.quantity} — ₦${Number(item.unit_price).toLocaleString()}`)
+    }
+  } else {
+    lines.push(`Product: ${order.product_name}${order.color ? ` (${order.color})` : ''}${order.size ? ` - ${order.size}` : ''}`)
+    lines.push(`Qty: ${order.quantity}`)
+  }
+
+  lines.push(`Total: ₦${Number(order.total_amount).toLocaleString()}`)
   if (order.customer_requested_delivery_date) lines.push(`Requested Delivery: ${order.customer_requested_delivery_date}`)
   if (order.preferred_delivery_time) lines.push(`Preferred Time: ${order.preferred_delivery_time}`)
   if (order.delivery_note) lines.push(`Note: ${order.delivery_note}`)
