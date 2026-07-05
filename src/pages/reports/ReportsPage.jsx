@@ -680,18 +680,54 @@ export function ReportsPage() {
                 byStateRev[s] = (byStateRev[s] || 0) + Number(o.amount_paid || o.total_amount)
               })
               const entries = Object.entries(byStateRev).sort(([, a], [, b]) => b - a)
-              const maxRev  = entries[0]?.[1] || 1
               return entries.length > 0 ? (
                 <div className="bg-white rounded-2xl p-4 border border-gray-100">
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by State</h3>
-                  <div className="space-y-2">
-                    {entries.slice(0, 10).map(([state, amt]) => (
-                      <div key={state} className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-gray-700 w-28 truncate">{state}</span>
-                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full">
-                          <div className="h-full bg-green-500 rounded-full" style={{ width: `${(amt / maxRev) * 100}%` }} />
+                  <div className="divide-y divide-gray-50">
+                    {entries.slice(0, 10).map(([state, amt], i) => (
+                      <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
+                          <span className="text-sm text-gray-800">{state}</span>
                         </div>
-                        <span className="text-sm font-bold text-gray-900 w-24 text-right">{formatCurrency(amt)}</span>
+                        <span className="text-sm font-bold text-gray-900">{formatCurrency(amt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null
+            })()}
+
+            {/* Revenue by product */}
+            {(() => {
+              const byProductRev = {}
+              orders.filter(o => REVENUE_STATUSES.includes(o.status)).forEach(o => {
+                const amt = Number(o.amount_paid || o.total_amount || 0)
+                const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+                if (fromJson) {
+                  const totalQty = fromJson.reduce((s, i) => s + (Number(i.quantity) || 1), 0)
+                  fromJson.forEach(item => {
+                    const name = (item.product_name || 'Unknown').trim()
+                    const share = totalQty > 0 ? (Number(item.quantity) || 1) / totalQty * amt : amt / fromJson.length
+                    byProductRev[name] = (byProductRev[name] || 0) + share
+                  })
+                } else if (o.product_name && !o.product_name.includes('+')) {
+                  const name = o.product_name.trim()
+                  byProductRev[name] = (byProductRev[name] || 0) + amt
+                }
+              })
+              const entries = Object.entries(byProductRev).sort(([, a], [, b]) => b - a)
+              return entries.length > 0 ? (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by Product</h3>
+                  <div className="divide-y divide-gray-50">
+                    {entries.map(([product, amt], i) => (
+                      <div key={product} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
+                          <span className="text-sm text-gray-800 truncate">{product}</span>
+                        </div>
+                        <span className="text-sm font-bold text-gray-900 shrink-0 ml-2">{formatCurrency(amt)}</span>
                       </div>
                     ))}
                   </div>
