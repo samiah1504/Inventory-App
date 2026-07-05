@@ -723,36 +723,62 @@ export function ReportsPage() {
 
         {/* ORDERS */}
         {tab === 'orders' && (
-          <>
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by State</h3>
-              <div className="divide-y divide-gray-50">
-                {Object.entries(byState).sort(([, a], [, b]) => b - a).slice(0, 15).map(([state, count], i) => (
-                  <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
-                      <span className="text-sm text-gray-700">{state}</span>
-                    </div>
-                    <span className="text-sm font-bold text-gray-900">{count}</span>
+          <div className="space-y-4">
+
+            {/* ── Summary ── */}
+            <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-3">
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Period Summary</p>
+
+              {/* Total orders — prominent */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-600">Total Orders</span>
+                <span className="text-2xl font-bold text-gray-900">{totalOrders}</span>
+              </div>
+
+              {/* Status grid */}
+              <div className="grid grid-cols-2 gap-2 border-t border-gray-100 pt-3">
+                {[
+                  { label: 'Delivered',  key: 'delivered',       color: 'text-green-600'  },
+                  { label: 'Paid',       key: 'paid',            color: 'text-emerald-600' },
+                  { label: 'Failed',     key: 'failed_delivery', color: 'text-red-500'    },
+                  { label: 'Returned',   key: 'returned',        color: 'text-orange-500' },
+                  { label: 'Cancelled',  key: 'cancelled',       color: 'text-gray-400'   },
+                ].map(({ label, key, color }) => (
+                  <div key={key} className="bg-gray-50 rounded-xl px-3 py-2.5">
+                    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+                    <p className={`text-base font-bold ${color}`}>{byStatus[key] || 0}</p>
                   </div>
                 ))}
-                {Object.keys(byState).length === 0 && <p className="text-sm text-gray-400">No data</p>}
+              </div>
+
+              {/* Paid order rate */}
+              <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2.5">
+                <span className="text-xs font-semibold text-blue-700">Paid Order Rate</span>
+                <span className="text-base font-bold text-blue-700">
+                  {totalOrders > 0 ? (((byStatus['paid'] || 0) / totalOrders) * 100).toFixed(1) : '0.0'}%
+                </span>
               </div>
             </div>
 
+            {/* ── Orders by State ── */}
             <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by Source</h3>
-              <div className="space-y-2">
-                {Object.entries(bySource).sort(([, a], [, b]) => b - a).map(([source, count]) => (
-                  <div key={source} className="flex items-center justify-between">
-                    <span className="text-sm text-gray-700">{source}</span>
-                    <span className="text-sm font-bold text-gray-900">{count}</span>
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by State</h3>
+              <div className="divide-y divide-gray-50">
+                {Object.entries(byState).sort(([, a], [, b]) => b - a).map(([state, count], i) => (
+                  <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
+                      <span className="text-sm text-gray-700">{state}</span>
+                    </div>
+                    <span className="text-sm font-bold text-gray-900 shrink-0">{count}</span>
                   </div>
                 ))}
-                {Object.keys(bySource).length === 0 && <p className="text-sm text-gray-400">No data</p>}
+                {Object.keys(byState).length === 0 && (
+                  <p className="text-sm text-gray-400">No orders for this period</p>
+                )}
               </div>
             </div>
-          </>
+          </div>
         )}
 
         {/* SALES */}
