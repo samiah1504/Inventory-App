@@ -107,3 +107,31 @@ CREATE INDEX IF NOT EXISTS idx_orders_planned_delivery ON orders(planned_deliver
 CREATE INDEX IF NOT EXISTS idx_orders_created_by ON orders(created_by);
 CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+
+-- ===================================================
+-- Waybill Batch — per-state expenses & source warehouse
+-- ===================================================
+
+-- Source warehouse/location the batch is leaving from
+ALTER TABLE waybill_batches ADD COLUMN IF NOT EXISTS source_warehouse_id UUID REFERENCES warehouses(id);
+ALTER TABLE waybill_batches ADD COLUMN IF NOT EXISTS source_state TEXT;
+ALTER TABLE waybill_batches ADD COLUMN IF NOT EXISTS source_city TEXT;
+
+-- Per-state expenses (replaces the flat cost columns for new batches)
+CREATE TABLE IF NOT EXISTS waybill_batch_state_expenses (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  batch_id UUID REFERENCES waybill_batches(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  destination_city TEXT,
+  waybill_cost DECIMAL(15,2) DEFAULT 0,
+  packaging_cost DECIMAL(15,2) DEFAULT 0,
+  loading_cost DECIMAL(15,2) DEFAULT 0,
+  transport_cost DECIMAL(15,2) DEFAULT 0,
+  dispatch_cost DECIMAL(15,2) DEFAULT 0,
+  other_cost DECIMAL(15,2) DEFAULT 0,
+  expense_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(batch_id, state)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wbse_batch ON waybill_batch_state_expenses(batch_id);

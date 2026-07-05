@@ -76,7 +76,7 @@ export function WaybillPage() {
   const [batchForm, setBatchForm] = useState({
     courier_company: '', waybill_type: 'external', tracking_number: '',
     date_shipped: new Date().toISOString().split('T')[0],
-    destination_state: '', destination_warehouse_id: '', notes: ''
+    source_warehouse_id: '', notes: '',
   })
 
   const createWaybillBatch = useCreateWaybillBatch()
@@ -299,7 +299,30 @@ export function WaybillPage() {
         }
       >
         <div className="space-y-4">
-          <p className="text-sm text-gray-500">{selectedOrders.length} order(s) selected</p>
+          {/* Destination states — auto-derived from selected orders */}
+          {(() => {
+            const states = [...new Set(
+              (awaitingOrders.data || [])
+                .filter(o => selectedOrders.includes(o.id))
+                .map(o => o.state).filter(Boolean)
+            )].sort()
+            return states.length > 0 ? (
+              <div className="bg-blue-50 rounded-xl px-3 py-2.5">
+                <p className="text-xs font-semibold text-blue-700 mb-1">Destination States</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {states.map(s => (
+                    <span key={s} className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-medium">{s}</span>
+                  ))}
+                </div>
+              </div>
+            ) : null
+          })()}
+
+          <Select label="Source Warehouse (Leaving From)" value={batchForm.source_warehouse_id}
+            onChange={e => setBatchForm({ ...batchForm, source_warehouse_id: e.target.value })}>
+            <option value="">Select warehouse...</option>
+            {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} — {w.state}</option>)}
+          </Select>
           <Select label="Waybill Type" value={batchForm.waybill_type}
             onChange={e => setBatchForm({ ...batchForm, waybill_type: e.target.value })}>
             <option value="external">External Courier</option>
@@ -311,16 +334,6 @@ export function WaybillPage() {
             value={batchForm.tracking_number} onChange={e => setBatchForm({ ...batchForm, tracking_number: e.target.value })} />
           <Input label="Date Shipped" type="date"
             value={batchForm.date_shipped} onChange={e => setBatchForm({ ...batchForm, date_shipped: e.target.value })} />
-          <Select label="Destination State" value={batchForm.destination_state}
-            onChange={e => setBatchForm({ ...batchForm, destination_state: e.target.value })}>
-            <option value="">Select state...</option>
-            {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
-          </Select>
-          <Select label="Destination Warehouse" value={batchForm.destination_warehouse_id}
-            onChange={e => setBatchForm({ ...batchForm, destination_warehouse_id: e.target.value })}>
-            <option value="">Select warehouse...</option>
-            {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
-          </Select>
           <Textarea label="Notes" rows={2}
             value={batchForm.notes} onChange={e => setBatchForm({ ...batchForm, notes: e.target.value })} />
         </div>

@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Package, DollarSign, Clock, CheckSquare, ChevronRight, CheckCircle } from 'lucide-react'
+import { Package, DollarSign, Clock, ChevronRight, CheckCircle } from 'lucide-react'
 import { useWaybillBatch, useSaveBatchExpenses, useTogglePackingItem, useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
 import { TopBar } from '../../components/layout/TopBar'
 import { Button } from '../../components/ui/Button'
@@ -8,6 +8,19 @@ import { Input, Textarea } from '../../components/ui/Input'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { generatePackingList, generateWaybillSummary, savePdf } from '../../lib/pdf'
+
+const COST_KEYS = [
+  { key: 'waybill_cost', label: 'Waybill Fee' },
+  { key: 'packaging_cost', label: 'Packaging' },
+  { key: 'loading_cost', label: 'Loading' },
+  { key: 'transport_cost', label: 'Transport' },
+  { key: 'dispatch_cost', label: 'Dispatch' },
+  { key: 'other_cost', label: 'Other' },
+]
+
+function emptyStateExpense() {
+  return { destination_city: '', waybill_cost: '', packaging_cost: '', loading_cost: '', transport_cost: '', dispatch_cost: '', other_cost: '', expense_notes: '' }
+}
 
 const STATUS_LABEL = {
   created: 'Created',
@@ -37,11 +50,8 @@ export function WaybillBatchDetailPage() {
   const navigate = useNavigate()
   const { showToast } = useAppStore()
   const [tab, setTab] = useState('orders')
-  const [allocationMode, setAllocationMode] = useState('equal')
-  const [expenses, setExpenses] = useState({
-    waybill_cost: '', packaging_cost: '', loading_cost: '',
-    transport_cost: '', dispatch_cost: '', other_cost: '', expense_notes: '',
-  })
+  // { [state]: { destination_city, waybill_cost, ..., expense_notes } }
+  const [stateExpenses, setStateExpenses] = useState({})
   const [expensesLoaded, setExpensesLoaded] = useState(false)
 
   const { data, isLoading, error } = useWaybillBatch(id)
@@ -49,21 +59,27 @@ export function WaybillBatchDetailPage() {
   const togglePackingItem = useTogglePackingItem()
   const advanceBatchStatus = useAdvanceBatchStatus()
 
-  // Populate expense fields from DB once loaded
-  if (data?.batch && !expensesLoaded) {
-    const b = data.batch
-    setExpenses({
-      waybill_cost: b.waybill_cost || '',
-      packaging_cost: b.packaging_cost || '',
-      loading_cost: b.loading_cost || '',
-      transport_cost: b.transport_cost || '',
-      dispatch_cost: b.dispatch_cost || '',
-      other_cost: b.other_cost || '',
-      expense_notes: b.expense_notes || '',
-    })
+  // Once we have data, initialise per-state expense forms
+  useEffect(() => {
+    if (!data || expensesLoaded) return
+    const destStates = [...new Set((data.orders || []).map(bo => bo.order?.state).filter(Boolean))].sort()
+    const init = {}
+    for (const state of destStates) {
+      const saved = (data.stateExpenses || []).find(e => e.state === state)
+      init[state] = saved ? {
+        destination_city: saved.destination_city || '',
+        waybill_cost: saved.waybill_cost || '',
+        packaging_cost: saved.packaging_cost || '',
+        loading_cost: saved.loading_cost || '',
+        transport_cost: saved.transport_cost || '',
+        dispatch_cost: saved.dispatch_cost || '',
+        other_cost: saved.other_cost || '',
+        expense_notes: saved.expense_notes || '',
+      } : emptyStateExpense()
+    }
+    setStateExpenses(init)
     setExpensesLoaded(true)
-    if (b.cost_allocation) setAllocationMode(b.cost_allocation)
-  }
+  }, [data, expensesLoaded])
 
   if (isLoading) return (
     <div className="flex flex-col h-full">
@@ -89,8 +105,8 @@ export function WaybillBatchDetailPage() {
   const isTransit = status === 'waybilled' || status === 'in_transit'
   const isDone = status === 'received'
 
-  const expenseTotal = ['waybill_cost', 'packaging_cost', 'loading_cost', 'transport_cost', 'dispatch_cost', 'other_cost']
-    .reduce((s, k) => s + (Number(expenses[k]) || 0), 0)
+  const grandExpenseTotal = Object.values(stateExpenses).reduce((sum, exp) =>
+    sum + COST_KEYS.reduce((s, { key }) => s + (Number(exp[key]) || 0), 0), 0)
 
   async function handleAdvance(newStatus) {
     await advanceBatchStatus.mutateAsync({
@@ -109,11 +125,14 @@ export function WaybillBatchDetailPage() {
   async function handleSaveExpenses() {
     await saveBatchExpenses.mutateAsync({
       batchId: id,
-      expenses,
-      allocationMode,
+      stateExpenses,
       batchOrders: orders,
     })
     showToast('Expenses saved', 'success')
+  }
+
+  function updateStateExpense(state, field, value) {
+    setStateExpenses(prev => ({ ...prev, [state]: { ...prev[state], [field]: value } }))
   }
 
   async function handleTogglePack(item) {
@@ -139,7 +158,13 @@ export function WaybillBatchDetailPage() {
           <span className="text-xs text-gray-400">{formatDate(batch.created_at)}</span>
         </div>
         <p className="text-base font-semibold text-white mt-1">{batch.courier_company || 'No courier'}</p>
-        <p className="text-xs text-gray-400">{batch.destination_state}{batch.tracking_number ? ` · ${batch.tracking_number}` : ''}</p>
+        {batch.source_warehouse && (
+          <p className="text-xs text-gray-400">From: {batch.source_warehouse.name} — {batch.source_warehouse.state}</p>
+        )}
+        <p className="text-xs text-gray-400">
+          To: {[...new Set(orders.map(bo => bo.order?.state).filter(Boolean))].sort().join(', ') || batch.destination_state || '—'}
+          {batch.tracking_number ? ` · ${batch.tracking_number}` : ''}
+        </p>
         <p className="text-xs text-gray-400">{orders.length} order{orders.length !== 1 ? 's' : ''} · Total cost: {formatCurrency(batch.total_cost || 0)}</p>
 
         {/* Action buttons */}
@@ -294,75 +319,82 @@ export function WaybillBatchDetailPage() {
             {batch.expenses_saved && (
               <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2">
                 <CheckCircle size={14} className="text-green-600 shrink-0" />
-                <p className="text-xs text-green-700 font-medium">Expenses saved · {formatCurrency(batch.total_cost)}</p>
+                <p className="text-xs text-green-700 font-medium">Expenses saved · Grand total: {formatCurrency(batch.total_cost)}</p>
               </div>
             )}
 
-            <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
-              {[
-                { key: 'waybill_cost', label: 'Waybill Fee' },
-                { key: 'packaging_cost', label: 'Packaging' },
-                { key: 'loading_cost', label: 'Loading' },
-                { key: 'transport_cost', label: 'Transport' },
-                { key: 'dispatch_cost', label: 'Dispatch' },
-                { key: 'other_cost', label: 'Other' },
-              ].map(({ key, label }) => (
-                <Input
-                  key={key}
-                  label={label + ' (₦)'}
-                  type="number"
-                  inputMode="decimal"
-                  value={expenses[key]}
-                  onChange={e => setExpenses(prev => ({ ...prev, [key]: e.target.value }))}
-                  disabled={isDone}
-                />
-              ))}
+            {Object.keys(stateExpenses).length === 0 && (
+              <p className="text-sm text-gray-400 text-center py-6">No destination states found</p>
+            )}
 
-              <div className="pt-2 border-t border-gray-100">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-gray-700">Total</span>
-                  <span className="text-lg font-bold text-gray-900">{formatCurrency(expenseTotal)}</span>
+            {/* Per-state expense cards */}
+            {Object.entries(stateExpenses).map(([state, exp]) => {
+              const stateTotal = COST_KEYS.reduce((s, { key }) => s + (Number(exp[key]) || 0), 0)
+              const stateOrders = orders.filter(bo => bo.order?.state === state)
+              return (
+                <div key={state} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                  <div className="bg-gray-50 border-b border-gray-100 px-4 py-2.5 flex items-center justify-between">
+                    <p className="text-sm font-bold text-gray-800">{state}</p>
+                    <span className="text-xs text-gray-500">{stateOrders.length} order{stateOrders.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <Input
+                      label="Destination City"
+                      placeholder="e.g. Ibadan"
+                      value={exp.destination_city}
+                      onChange={e => updateStateExpense(state, 'destination_city', e.target.value)}
+                      disabled={isDone}
+                    />
+                    {COST_KEYS.map(({ key, label }) => (
+                      <Input
+                        key={key}
+                        label={label + ' (₦)'}
+                        type="number"
+                        inputMode="decimal"
+                        value={exp[key]}
+                        onChange={e => updateStateExpense(state, key, e.target.value)}
+                        disabled={isDone}
+                      />
+                    ))}
+                    <Textarea
+                      label="Notes"
+                      rows={2}
+                      value={exp.expense_notes}
+                      onChange={e => updateStateExpense(state, 'expense_notes', e.target.value)}
+                      disabled={isDone}
+                    />
+                    {stateTotal > 0 && (
+                      <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
+                        <span className="text-xs text-gray-500">State subtotal</span>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-gray-900">{formatCurrency(stateTotal)}</p>
+                          {stateOrders.length > 0 && (
+                            <p className="text-xs text-gray-400">≈ {formatCurrency(stateTotal / stateOrders.length)} / order</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                {orders.length > 0 && expenseTotal > 0 && (
-                  <p className="text-xs text-gray-400 mt-0.5 text-right">
-                    ≈ {formatCurrency(expenseTotal / orders.length)} per order (equal split)
-                  </p>
-                )}
-              </div>
+              )
+            })}
 
-              <Textarea
-                label="Notes"
-                rows={2}
-                value={expenses.expense_notes}
-                onChange={e => setExpenses(prev => ({ ...prev, expense_notes: e.target.value }))}
-                disabled={isDone}
-              />
-            </div>
-
-            {!isDone && (
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setAllocationMode('equal')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-all border ${allocationMode === 'equal' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}
-                  >
-                    Equal Split
-                  </button>
-                  <button
-                    onClick={() => setAllocationMode('manual')}
-                    className={`flex-1 py-2.5 rounded-xl text-xs font-medium transition-all border ${allocationMode === 'manual' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}
-                  >
-                    Manual
-                  </button>
-                </div>
-                <Button
-                  onClick={handleSaveExpenses}
-                  disabled={saveBatchExpenses.isPending}
-                  className="w-full"
-                >
-                  Save Expenses
-                </Button>
+            {/* Grand total */}
+            {grandExpenseTotal > 0 && (
+              <div className="bg-yellow-50 rounded-2xl px-4 py-3 flex justify-between items-center">
+                <span className="text-sm font-semibold text-yellow-800">Grand Total</span>
+                <span className="text-xl font-bold text-yellow-800">{formatCurrency(grandExpenseTotal)}</span>
               </div>
+            )}
+
+            {!isDone && Object.keys(stateExpenses).length > 0 && (
+              <Button
+                onClick={handleSaveExpenses}
+                disabled={saveBatchExpenses.isPending}
+                className="w-full"
+              >
+                Save Expenses
+              </Button>
             )}
           </div>
         )}
