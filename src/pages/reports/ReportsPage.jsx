@@ -848,39 +848,39 @@ export function ReportsPage() {
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
                     {productStateFilter ? `${productStateFilter} · ` : ''}Period Summary
                   </p>
-                  <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-xs text-gray-500">Revenue</p>
-                      <p className="text-base font-bold text-green-600">{formatCurrency(prodSummary.revenue)}</p>
+                      <p className="text-xs text-gray-500 mb-0.5">Revenue</p>
+                      <p className="text-sm font-bold text-green-600">{formatCurrency(prodSummary.revenue)}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500">Units Sold</p>
-                      <p className="text-base font-bold text-blue-600">{prodSummary.units}</p>
+                      <p className="text-xs text-gray-500 mb-0.5">Units Sold</p>
+                      <p className="text-sm font-bold text-blue-600">{prodSummary.units}</p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500">Gross Profit</p>
-                      <p className={`text-base font-bold ${prodSummary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      <p className="text-xs text-gray-500 mb-0.5">Gross Profit</p>
+                      <p className={`text-sm font-bold ${prodSummary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {formatCurrency(prodSummary.grossProfit)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500">Net Profit</p>
-                      <p className={`text-base font-bold ${prodSummary.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <p className="text-xs text-gray-500 mb-0.5">Net Profit</p>
+                      <p className={`text-sm font-bold ${prodSummary.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(prodSummary.netProfit)}
                       </p>
                     </div>
                   </div>
                   <div className="border-t border-gray-100 pt-3 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">Delivery Expenses</span>
+                    <div>
+                      <span className="text-xs text-gray-500">Delivery: </span>
                       <span className="text-xs font-semibold text-gray-700">{formatCurrency(prodSummary.deliveryExp)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-500">Other Expenses</span>
+                    <div>
+                      <span className="text-xs text-gray-500">Other: </span>
                       <span className="text-xs font-semibold text-gray-700">{formatCurrency(prodSummary.otherExp)}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-gray-800">Total Expenses</span>
+                    <div>
+                      <span className="text-xs font-semibold text-gray-800">Total Expenses: </span>
                       <span className="text-xs font-bold text-red-600">{formatCurrency(prodSummary.totalExp)}</span>
                     </div>
                   </div>
