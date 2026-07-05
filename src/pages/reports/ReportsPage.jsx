@@ -594,16 +594,11 @@ export function ReportsPage() {
             {/* Orders by status */}
             <div className="bg-white rounded-2xl p-4 border border-gray-100">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by Status</h3>
-              <div className="space-y-2">
+              <div className="divide-y divide-gray-50">
                 {Object.entries(byStatus).sort(([, a], [, b]) => b - a).map(([status, count]) => (
-                  <div key={status} className="flex items-center justify-between gap-2">
-                    <span className="text-sm text-gray-700 capitalize w-36 truncate">{status.replace(/_/g, ' ')}</span>
-                    <div className="flex items-center gap-2 flex-1">
-                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${totalOrders ? (count / totalOrders) * 100 : 0}%` }} />
-                      </div>
-                      <span className="text-sm font-semibold text-gray-900 w-8 text-right">{count}</span>
-                    </div>
+                  <div key={status} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                    <span className="text-sm text-gray-700 capitalize">{status.replace(/_/g, ' ')}</span>
+                    <span className="text-sm font-bold text-gray-900">{count}</span>
                   </div>
                 ))}
                 {Object.keys(byStatus).length === 0 && <p className="text-sm text-gray-400">No orders</p>}
@@ -633,16 +628,14 @@ export function ReportsPage() {
           <>
             <div className="bg-white rounded-2xl p-4 border border-gray-100">
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by State</h3>
-              <div className="space-y-2">
-                {Object.entries(byState).sort(([, a], [, b]) => b - a).slice(0, 15).map(([state, count]) => (
-                  <div key={state} className="flex items-center justify-between gap-2">
-                    <span className="text-sm text-gray-700 w-32 truncate">{state}</span>
-                    <div className="flex items-center gap-2 flex-1">
-                      <div className="flex-1 h-1.5 bg-gray-100 rounded-full">
-                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${totalOrders ? (count / totalOrders) * 100 : 0}%` }} />
-                      </div>
-                      <span className="text-sm font-bold w-8 text-right">{count}</span>
+              <div className="divide-y divide-gray-50">
+                {Object.entries(byState).sort(([, a], [, b]) => b - a).slice(0, 15).map(([state, count], i) => (
+                  <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
+                      <span className="text-sm text-gray-700">{state}</span>
                     </div>
+                    <span className="text-sm font-bold text-gray-900">{count}</span>
                   </div>
                 ))}
                 {Object.keys(byState).length === 0 && <p className="text-sm text-gray-400">No data</p>}
@@ -773,30 +766,22 @@ export function ReportsPage() {
                   {productStats.length === 0 ? (
                     <p className="text-sm text-gray-400">No product data for this period</p>
                   ) : (
-                    <div className="space-y-3">
-                      {productStats.slice(0, 15).map((p, idx) => {
-                        const maxQty = productStats[0]?.qty || 1
-                        return (
-                          <div key={p.name}>
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <span className="text-xs text-gray-400 w-4">{idx + 1}</span>
-                                <p className="text-sm text-gray-900 truncate">{p.name}</p>
-                              </div>
-                              <div className="text-right shrink-0">
-                                <span className="text-sm font-bold text-gray-900">{p.qty} units</span>
-                                <span className="text-xs text-gray-400 ml-2">{p.orderCount} orders</span>
-                              </div>
+                    <div className="divide-y divide-gray-50">
+                      {productStats.slice(0, 15).map((p, idx) => (
+                        <div key={p.name} className="py-2.5 first:pt-0 last:pb-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-bold text-gray-300 w-5 shrink-0">{idx + 1}</span>
+                              <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-1.5 bg-gray-100 rounded-full">
-                                <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(p.qty / maxQty) * 100}%` }} />
-                              </div>
-                              <span className="text-xs text-gray-500 w-24 text-right">{formatCurrency(p.revenue)}</span>
-                            </div>
+                            <span className="text-sm font-bold text-gray-900 shrink-0">{p.qty} units</span>
                           </div>
-                        )
-                      })}
+                          <div className="flex justify-between mt-0.5 pl-7">
+                            <span className="text-xs text-gray-400">{p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
+                            <span className="text-xs font-semibold text-green-600">{formatCurrency(p.revenue)}</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -806,11 +791,17 @@ export function ReportsPage() {
                   <div className="bg-white rounded-2xl p-4 border border-gray-100">
                     <h3 className="text-sm font-semibold text-gray-900 mb-3">Slow / Low Sales</h3>
                     <p className="text-xs text-gray-400 mb-2">Products with fewer than 2 orders in this period</p>
-                    <div className="space-y-2">
+                    <div className="divide-y divide-gray-50">
                       {productStats.filter(p => p.orderCount < 2).map(p => (
-                        <div key={p.name} className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-                          <p className="text-sm text-gray-700 truncate flex-1">{p.name}</p>
-                          <span className="text-xs text-gray-400 shrink-0">{p.orderCount} order(s)</span>
+                        <div key={p.name} className="py-2.5 first:pt-0 last:pb-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm text-gray-700 truncate flex-1">{p.name}</p>
+                            <span className="text-sm font-bold text-gray-900 shrink-0">{p.qty} units</span>
+                          </div>
+                          <div className="flex justify-between mt-0.5">
+                            <span className="text-xs text-gray-400">{p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
+                            <span className="text-xs font-semibold text-green-600">{formatCurrency(p.revenue)}</span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -821,7 +812,7 @@ export function ReportsPage() {
                 {businesses && businesses.length > 1 && (
                   <div className="bg-white rounded-2xl p-4 border border-gray-100">
                     <h3 className="text-sm font-semibold text-gray-900 mb-3">Top Product by Business</h3>
-                    <div className="space-y-3">
+                    <div className="divide-y divide-gray-50">
                       {businesses.map(biz => {
                         const bizRevOrds = orders.filter(o => o.business_id === biz.id && REVENUE_STATUSES.includes(o.status))
                         const bpCounts = {}
@@ -833,14 +824,16 @@ export function ReportsPage() {
                         })
                         const top = Object.entries(bpCounts).sort(([, a], [, b]) => b - a)[0]
                         return (
-                          <div key={biz.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                            <span className="text-sm font-medium text-gray-700">{biz.name}</span>
-                            {top ? (
-                              <div className="text-right">
-                                <p className="text-sm text-gray-900 truncate max-w-40">{top[0]}</p>
-                                <p className="text-xs text-gray-400">{top[1]} orders</p>
-                              </div>
-                            ) : <span className="text-xs text-gray-400">No data</span>}
+                          <div key={biz.id} className="py-2.5 first:pt-0 last:pb-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-sm font-semibold text-gray-800">{biz.name}</span>
+                              {top
+                                ? <span className="text-sm font-bold text-gray-900 shrink-0">{top[1]} units</span>
+                                : <span className="text-xs text-gray-400">No data</span>}
+                            </div>
+                            {top && (
+                              <p className="text-xs text-gray-500 mt-0.5 truncate">{top[0]}</p>
+                            )}
                           </div>
                         )
                       })}
@@ -926,20 +919,12 @@ export function ReportsPage() {
                   </span>
                 </div>
                 {plStats.grossSales > 0 && (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-xs text-gray-400">Profit Margin</span>
-                      <span className={`text-sm font-bold ${plStats.margin >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {plStats.margin.toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="mt-2 h-2 bg-gray-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${plStats.margin >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                        style={{ width: `${Math.min(100, Math.abs(plStats.margin))}%` }}
-                      />
-                    </div>
-                  </>
+                  <div className="flex justify-between border-t border-gray-700 pt-2">
+                    <span className="text-xs text-gray-400">Profit Margin</span>
+                    <span className={`text-sm font-bold ${plStats.margin >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {plStats.margin.toFixed(1)}%
+                    </span>
+                  </div>
                 )}
               </div>
             </div>
