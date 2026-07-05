@@ -769,16 +769,13 @@ export function ReportsPage() {
                     <div className="divide-y divide-gray-50">
                       {productStats.slice(0, 15).map((p, idx) => (
                         <div key={p.name} className="py-2.5 first:pt-0 last:pb-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-xs font-bold text-gray-300 w-5 shrink-0">{idx + 1}</span>
-                              <p className="text-sm font-medium text-gray-900 truncate">{p.name}</p>
-                            </div>
-                            <span className="text-sm font-bold text-gray-900 shrink-0">{p.qty} units</span>
+                          <div className="flex items-start gap-2 mb-1">
+                            <span className="text-xs font-bold text-gray-300 w-5 shrink-0 pt-0.5">{idx + 1}</span>
+                            <p className="text-sm font-medium text-gray-900 leading-snug">{p.name}</p>
                           </div>
-                          <div className="flex justify-between mt-0.5 pl-7">
-                            <span className="text-xs text-gray-400">{p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
-                            <span className="text-xs font-semibold text-green-600">{formatCurrency(p.revenue)}</span>
+                          <div className="flex items-center justify-between pl-7">
+                            <span className="text-xs text-gray-400">{p.qty} unit{p.qty !== 1 ? 's' : ''} · {p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
+                            <span className="text-xs font-bold text-green-600">{formatCurrency(p.revenue)}</span>
                           </div>
                         </div>
                       ))}
@@ -794,12 +791,9 @@ export function ReportsPage() {
                     <div className="divide-y divide-gray-50">
                       {productStats.filter(p => p.orderCount < 2).map(p => (
                         <div key={p.name} className="py-2.5 first:pt-0 last:pb-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm text-gray-700 truncate flex-1">{p.name}</p>
-                            <span className="text-sm font-bold text-gray-900 shrink-0">{p.qty} units</span>
-                          </div>
-                          <div className="flex justify-between mt-0.5">
-                            <span className="text-xs text-gray-400">{p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
+                          <p className="text-sm text-gray-700 mb-1">{p.name}</p>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-400">{p.qty} unit{p.qty !== 1 ? 's' : ''} · {p.orderCount} order{p.orderCount !== 1 ? 's' : ''}</span>
                             <span className="text-xs font-semibold text-green-600">{formatCurrency(p.revenue)}</span>
                           </div>
                         </div>
