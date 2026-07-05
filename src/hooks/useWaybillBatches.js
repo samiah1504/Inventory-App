@@ -79,12 +79,32 @@ export function useCreateWaybillBatch() {
         })
       }
 
-      // Group orders into packing items by state + product
+      // Load order_items for all selected orders so multi-product orders are expanded
+      const { data: orderItemsRows } = await supabase
+        .from('order_items')
+        .select('order_id, product_name, quantity')
+        .in('order_id', selectedOrders)
+
+      // Build a map: order_id → items array
+      const itemsByOrder = {}
+      for (const row of orderItemsRows || []) {
+        if (!itemsByOrder[row.order_id]) itemsByOrder[row.order_id] = []
+        itemsByOrder[row.order_id].push(row)
+      }
+
+      // Group into packing items by state + product_name
       const grouped = {}
       for (const order of selectedOrderData) {
-        const key = `${order.state}||${order.product_name}`
-        if (!grouped[key]) grouped[key] = { state: order.state, product_name: order.product_name, quantity: 0 }
-        grouped[key].quantity += Number(order.quantity) || 1
+        const items = itemsByOrder[order.id]
+        const lineItems = (items && items.length > 0)
+          ? items
+          : [{ product_name: order.product_name, quantity: Number(order.quantity) || 1 }]
+
+        for (const li of lineItems) {
+          const key = `${order.state}||${li.product_name}`
+          if (!grouped[key]) grouped[key] = { state: order.state, product_name: li.product_name, quantity: 0 }
+          grouped[key].quantity += Number(li.quantity) || 1
+        }
       }
       for (const item of Object.values(grouped)) {
         await supabase.from('waybill_batch_packing_items').insert({ batch_id: batch.id, ...item })

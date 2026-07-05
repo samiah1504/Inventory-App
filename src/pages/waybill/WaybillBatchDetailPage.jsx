@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Package, DollarSign, Clock, ChevronRight, CheckCircle } from 'lucide-react'
 import { useWaybillBatch, useSaveBatchExpenses, useTogglePackingItem, useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
@@ -52,34 +52,42 @@ export function WaybillBatchDetailPage() {
   const [tab, setTab] = useState('orders')
   // { [state]: { destination_city, waybill_cost, ..., expense_notes } }
   const [stateExpenses, setStateExpenses] = useState({})
-  const [expensesLoaded, setExpensesLoaded] = useState(false)
+  // Track which states we've already initialised so user edits aren't overwritten on refetch
+  const initialisedStatesRef = useRef(new Set())
 
   const { data, isLoading, error } = useWaybillBatch(id)
   const saveBatchExpenses = useSaveBatchExpenses()
   const togglePackingItem = useTogglePackingItem()
   const advanceBatchStatus = useAdvanceBatchStatus()
 
-  // Once we have data, initialise per-state expense forms
+  // Initialise expense form state for each destination state as data arrives
   useEffect(() => {
-    if (!data || expensesLoaded) return
-    const destStates = [...new Set((data.orders || []).map(bo => bo.order?.state).filter(Boolean))].sort()
-    const init = {}
-    for (const state of destStates) {
-      const saved = (data.stateExpenses || []).find(e => e.state === state)
-      init[state] = saved ? {
-        destination_city: saved.destination_city || '',
-        waybill_cost: saved.waybill_cost || '',
-        packaging_cost: saved.packaging_cost || '',
-        loading_cost: saved.loading_cost || '',
-        transport_cost: saved.transport_cost || '',
-        dispatch_cost: saved.dispatch_cost || '',
-        other_cost: saved.other_cost || '',
-        expense_notes: saved.expense_notes || '',
-      } : emptyStateExpense()
-    }
-    setStateExpenses(init)
-    setExpensesLoaded(true)
-  }, [data, expensesLoaded])
+    if (!data?.orders?.length) return
+    const destStates = [...new Set(data.orders.map(bo => bo.order?.state).filter(Boolean))].sort()
+    if (destStates.length === 0) return
+
+    const newStates = destStates.filter(s => !initialisedStatesRef.current.has(s))
+    if (newStates.length === 0) return
+
+    setStateExpenses(prev => {
+      const next = { ...prev }
+      for (const state of newStates) {
+        const saved = (data.stateExpenses || []).find(e => e.state === state)
+        next[state] = saved ? {
+          destination_city: saved.destination_city || '',
+          waybill_cost: saved.waybill_cost || '',
+          packaging_cost: saved.packaging_cost || '',
+          loading_cost: saved.loading_cost || '',
+          transport_cost: saved.transport_cost || '',
+          dispatch_cost: saved.dispatch_cost || '',
+          other_cost: saved.other_cost || '',
+          expense_notes: saved.expense_notes || '',
+        } : emptyStateExpense()
+        initialisedStatesRef.current.add(state)
+      }
+      return next
+    })
+  }, [data])
 
   if (isLoading) return (
     <div className="flex flex-col h-full">
