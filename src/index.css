@@ -18,8 +18,8 @@
   box-sizing: border-box;
 }
 
-html {
-  overflow-x: hidden;
+html, body {
+  overflow-x: clip; /* clip — does NOT create a scroll container, safe for sticky */
   max-width: 100%;
 }
 
@@ -29,16 +29,12 @@ body {
   overscroll-behavior: none;
   -webkit-font-smoothing: antialiased;
   background: #ffffff;
-  overflow-x: hidden;
-  max-width: 100%;
 }
 
 #root {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
-  max-width: 100%;
 }
 
 .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
