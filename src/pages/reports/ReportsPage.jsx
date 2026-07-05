@@ -19,6 +19,8 @@ import { useBusinesses } from '../../hooks/useBusinesses'
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const REVENUE_STATUSES = ['paid', 'partially_paid']
+// Broader set for product-level breakdown: delivered counts as a completed sale
+const SOLD_STATUSES = ['delivered', 'paid', 'partially_paid']
 
 const REPORT_TABS = [
   { key: 'overview',  label: 'Overview' },
@@ -287,12 +289,12 @@ export function ReportsPage() {
     enabled: canQueryItems,
     queryFn: async () => {
       try {
-        const revenueOrders = (ordersReport.data || []).filter(o => REVENUE_STATUSES.includes(o.status))
-        const orderIds = revenueOrders.map(o => o.id).filter(Boolean)
+        const soldOrders = (ordersReport.data || []).filter(o => SOLD_STATUSES.includes(o.status))
+        const orderIds = soldOrders.map(o => o.id).filter(Boolean)
         if (orderIds.length === 0) return []
         const { data, error } = await supabase
           .from('order_items')
-          .select('order_id, product_name, quantity, total_amount')
+          .select('order_id, product_name, quantity, unit_price, total_amount')
           .in('order_id', orderIds)
         if (error) throw error
         return data || []
@@ -331,19 +333,19 @@ export function ReportsPage() {
   // ── Product analytics ─────────────────────────────────────────────────────
 
   const productStats = useMemo(() => {
-    const revenueOrders = orders.filter(o => REVENUE_STATUSES.includes(o.status))
-    return buildProductStats(revenueOrders, productsReport.data || [], expenses)
+    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status))
+    return buildProductStats(soldOrders, productsReport.data || [], expenses)
   }, [orders, productsReport.data, expenses])
 
   const stateFilteredProductStats = useMemo(() => {
     if (!productStateFilter) return productStats
-    const revenueOrders = orders.filter(o => REVENUE_STATUSES.includes(o.status) && o.state === productStateFilter)
-    return buildProductStats(revenueOrders, productsReport.data || [], expenses)
+    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status) && o.state === productStateFilter)
+    return buildProductStats(soldOrders, productsReport.data || [], expenses)
   }, [orders, productsReport.data, expenses, productStateFilter, productStats])
 
   const productAvailableStates = useMemo(() =>
     Array.from(new Set(
-      orders.filter(o => REVENUE_STATUSES.includes(o.status) && o.state).map(o => o.state)
+      orders.filter(o => SOLD_STATUSES.includes(o.status) && o.state).map(o => o.state)
     )).sort()
   , [orders])
 
