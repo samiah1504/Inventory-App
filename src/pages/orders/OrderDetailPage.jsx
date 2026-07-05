@@ -290,11 +290,35 @@ export function OrderDetailPage() {
           <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-2">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Order Details</h3>
             <Row label="Business" value={order.business?.name} />
-            <Row label="Product" value={order.product_name} />
-            {order.color && <Row label="Color" value={order.color} />}
-            {order.size && <Row label="Size" value={order.size} />}
-            <Row label="Quantity" value={order.quantity} />
-            <Row label="Unit Price" value={formatCurrency(order.unit_price)} />
+
+            {/* Multi-item display */}
+            {order.items && order.items.length > 1 ? (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">{order.items.length} products</p>
+                {order.items.map((item, idx) => (
+                  <div key={item.id} className="bg-gray-50 rounded-xl p-3 space-y-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900">{item.product_name}</p>
+                      <p className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(item.total_amount)}</p>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      {item.quantity} × {formatCurrency(item.unit_price)}
+                      {item.color ? ` · ${item.color}` : ''}
+                      {item.size ? ` · ${item.size}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <>
+                <Row label="Product" value={order.product_name} />
+                {order.color && <Row label="Color" value={order.color} />}
+                {order.size && <Row label="Size" value={order.size} />}
+                <Row label="Quantity" value={order.quantity} />
+                <Row label="Unit Price" value={formatCurrency(order.unit_price)} />
+              </>
+            )}
+
             <div className="border-t border-gray-100 pt-2">
               <Row label="Total Amount" value={formatCurrency(order.total_amount)} highlight />
             </div>

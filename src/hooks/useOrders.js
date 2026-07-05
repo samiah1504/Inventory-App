@@ -56,7 +56,8 @@ export function useOrder(id) {
           created_by_staff:staff_users!orders_created_by_fkey(id, name, staff_code),
           timeline:order_timeline(*, staff:staff_users(name)),
           notes:order_notes(*, staff:staff_users(name)),
-          expenses:expenses(*)
+          expenses:expenses(*),
+          items:order_items(id, product_id, product_name, quantity, unit_price, total_amount, color, size)
         `)
         .eq('id', id)
         .single()
@@ -74,11 +75,13 @@ export function useCreateOrder() {
 
   return useMutation({
     mutationFn: async (orderData) => {
+      const { items, ...orderFields } = orderData
+
       // Get next order number
       const year = new Date().getFullYear()
       const { data: counter } = await supabase.rpc('get_next_counter', {
         counter_type: 'order',
-        business_id_param: orderData.business_id,
+        business_id_param: orderFields.business_id,
         year_param: year
       })
       const orderNumber = `ORD-${year}-${String(counter || 1).padStart(5, '0')}`
@@ -87,14 +90,14 @@ export function useCreateOrder() {
       const { data: customer } = await supabase
         .from('customers')
         .upsert({
-          name: orderData.customer_name,
-          phone: orderData.customer_phone,
+          name: orderFields.customer_name,
+          phone: orderFields.customer_phone,
         }, { onConflict: 'phone', ignoreDuplicates: false })
         .select()
         .single()
 
       const payload = {
-        ...orderData,
+        ...orderFields,
         order_number: orderNumber,
         customer_id: customer?.id,
         staff_code: user?.staff_code,
@@ -104,6 +107,13 @@ export function useCreateOrder() {
 
       const { data, error } = await supabase.from('orders').insert(payload).select().single()
       if (error) throw error
+
+      // Insert order items if provided
+      if (items && items.length > 0) {
+        for (const item of items) {
+          await supabase.from('order_items').insert({ order_id: data.id, ...item })
+        }
+      }
 
       // Timeline entry
       await supabase.from('order_timeline').insert({

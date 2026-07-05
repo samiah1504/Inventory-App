@@ -88,6 +88,20 @@ ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS staff_code TEXT;
 -- Add short_code to businesses if missing
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS short_code TEXT;
 
+-- Order items table for multi-product orders
+CREATE TABLE IF NOT EXISTS order_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
+  product_id UUID REFERENCES products(id),
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  unit_price DECIMAL(15,2) NOT NULL DEFAULT 0,
+  total_amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+  color TEXT,
+  size TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Index for order searches
 CREATE INDEX IF NOT EXISTS idx_orders_planned_delivery ON orders(planned_delivery_date);
 CREATE INDEX IF NOT EXISTS idx_orders_created_by ON orders(created_by);
