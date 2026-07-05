@@ -130,7 +130,7 @@ export function ReportsPage() {
       try {
         let q = supabase
           .from('orders')
-          .select('id, order_number, customer_name, customer_phone, status, state, source, product_name, total_amount, amount_paid, balance_amount, created_by, created_at, business_id')
+          .select('id, order_number, customer_name, customer_phone, status, state, source, product_name, quantity, total_amount, amount_paid, balance_amount, created_by, created_at, business_id, items_data')
           .gte('created_at', `${dateFrom}T00:00:00`)
           .lte('created_at', `${dateTo}T23:59:59`)
           .order('created_at', { ascending: false })
@@ -266,34 +266,35 @@ export function ReportsPage() {
 
   const productStats = useMemo(() => {
     const revenueOrders = orders.filter(o => REVENUE_STATUSES.includes(o.status))
-    const items = productsReport.data || []
+    const orderItemRows = productsReport.data || []
 
-    if (items.length > 0) {
-      const byProduct = {}
-      items.forEach(item => {
-        const name = item.product_name || 'Unknown'
-        if (!byProduct[name]) byProduct[name] = { qty: 0, revenue: 0, orderIds: new Set() }
-        byProduct[name].qty += Number(item.quantity || 1)
-        byProduct[name].revenue += Number(item.total_amount || 0)
-        byProduct[name].orderIds.add(item.order_id)
-      })
-      return Object.entries(byProduct)
-        .map(([name, s]) => ({ name, qty: s.qty, revenue: s.revenue, orderCount: s.orderIds.size }))
-        .sort((a, b) => b.qty - a.qty)
+    const byProduct = {}
+    const addItem = (name, qty, revenue, orderId) => {
+      const key = (name || 'Unknown').trim()
+      if (!byProduct[key]) byProduct[key] = { qty: 0, revenue: 0, orderIds: new Set() }
+      byProduct[key].qty += Number(qty) || 1
+      byProduct[key].revenue += Number(revenue) || 0
+      if (orderId) byProduct[key].orderIds.add(orderId)
     }
 
-    // Fallback: use orders.product_name
-    const byProduct = {}
+    // Step 1: from order_items table
+    const coveredByTable = new Set(orderItemRows.map(i => i.order_id))
+    orderItemRows.forEach(item => addItem(item.product_name, item.quantity, item.total_amount, item.order_id))
+
+    // Step 2: for orders not in order_items, expand items_data JSONB or fall back to product_name
     revenueOrders.forEach(o => {
-      if (o.product_name) {
-        if (!byProduct[o.product_name]) byProduct[o.product_name] = { qty: 0, revenue: 0, orderCount: 0 }
-        byProduct[o.product_name].qty += 1
-        byProduct[o.product_name].revenue += Number(o.total_amount || 0)
-        byProduct[o.product_name].orderCount++
+      if (coveredByTable.has(o.id)) return
+      const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+      if (fromJson) {
+        const perItem = Number(o.total_amount || 0) / fromJson.reduce((s, i) => s + (Number(i.quantity) || 1), 0)
+        fromJson.forEach(item => addItem(item.product_name, item.quantity, perItem * (Number(item.quantity) || 1), o.id))
+      } else if (o.product_name && !o.product_name.includes('+')) {
+        addItem(o.product_name, o.quantity || 1, o.total_amount, o.id)
       }
     })
+
     return Object.entries(byProduct)
-      .map(([name, s]) => ({ name, ...s }))
+      .map(([name, s]) => ({ name, qty: s.qty, revenue: s.revenue, orderCount: s.orderIds.size }))
       .sort((a, b) => b.qty - a.qty)
   }, [orders, productsReport.data])
 
@@ -339,7 +340,12 @@ export function ReportsPage() {
       const delivRate = delivBase > 0 ? (delivered / delivBase) * 100 : 0
 
       const pCounts = {}
-      revOrds.forEach(o => { if (o.product_name) pCounts[o.product_name] = (pCounts[o.product_name] || 0) + 1 })
+      const addP = (name, qty) => { if (name && !name.includes('+')) pCounts[name.trim()] = (pCounts[name.trim()] || 0) + (Number(qty) || 1) }
+      revOrds.forEach(o => {
+        const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+        if (fromJson) fromJson.forEach(i => addP(i.product_name, i.quantity))
+        else addP(o.product_name, o.quantity || 1)
+      })
       const topProduct = Object.entries(pCounts).sort(([, a], [, b]) => b - a)[0]
 
       return {
@@ -788,7 +794,12 @@ export function ReportsPage() {
                       {businesses.map(biz => {
                         const bizRevOrds = orders.filter(o => o.business_id === biz.id && REVENUE_STATUSES.includes(o.status))
                         const bpCounts = {}
-                        bizRevOrds.forEach(o => { if (o.product_name) bpCounts[o.product_name] = (bpCounts[o.product_name] || 0) + 1 })
+                        const addBP = (name, qty) => { if (name && !name.includes('+')) bpCounts[name.trim()] = (bpCounts[name.trim()] || 0) + (Number(qty) || 1) }
+                        bizRevOrds.forEach(o => {
+                          const fj = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+                          if (fj) fj.forEach(i => addBP(i.product_name, i.quantity))
+                          else addBP(o.product_name, o.quantity || 1)
+                        })
                         const top = Object.entries(bpCounts).sort(([, a], [, b]) => b - a)[0]
                         return (
                           <div key={biz.id} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
