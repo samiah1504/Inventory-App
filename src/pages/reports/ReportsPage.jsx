@@ -599,7 +599,7 @@ export function ReportsPage() {
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
         title="Reports"
         back={false}
@@ -634,7 +634,7 @@ export function ReportsPage() {
       />
 
       {/* ── Filters ── */}
-      <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 sticky top-[57px] z-20">
+      <div className="bg-white border-b border-gray-100 px-4 py-3 space-y-2 sticky top-[57px] z-20 w-full overflow-x-hidden">
         {/* Period presets */}
         <div className="flex gap-2 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
           {[
