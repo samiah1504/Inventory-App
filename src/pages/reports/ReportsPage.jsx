@@ -676,7 +676,7 @@ export function ReportsPage() {
       </div>
 
       {/* ── Tab content ── */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 
         {/* OVERVIEW */}
         {tab === 'overview' && (
@@ -765,11 +765,9 @@ export function ReportsPage() {
               <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by State</h3>
               <div className="divide-y divide-gray-50">
                 {Object.entries(byState).sort(([, a], [, b]) => b - a).map(([state, count], i) => (
-                  <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
-                      <span className="text-sm text-gray-700">{state}</span>
-                    </div>
+                  <div key={state} className="flex items-center gap-2 py-2.5 first:pt-0 last:pb-0">
+                    <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
+                    <span className="text-sm text-gray-700 flex-1 min-w-0 truncate">{state}</span>
                     <span className="text-sm font-bold text-gray-900 shrink-0">{count}</span>
                   </div>
                 ))}
@@ -802,12 +800,10 @@ export function ReportsPage() {
                   <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue by State</h3>
                   <div className="divide-y divide-gray-50">
                     {entries.slice(0, 10).map(([state, amt], i) => (
-                      <div key={state} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-gray-300 w-4">{i + 1}</span>
-                          <span className="text-sm text-gray-800">{state}</span>
-                        </div>
-                        <span className="text-sm font-bold text-gray-900">{formatCurrency(amt)}</span>
+                      <div key={state} className="flex items-center gap-2 py-2.5 first:pt-0 last:pb-0">
+                        <span className="text-xs font-bold text-gray-300 w-4 shrink-0">{i + 1}</span>
+                        <span className="text-sm text-gray-800 flex-1 min-w-0 truncate">{state}</span>
+                        <span className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(amt)}</span>
                       </div>
                     ))}
                   </div>
@@ -857,12 +853,12 @@ export function ReportsPage() {
               ) : (
                 <div className="space-y-2">
                   {outstandingOrders.map(o => (
-                    <div key={o.order_number} className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-                      <div>
-                        <p className="text-xs font-mono text-gray-400">{o.order_number}</p>
-                        <p className="text-sm text-gray-700">{o.customer_name}</p>
+                    <div key={o.order_number} className="flex gap-2 py-1.5 border-b border-gray-50 last:border-0">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-mono text-gray-400 truncate">{o.order_number}</p>
+                        <p className="text-sm text-gray-700 truncate">{o.customer_name}</p>
                       </div>
-                      <p className="text-sm font-bold text-amber-600">{formatCurrency(o.balance_amount)}</p>
+                      <p className="text-sm font-bold text-amber-600 shrink-0">{formatCurrency(o.balance_amount)}</p>
                     </div>
                   ))}
                 </div>
