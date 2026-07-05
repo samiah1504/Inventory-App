@@ -65,7 +65,10 @@ export function OrderDetailPage() {
     </div>
   )
 
-  const allowedTransitions = STATUS_TRANSITIONS[user?.role] || []
+  const roleTransitions = STATUS_TRANSITIONS[user?.role] || []
+  const allowedTransitions = order.status === 'paid'
+    ? roleTransitions.filter(s => s === 'returned')
+    : roleTransitions
   const canChangeStatus = allowedTransitions.length > 0
   const canViewDocs = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
   const canEdit = order.status === 'new' && (
