@@ -50,7 +50,7 @@ export function WaybillPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('waybill_batches')
-        .select('*, items:waybill_batch_orders(count), warehouse:warehouses(name, state)')
+        .select('*, items:waybill_batch_orders(count)')
         .order('created_at', { ascending: false })
         .limit(50)
       if (error) throw error
@@ -229,7 +229,7 @@ export function WaybillPage() {
                      <ChevronRight size={16} className="text-gray-300 mt-0.5" />
                    </div>
                    <p className="text-sm font-medium text-gray-900">{batch.courier_company}</p>
-                   <p className="text-xs text-gray-500">{batch.warehouse?.name || batch.destination_state}{batch.tracking_number ? ` · ${batch.tracking_number}` : ''}</p>
+                   <p className="text-xs text-gray-500">{batch.destination_state || '—'}{batch.tracking_number ? ` · ${batch.tracking_number}` : ''}</p>
                    <p className="text-xs text-gray-400 mt-0.5">{formatDate(batch.created_at)}</p>
                  </button>
                )
