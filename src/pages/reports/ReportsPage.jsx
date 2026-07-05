@@ -729,34 +729,34 @@ export function ReportsPage() {
             <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-3">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Period Summary</p>
 
-              {/* Total orders — prominent */}
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-gray-600">Total Orders</span>
-                <span className="text-2xl font-bold text-gray-900">{totalOrders}</span>
+              {/* Total orders — full-width stat card, no justify-between */}
+              <div className="bg-gray-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-gray-500 mb-1">Total Orders</p>
+                <p className="text-3xl font-bold text-gray-900">{totalOrders}</p>
               </div>
 
-              {/* Status grid */}
-              <div className="grid grid-cols-2 gap-2 border-t border-gray-100 pt-3">
+              {/* Status grid — label above value, no horizontal stretching */}
+              <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'Delivered',  key: 'delivered',       color: 'text-green-600'  },
+                  { label: 'Delivered',  key: 'delivered',       color: 'text-green-600'   },
                   { label: 'Paid',       key: 'paid',            color: 'text-emerald-600' },
-                  { label: 'Failed',     key: 'failed_delivery', color: 'text-red-500'    },
-                  { label: 'Returned',   key: 'returned',        color: 'text-orange-500' },
-                  { label: 'Cancelled',  key: 'cancelled',       color: 'text-gray-400'   },
+                  { label: 'Failed',     key: 'failed_delivery', color: 'text-red-500'     },
+                  { label: 'Returned',   key: 'returned',        color: 'text-orange-500'  },
+                  { label: 'Cancelled',  key: 'cancelled',       color: 'text-gray-400'    },
                 ].map(({ label, key, color }) => (
-                  <div key={key} className="bg-gray-50 rounded-xl px-3 py-2.5">
-                    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
-                    <p className={`text-base font-bold ${color}`}>{byStatus[key] || 0}</p>
+                  <div key={key} className="bg-gray-50 rounded-xl px-2 py-2">
+                    <p className="text-xs text-gray-500 mb-0.5 truncate">{label}</p>
+                    <p className={`text-lg font-bold ${color}`}>{byStatus[key] || 0}</p>
                   </div>
                 ))}
               </div>
 
-              {/* Paid order rate */}
-              <div className="flex items-center justify-between bg-blue-50 rounded-xl px-3 py-2.5">
-                <span className="text-xs font-semibold text-blue-700">Paid Order Rate</span>
-                <span className="text-base font-bold text-blue-700">
+              {/* Paid order rate — full-width card, label above value */}
+              <div className="bg-blue-50 rounded-xl px-4 py-3">
+                <p className="text-xs text-blue-600 mb-1">Paid Order Rate</p>
+                <p className="text-2xl font-bold text-blue-700">
                   {totalOrders > 0 ? (((byStatus['paid'] || 0) / totalOrders) * 100).toFixed(1) : '0.0'}%
-                </span>
+                </p>
               </div>
             </div>
 
