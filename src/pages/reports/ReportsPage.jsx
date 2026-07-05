@@ -47,37 +47,52 @@ function buildProductStats(revenueOrders, orderItemRows, allExpenses) {
   const addItem = (name, qty, revenue, orderId) => {
     const key = (name || 'Unknown').trim()
     if (!byProduct[key]) byProduct[key] = { qty: 0, revenue: 0, orderIds: new Set() }
-    byProduct[key].qty += Number(qty) || 1
+    byProduct[key].qty     += Number(qty) || 1
     byProduct[key].revenue += Number(revenue) || 0
     if (orderId) byProduct[key].orderIds.add(orderId)
   }
 
-  const revOrderIds = new Set(revenueOrders.map(o => o.id))
-  const validItems = orderItemRows.filter(item => revOrderIds.has(item.order_id))
-  const coveredByTable = new Set(validItems.map(i => i.order_id))
-  validItems.forEach(item => addItem(item.product_name, item.quantity, item.total_amount, item.order_id))
-
+  // Priority 1 — items_data JSONB: always complete, stores correct per-item price
+  const coveredByJson = new Set()
   revenueOrders.forEach(o => {
-    if (coveredByTable.has(o.id)) return
     const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
-    if (fromJson) {
-      const perItem = Number(o.total_amount || 0) / fromJson.reduce((s, i) => s + (Number(i.quantity) || 1), 0)
-      fromJson.forEach(item => addItem(item.product_name, item.quantity, perItem * (Number(item.quantity) || 1), o.id))
-    } else if (o.product_name && !o.product_name.includes('+')) {
-      addItem(o.product_name, o.quantity || 1, o.total_amount, o.id)
+    if (!fromJson) return
+    coveredByJson.add(o.id)
+    fromJson.forEach(item => {
+      const name = (item.product_name || item.name || 'Unknown').trim()
+      const rev  = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
+      addItem(name, item.quantity, rev, o.id)
+    })
+  })
+
+  // Priority 2 — order_items table: only for orders that have no items_data
+  const revOrderIds  = new Set(revenueOrders.map(o => o.id))
+  const validItems   = orderItemRows.filter(i => revOrderIds.has(i.order_id) && !coveredByJson.has(i.order_id))
+  const coveredByTbl = new Set(validItems.map(i => i.order_id))
+  validItems.forEach(item => {
+    const name = (item.product_name || item.name || 'Unknown').trim()
+    const rev  = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
+    addItem(name, item.quantity, rev, item.order_id)
+  })
+
+  // Priority 3 — product_name string: last resort for single-product orders only
+  revenueOrders.forEach(o => {
+    if (coveredByJson.has(o.id) || coveredByTbl.has(o.id)) return
+    if (o.product_name && !o.product_name.includes('+')) {
+      addItem(o.product_name.trim(), o.quantity || 1, o.total_amount, o.id)
     }
   })
 
-  const totalRevenue = Object.values(byProduct).reduce((s, p) => s + p.revenue, 0)
+  const totalRevenue    = Object.values(byProduct).reduce((s, p) => s + p.revenue, 0)
   const deliveryExpTotal = allExpenses
     .filter(e => DELIVERY_EXP_TYPES.some(t => (e.expense_type || '').toLowerCase().includes(t)))
     .reduce((s, e) => s + Number(e.amount || 0), 0)
-  const otherExpTotal = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0) - deliveryExpTotal
+  const otherExpTotal   = allExpenses.reduce((s, e) => s + Number(e.amount || 0), 0) - deliveryExpTotal
 
   return Object.entries(byProduct).map(([name, s]) => {
-    const share = totalRevenue > 0 ? s.revenue / totalRevenue : 0
+    const share          = totalRevenue > 0 ? s.revenue / totalRevenue : 0
     const deliveryExpenses = deliveryExpTotal * share
-    const otherExpenses    = otherExpTotal * share
+    const otherExpenses    = otherExpTotal    * share
     const totalExpenses    = deliveryExpenses + otherExpenses
     const grossProfit      = s.revenue - deliveryExpenses
     const netProfit        = s.revenue - totalExpenses
@@ -413,7 +428,7 @@ export function ReportsPage() {
       const addP = (name, qty) => { if (name && !name.includes('+')) pCounts[name.trim()] = (pCounts[name.trim()] || 0) + (Number(qty) || 1) }
       revOrds.forEach(o => {
         const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
-        if (fromJson) fromJson.forEach(i => addP(i.product_name, i.quantity))
+        if (fromJson) fromJson.forEach(i => addP(i.product_name || i.name, i.quantity))
         else addP(o.product_name, o.quantity || 1)
       })
       const topProduct = Object.entries(pCounts).sort(([, a], [, b]) => b - a)[0]
@@ -781,7 +796,7 @@ export function ReportsPage() {
                 const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
                 if (fromJson) {
                   fromJson.forEach(item => {
-                    const name = (item.product_name || 'Unknown').trim()
+                    const name = (item.product_name || item.name || 'Unknown').trim()
                     const rev = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
                     byProductRev[name] = (byProductRev[name] || 0) + rev
                   })
