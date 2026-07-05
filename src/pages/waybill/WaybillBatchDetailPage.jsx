@@ -158,8 +158,8 @@ export function WaybillBatchDetailPage() {
           <span className="text-xs text-gray-400">{formatDate(batch.created_at)}</span>
         </div>
         <p className="text-base font-semibold text-white mt-1">{batch.courier_company || 'No courier'}</p>
-        {batch.source_warehouse && (
-          <p className="text-xs text-gray-400">From: {batch.source_warehouse.name} — {batch.source_warehouse.state}</p>
+        {(batch.source_state || batch.source_warehouse_id) && (
+          <p className="text-xs text-gray-400">From: {batch.source_state || 'warehouse'}</p>
         )}
         <p className="text-xs text-gray-400">
           To: {[...new Set(orders.map(bo => bo.order?.state).filter(Boolean))].sort().join(', ') || batch.destination_state || '—'}

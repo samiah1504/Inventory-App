@@ -7,10 +7,8 @@ export function useWaybillBatch(id) {
     queryKey: ['waybill_batch', id],
     enabled: !!id,
     queryFn: async () => {
-      const [batchR, batchOrdersR, packingR, timelineR, stateExpensesR] = await Promise.all([
-        supabase.from('waybill_batches')
-          .select('*, source_warehouse:warehouses!waybill_batches_source_warehouse_id_fkey(id, name, state, city)')
-          .eq('id', id).single(),
+      const [batchR, batchOrdersR, packingR, timelineR] = await Promise.all([
+        supabase.from('waybill_batches').select('*').eq('id', id).single(),
         supabase.from('waybill_batch_orders')
           .select('*, order:orders(id, order_number, customer_name, state, product_name, quantity, total_amount, status, customer_phone, address, city)')
           .eq('batch_id', id),
@@ -18,16 +16,23 @@ export function useWaybillBatch(id) {
           .select('*').eq('batch_id', id).order('state').order('product_name'),
         supabase.from('waybill_batch_timeline')
           .select('*').eq('batch_id', id).order('created_at', { ascending: true }),
-        supabase.from('waybill_batch_state_expenses')
-          .select('*').eq('batch_id', id).order('state'),
       ])
       if (batchR.error) throw batchR.error
+
+      // Load separately — table may not exist if migration hasn't been run
+      let stateExpenses = []
+      try {
+        const { data } = await supabase.from('waybill_batch_state_expenses')
+          .select('*').eq('batch_id', id).order('state')
+        stateExpenses = data || []
+      } catch { stateExpenses = [] }
+
       return {
         batch: batchR.data,
         orders: batchOrdersR.data || [],
         packingItems: packingR.data || [],
         timeline: timelineR.data || [],
-        stateExpenses: stateExpensesR.data || [],
+        stateExpenses,
       }
     },
     staleTime: 15000,
@@ -49,20 +54,23 @@ export function useCreateWaybillBatch() {
       const selectedOrderData = (awaitingOrders || []).filter(o => selectedOrders.includes(o.id))
       const destinationStates = [...new Set(selectedOrderData.map(o => o.state).filter(Boolean))].sort()
 
-      const { data: batch, error } = await supabase.from('waybill_batches').insert({
+      const batchPayload = {
         courier_company: form.courier_company,
         waybill_type: form.waybill_type,
         tracking_number: form.tracking_number,
         date_shipped: form.date_shipped,
         notes: form.notes,
-        source_warehouse_id: form.source_warehouse_id || null,
         destination_state: destinationStates.join(', '),
         batch_number: batchNumber,
         total_cost: 0,
         status: 'created',
         business_id: selectedOrderData[0]?.business_id || null,
         created_by: user?.id,
-      }).select().single()
+      }
+      // Only include source_warehouse_id if column exists (migration may not be run yet)
+      if (form.source_warehouse_id) batchPayload.source_warehouse_id = form.source_warehouse_id
+
+      const { data: batch, error } = await supabase.from('waybill_batches').insert(batchPayload).select().single()
       if (error) throw error
 
       for (const orderId of selectedOrders) {
