@@ -252,20 +252,20 @@ export function AccountingPage() {
                       <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{biz.short_code}</span>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div>
-                      <p className="text-xs text-gray-400">Sales</p>
-                      <p className="text-sm font-bold text-green-600">{formatCurrency(biz.sales)}</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Sales</span>
+                      <span className="text-sm font-bold text-green-600">{formatCurrency(biz.sales)}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Expenses</p>
-                      <p className="text-sm font-bold text-red-500">{formatCurrency(biz.expenses)}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Expenses</span>
+                      <span className="text-sm font-bold text-red-500">{formatCurrency(biz.expenses)}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Profit</p>
-                      <p className={`text-sm font-bold ${biz.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-1.5">
+                      <span className="text-xs font-semibold text-gray-700">Profit</span>
+                      <span className={`text-sm font-bold ${biz.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(biz.profit)}
-                      </p>
+                      </span>
                     </div>
                   </div>
                 </div>

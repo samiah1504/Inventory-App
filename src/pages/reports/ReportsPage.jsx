@@ -944,16 +944,16 @@ export function ReportsPage() {
                 </div>
 
                 {/* Order counts */}
-                <div className="grid grid-cols-4 gap-2 mb-3">
+                <div className="grid grid-cols-2 gap-2 mb-3">
                   {[
-                    { label: 'Total',     value: biz.totalOrders, color: 'text-gray-900' },
-                    { label: 'Delivered', value: biz.delivered,   color: 'text-green-600' },
-                    { label: 'Failed',    value: biz.failed,      color: 'text-red-500' },
-                    { label: 'Cancelled', value: biz.cancelled,   color: 'text-gray-400' },
+                    { label: 'Total Orders', value: biz.totalOrders, color: 'text-gray-900' },
+                    { label: 'Delivered',    value: biz.delivered,   color: 'text-green-600' },
+                    { label: 'Failed',       value: biz.failed,      color: 'text-red-500' },
+                    { label: 'Cancelled',    value: biz.cancelled,   color: 'text-gray-400' },
                   ].map(({ label, value, color }) => (
-                    <div key={label} className="text-center p-2 bg-gray-50 rounded-xl">
-                      <p className={`text-lg font-bold ${color}`}>{value}</p>
+                    <div key={label} className="flex items-center justify-between px-3 py-2 bg-gray-50 rounded-xl">
                       <p className="text-xs text-gray-500">{label}</p>
+                      <p className={`text-base font-bold ${color}`}>{value}</p>
                     </div>
                   ))}
                 </div>

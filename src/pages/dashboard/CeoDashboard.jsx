@@ -232,28 +232,27 @@ export function CeoDashboard() {
         <h1 className="text-2xl font-bold mt-0.5">{user?.name}</h1>
         <p className="text-gray-400 text-sm mt-0.5">{formatDate(new Date().toISOString())}</p>
 
-        {/* Three inline stats */}
-        <div className="mt-4 grid grid-cols-3 bg-gray-800 rounded-2xl overflow-hidden divide-x divide-gray-700">
-          <div className="p-3 text-center">
-            <p className="text-xs text-gray-400 mb-0.5">Orders</p>
-            <p className="text-xl font-bold text-white">
+        {/* Today stats */}
+        <div className="mt-4 bg-gray-800 rounded-2xl p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-400">Orders Today</span>
+            <span className="text-2xl font-bold text-white">
               {todayOrdersQ.isLoading ? '—' : todayOrders.length}
-            </p>
-            <p className="text-xs text-gray-500">Today</p>
+            </span>
           </div>
-          <div className="p-3 text-center">
-            <p className="text-xs text-gray-400 mb-0.5">Sales</p>
-            <p className="text-sm font-bold text-green-400">
-              {todayOrdersQ.isLoading ? '—' : formatCurrency(salesToday)}
-            </p>
-            <p className="text-xs text-gray-500">Today</p>
-          </div>
-          <div className="p-3 text-center">
-            <p className="text-xs text-gray-400 mb-0.5">Profit</p>
-            <p className={`text-sm font-bold ${profitToday >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {(todayOrdersQ.isLoading || expensesTodayQ.isLoading) ? '—' : formatCurrency(profitToday)}
-            </p>
-            <p className="text-xs text-gray-500">Today</p>
+          <div className="grid grid-cols-2 gap-3 border-t border-gray-700 pt-3">
+            <div>
+              <p className="text-xs text-gray-400 mb-0.5">Sales Today</p>
+              <p className="text-sm font-bold text-green-400">
+                {todayOrdersQ.isLoading ? '—' : formatCurrency(salesToday)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 mb-0.5">Profit Today</p>
+              <p className={`text-sm font-bold ${profitToday >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {(todayOrdersQ.isLoading || expensesTodayQ.isLoading) ? '—' : formatCurrency(profitToday)}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -270,22 +269,22 @@ export function CeoDashboard() {
             </span>
           </div>
           {monthOrdersQ.isLoading ? (
-            <div className="h-12 bg-gray-50 rounded-xl animate-pulse" />
+            <div className="h-20 bg-gray-50 rounded-xl animate-pulse" />
           ) : (
-            <div className="grid grid-cols-3 divide-x divide-gray-100">
-              <div className="text-center pr-2">
-                <p className="text-xs text-gray-500 mb-1">Orders</p>
-                <p className="text-2xl font-bold text-gray-900">{monthOrders.length}</p>
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Orders</span>
+                <span className="text-2xl font-bold text-gray-900">{monthOrders.length}</span>
               </div>
-              <div className="text-center px-2">
-                <p className="text-xs text-gray-500 mb-1">Sales</p>
-                <p className="text-base font-bold text-green-600 leading-tight">{formatCurrency(salesMonth)}</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-gray-500">Sales</span>
+                <span className="text-base font-bold text-green-600">{formatCurrency(salesMonth)}</span>
               </div>
-              <div className="text-center pl-2">
-                <p className="text-xs text-gray-500 mb-1">Profit</p>
-                <p className={`text-base font-bold leading-tight ${profitMonth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div className="flex items-center justify-between border-t border-gray-100 pt-2">
+                <span className="text-xs font-semibold text-gray-700">Net Profit</span>
+                <span className={`text-base font-bold ${profitMonth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatCurrency(profitMonth)}
-                </p>
+                </span>
               </div>
             </div>
           )}
@@ -353,24 +352,24 @@ export function CeoDashboard() {
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-4 gap-1 text-center">
-                    <div>
-                      <p className="text-xs text-gray-400">Orders</p>
-                      <p className="text-sm font-bold text-gray-900">{biz.orders}</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Orders</span>
+                      <span className="text-sm font-bold text-gray-900">{biz.orders}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Sales</p>
-                      <p className="text-xs font-bold text-green-600">{formatCurrency(biz.sales)}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Sales</span>
+                      <span className="text-sm font-bold text-green-600">{formatCurrency(biz.sales)}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Expenses</p>
-                      <p className="text-xs font-bold text-red-500">{formatCurrency(biz.expenses)}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Expenses</span>
+                      <span className="text-sm font-bold text-red-500">{formatCurrency(biz.expenses)}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Profit</p>
-                      <p className={`text-xs font-bold ${biz.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-1.5">
+                      <span className="text-xs font-semibold text-gray-700">Profit</span>
+                      <span className={`text-sm font-bold ${biz.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(biz.profit)}
-                      </p>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -382,24 +381,24 @@ export function CeoDashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-semibold text-gray-600">Combined Total</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-1 text-center">
-                    <div>
-                      <p className="text-xs text-gray-400">Orders</p>
-                      <p className="text-sm font-bold text-gray-900">{businessPerf.reduce((s, b) => s + b.orders, 0)}</p>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Orders</span>
+                      <span className="text-sm font-bold text-gray-900">{businessPerf.reduce((s, b) => s + b.orders, 0)}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Sales</p>
-                      <p className="text-xs font-bold text-green-600">{formatCurrency(businessPerf.reduce((s, b) => s + b.sales, 0))}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Sales</span>
+                      <span className="text-sm font-bold text-green-600">{formatCurrency(businessPerf.reduce((s, b) => s + b.sales, 0))}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Expenses</p>
-                      <p className="text-xs font-bold text-red-500">{formatCurrency(businessPerf.reduce((s, b) => s + b.expenses, 0))}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-gray-400">Expenses</span>
+                      <span className="text-sm font-bold text-red-500">{formatCurrency(businessPerf.reduce((s, b) => s + b.expenses, 0))}</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400">Profit</p>
-                      <p className={`text-xs font-bold ${combinedProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <div className="flex items-center justify-between border-t border-gray-100 pt-1.5">
+                      <span className="text-xs font-semibold text-gray-700">Profit</span>
+                      <span className={`text-sm font-bold ${combinedProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                         {formatCurrency(combinedProfit)}
-                      </p>
+                      </span>
                     </div>
                   </div>
                 </div>

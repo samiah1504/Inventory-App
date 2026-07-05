@@ -180,37 +180,41 @@ export function WaybillBatchDetailPage() {
 
         {/* Action buttons */}
         {!isDone && (
-          <div className="mt-3 flex gap-2">
-            {status === 'created' && (
-              <Button size="sm" onClick={() => handleAdvance('packed')} disabled={advanceBatchStatus.isPending}
-                className="flex-1">
-                Confirm Packing Done
-              </Button>
-            )}
-            {status === 'packed' && (
-              <Button size="sm" onClick={() => handleAdvance('waybilled')} disabled={advanceBatchStatus.isPending}
-                className="flex-1">
-                Confirm Dispatched
-              </Button>
-            )}
-            {isTransit && (
-              <Button size="sm" onClick={() => handleAdvance('received')} disabled={advanceBatchStatus.isPending}
-                className="flex-1">
-                Mark Received
-              </Button>
-            )}
-            <button
-              onClick={() => savePdf(generatePackingList(batch, packingItems, orders, orderItems), `${batch.batch_number}-packing.pdf`)}
-              className="px-3 py-2 bg-gray-800 text-gray-300 rounded-xl text-xs font-medium active:scale-95 transition-all"
-            >
-              Packing PDF
-            </button>
-            <button
-              onClick={() => savePdf(generateWaybillSummary(batch, orders, expenses), `${batch.batch_number}-summary.pdf`)}
-              className="px-3 py-2 bg-gray-800 text-gray-300 rounded-xl text-xs font-medium active:scale-95 transition-all"
-            >
-              Summary PDF
-            </button>
+          <div className="mt-3 space-y-2">
+            <div className="flex gap-2">
+              {status === 'created' && (
+                <Button size="sm" onClick={() => handleAdvance('packed')} disabled={advanceBatchStatus.isPending}
+                  className="flex-1">
+                  Confirm Packing Done
+                </Button>
+              )}
+              {status === 'packed' && (
+                <Button size="sm" onClick={() => handleAdvance('waybilled')} disabled={advanceBatchStatus.isPending}
+                  className="flex-1">
+                  Confirm Dispatched
+                </Button>
+              )}
+              {isTransit && (
+                <Button size="sm" onClick={() => handleAdvance('received')} disabled={advanceBatchStatus.isPending}
+                  className="flex-1">
+                  Mark Received
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => savePdf(generatePackingList(batch, packingItems, orders, orderItems), `${batch.batch_number}-packing.pdf`)}
+                className="flex-1 py-2 bg-gray-800 text-gray-300 rounded-xl text-xs font-medium active:scale-95 transition-all"
+              >
+                Packing PDF
+              </button>
+              <button
+                onClick={() => savePdf(generateWaybillSummary(batch, orders, expenses), `${batch.batch_number}-summary.pdf`)}
+                className="flex-1 py-2 bg-gray-800 text-gray-300 rounded-xl text-xs font-medium active:scale-95 transition-all"
+              >
+                Summary PDF
+              </button>
+            </div>
           </div>
         )}
         {isDone && (
