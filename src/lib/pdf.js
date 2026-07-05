@@ -257,10 +257,13 @@ export function generatePackingList(batch, packingItems, batchOrders, orderItems
     // Aggregate items for this state
     const grouped = {}
     for (const bo of stateOrders) {
-      const items = itemsByOrderId[bo.order?.id]
-      const lineItems = (items && items.length > 0)
-        ? items
-        : [{ product_name: bo.order?.product_name, quantity: bo.order?.quantity || 1, color: bo.order?.color, size: bo.order?.size }]
+      // Priority: items_data JSONB > order_items table > order summary
+      const fromJson = Array.isArray(bo.order?.items_data) && bo.order.items_data.length > 0
+        ? bo.order.items_data : null
+      const fromTable = itemsByOrderId[bo.order?.id]?.length > 0
+        ? itemsByOrderId[bo.order.id] : null
+      const lineItems = fromJson || fromTable
+        || [{ product_name: bo.order?.product_name, quantity: bo.order?.quantity || 1, color: bo.order?.color, size: bo.order?.size }]
 
       for (const li of lineItems) {
         const label = [li.product_name, li.color, li.size].filter(Boolean).join(' — ')

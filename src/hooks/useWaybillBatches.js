@@ -10,7 +10,7 @@ export function useWaybillBatch(id) {
       const [batchR, batchOrdersR, packingR, timelineR] = await Promise.all([
         supabase.from('waybill_batches').select('*').eq('id', id).single(),
         supabase.from('waybill_batch_orders')
-          .select('*, order:orders(id, order_number, customer_name, state, product_name, quantity, total_amount, status, customer_phone, address, city)')
+          .select('*, order:orders(id, order_number, customer_name, state, product_name, quantity, total_amount, status, customer_phone, address, city, color, size, items_data)')
           .eq('batch_id', id),
         supabase.from('waybill_batch_packing_items')
           .select('*').eq('batch_id', id).order('state').order('product_name'),

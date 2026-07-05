@@ -262,12 +262,14 @@ export function WaybillBatchDetailPage() {
 
         {/* Pack Tab */}
         {tab === 'pack' && (() => {
-          // Build display items from actual order_items when available,
-          // so multi-product orders show each product separately.
-          const itemsByOrder = {}
+          // Build display items, preferring (in order):
+          // 1. items_data JSONB on the order (always saved from new orders)
+          // 2. order_items table rows (from orderItems hook data)
+          // 3. order summary fields (single-product fallback)
+          const itemsByOrderTable = {}
           for (const oi of (orderItems || [])) {
-            if (!itemsByOrder[oi.order_id]) itemsByOrder[oi.order_id] = []
-            itemsByOrder[oi.order_id].push(oi)
+            if (!itemsByOrderTable[oi.order_id]) itemsByOrderTable[oi.order_id] = []
+            itemsByOrderTable[oi.order_id].push(oi)
           }
 
           const grouped = {}
@@ -275,10 +277,15 @@ export function WaybillBatchDetailPage() {
             if (!bo.order) continue
             const state = bo.order.state
             if (!state) continue
-            const items = itemsByOrder[bo.order.id]
-            const lineItems = (items && items.length > 0)
-              ? items
-              : [{ product_name: bo.order.product_name, quantity: bo.order.quantity || 1, color: bo.order.color, size: bo.order.size }]
+
+            const fromJson = Array.isArray(bo.order.items_data) && bo.order.items_data.length > 0
+              ? bo.order.items_data
+              : null
+            const fromTable = itemsByOrderTable[bo.order.id]?.length > 0
+              ? itemsByOrderTable[bo.order.id]
+              : null
+            const lineItems = fromJson || fromTable
+              || [{ product_name: bo.order.product_name, quantity: bo.order.quantity || 1, color: bo.order.color, size: bo.order.size }]
 
             for (const li of lineItems) {
               const key = `${state}||${li.product_name}`
