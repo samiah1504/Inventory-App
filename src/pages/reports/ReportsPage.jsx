@@ -652,8 +652,8 @@ export function ReportsPage() {
 
         {/* Date range */}
         <div className="flex gap-2">
-          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1" />
-          <Input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="flex-1" />
+          <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1 min-w-0" />
+          <Input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="flex-1 min-w-0" />
         </div>
 
         {/* Business selector */}

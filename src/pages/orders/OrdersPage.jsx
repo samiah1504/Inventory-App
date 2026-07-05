@@ -130,9 +130,9 @@ export function OrdersPage() {
         {showDateFilter && (
           <div className="space-y-2">
             <div className="flex gap-2 items-center">
-              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1" />
+              <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1 min-w-0" />
               <span className="text-xs text-gray-400">to</span>
-              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1" />
+              <Input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="flex-1 min-w-0" />
               {hasDateFilter && (
                 <button onClick={() => { setDateFrom(''); setDateTo('') }} className="p-2 bg-gray-100 rounded-xl active:scale-95">
                   <X size={14} className="text-gray-500" />
