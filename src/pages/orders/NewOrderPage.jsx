@@ -175,6 +175,7 @@ export function NewOrderPage() {
                 idx={idx}
                 canRemove={items.length > 1}
                 allProducts={allProducts}
+                businesses={businesses}
                 onUpdate={updates => updateItem(idx, updates)}
                 onRemove={() => setItems(prev => prev.filter((_, i) => i !== idx))}
               />
@@ -227,7 +228,7 @@ export function NewOrderPage() {
   )
 }
 
-function ItemRow({ item, idx, canRemove, allProducts, onUpdate, onRemove }) {
+function ItemRow({ item, idx, canRemove, allProducts, businesses, onUpdate, onRemove }) {
   const [search, setSearch] = useState(item.product_name || '')
   const [showDropdown, setShowDropdown] = useState(false)
 
@@ -307,6 +308,14 @@ function ItemRow({ item, idx, canRemove, allProducts, onUpdate, onRemove }) {
           </button>
         )}
       </div>
+
+      {businesses && businesses.length > 1 && (
+        <Select label="Business" value={item.business_id || ''}
+          onChange={e => onUpdate({ business_id: e.target.value })}>
+          <option value="">Select business...</option>
+          {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </Select>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <Input label="Qty" type="number" min="1" inputMode="numeric"
