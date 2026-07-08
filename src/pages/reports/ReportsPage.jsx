@@ -77,12 +77,14 @@ function buildProductStats(revenueOrders, orderItemRows, allExpenses) {
     addItem(name, item.quantity, rev, item.order_id)
   })
 
-  // Priority 3 — product_name string: last resort for single-product orders only
+  // Priority 3 — product_name string: last resort so NO order is ever dropped.
+  // Multi-product summaries like "Sofa +2 more" attribute the full order
+  // revenue to the primary product (better than losing the order entirely).
   revenueOrders.forEach(o => {
     if (coveredByJson.has(o.id) || coveredByTbl.has(o.id)) return
-    if (o.product_name && !o.product_name.includes('+')) {
-      addItem(o.product_name.trim(), o.quantity || 1, o.total_amount, o.id)
-    }
+    const name = (o.product_name || 'Unknown').replace(/\s*\+\s*\d+\s*more\s*$/i, '').trim() || 'Unknown'
+    const rev  = Number(o.amount_paid) || Number(o.total_amount) || 0
+    addItem(name, o.quantity || 1, rev, o.id)
   })
 
   const totalRevenue    = Object.values(byProduct).reduce((s, p) => s + p.revenue, 0)
@@ -427,7 +429,10 @@ export function ReportsPage() {
       const delivRate = delivBase > 0 ? (delivered / delivBase) * 100 : 0
 
       const pCounts = {}
-      const addP = (name, qty) => { if (name && !name.includes('+')) pCounts[name.trim()] = (pCounts[name.trim()] || 0) + (Number(qty) || 1) }
+      const addP = (name, qty) => {
+        const clean = (name || '').replace(/\s*\+\s*\d+\s*more\s*$/i, '').trim()
+        if (clean) pCounts[clean] = (pCounts[clean] || 0) + (Number(qty) || 1)
+      }
       revOrds.forEach(o => {
         const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
         if (fromJson) fromJson.forEach(i => addP(i.product_name || i.name, i.quantity))
