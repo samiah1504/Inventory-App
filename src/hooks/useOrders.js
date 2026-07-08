@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { queueAction, isOnline } from '../lib/offline'
-import { reserveStockForOrder, resolveOrderStock } from '../lib/stockOps'
+import { reserveStockForOrder, resolveOrderStock, startReturnProcess } from '../lib/stockOps'
 
 export function useOrders(filters = {}) {
   const { user } = useAuthStore()
@@ -205,11 +205,13 @@ export function useUpdateOrderStatus() {
       })
 
       // Inventory side-effects: reserved stock becomes sold on payment,
-      // returns to available on cancel/return, and on failed delivery the
-      // officer's choice (returned / damaged / missing) decides.
+      // releases on cancel, and on failed delivery the officer's choice
+      // (returned / damaged / missing) decides. A returned order starts the
+      // return-assessment process (stock goes to awaiting-inspection) —
+      // inventory is only finalized when the return is processed.
       if (status === 'paid') await resolveOrderStock(data, 'sold', user?.id)
       else if (status === 'cancelled') await resolveOrderStock(data, 'release', user?.id)
-      else if (status === 'returned') await resolveOrderStock(data, 'returned', user?.id)
+      else if (status === 'returned') await startReturnProcess(data, user)
       else if (status === 'failed_delivery' && stockOutcome) await resolveOrderStock(data, stockOutcome, user?.id)
 
       return data
@@ -219,6 +221,7 @@ export function useUpdateOrderStatus() {
         queryClient.invalidateQueries({ queryKey: ['orders'] })
         queryClient.invalidateQueries({ queryKey: ['order', id] })
         queryClient.invalidateQueries({ queryKey: ['inventory'] })
+        queryClient.invalidateQueries({ queryKey: ['returns'] })
         showToast('Order updated', 'success')
       }
     },

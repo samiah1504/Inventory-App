@@ -139,3 +139,65 @@ CREATE INDEX IF NOT EXISTS idx_wbse_batch ON waybill_batch_state_expenses(batch_
 -- Store all order line items as JSON directly on the order row
 -- This is the primary storage; order_items table is kept for joins/querying
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS items_data JSONB;
+
+-- ===================================================
+-- Returned Goods Management
+-- ===================================================
+
+-- Inspection & repair stock buckets
+ALTER TABLE inventory
+  ADD COLUMN IF NOT EXISTS quantity_inspection INT DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS quantity_repair INT DEFAULT 0;
+
+-- Return assessment records — one per returned product line
+CREATE TABLE IF NOT EXISTS returns (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  return_number TEXT NOT NULL UNIQUE,
+  order_id UUID REFERENCES orders(id),
+  order_number TEXT,
+  customer_name TEXT,
+  business_id UUID REFERENCES businesses(id),
+  product_id UUID REFERENCES products(id),
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  warehouse_id UUID REFERENCES warehouses(id),
+  return_date DATE DEFAULT CURRENT_DATE,
+
+  -- Assessment (filled when processed)
+  reason TEXT,                 -- changed_mind, rejected_on_delivery, wrong_product, wrong_colour, wrong_size, damaged_delivery, factory_defect, missing_parts, complaint, exchange, other
+  reason_note TEXT,
+  outcome TEXT,                -- restocked, inspection, repair, damaged, written_off, supplier_return, display_item, other
+  outcome_note TEXT,
+  customer_resolution TEXT,    -- no_refund, full_refund, partial_refund, exchanged, store_credit, replacement_sent
+  refund_amount DECIMAL(15,2) DEFAULT 0,
+
+  -- Exchange details (when customer_resolution = exchanged)
+  replacement_product_id UUID REFERENCES products(id),
+  replacement_product_name TEXT,
+  replacement_quantity INT,
+  replacement_order_number TEXT,
+  difference_paid DECIMAL(15,2) DEFAULT 0,
+
+  status TEXT NOT NULL DEFAULT 'awaiting_inspection',  -- awaiting_inspection / completed
+  created_by UUID REFERENCES staff_users(id),
+  processed_by UUID REFERENCES staff_users(id),
+  processed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_returns_order ON returns(order_id);
+CREATE INDEX IF NOT EXISTS idx_returns_status ON returns(status);
+
+-- Timeline of everything that happened to a return
+CREATE TABLE IF NOT EXISTS return_timeline (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  return_id UUID REFERENCES returns(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  description TEXT,
+  staff_id UUID REFERENCES staff_users(id),
+  staff_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_return_timeline_return ON return_timeline(return_id);

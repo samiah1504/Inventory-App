@@ -4,7 +4,9 @@ import { Plus, Package, Sliders, ChevronDown, ChevronUp, ArrowLeftRight, Bell } 
 import {
   useInventory, useAddStock, useAdjustStock, useSetMinStock,
   useWarehouseTransfers, useTransferStock, useReceiveTransfer, useProductMovements,
+  useReturns,
 } from '../../hooks/useInventory'
+import { ReturnsTab } from './ReturnsTab'
 import { useBusinesses, useProducts, useWarehouses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
@@ -27,17 +29,23 @@ const STATUS_FILTERS = [
 ]
 
 const MOVEMENT_LABELS = {
-  purchase:       { label: 'Stock received',  color: 'text-blue-600' },
-  sale:           { label: 'Sold',            color: 'text-green-600' },
-  reserve:        { label: 'Reserved',        color: 'text-amber-600' },
-  release:        { label: 'Released',        color: 'text-gray-600' },
-  return:         { label: 'Returned',        color: 'text-orange-500' },
-  damage:         { label: 'Damaged',         color: 'text-red-600' },
-  missing:        { label: 'Missing',         color: 'text-red-600' },
-  transfer_in:    { label: 'Transfer in',     color: 'text-blue-600' },
-  transfer_out:   { label: 'Transfer out',    color: 'text-purple-600' },
-  adjustment_in:  { label: 'Adjustment (+)',  color: 'text-gray-600' },
-  adjustment_out: { label: 'Adjustment (−)',  color: 'text-gray-600' },
+  purchase:          { label: 'Stock received',      color: 'text-blue-600' },
+  sale:              { label: 'Sold',                color: 'text-green-600' },
+  reserve:           { label: 'Reserved',            color: 'text-amber-600' },
+  release:           { label: 'Released',            color: 'text-gray-600' },
+  return:            { label: 'Returned to stock',   color: 'text-orange-500' },
+  return_inspection: { label: 'Awaiting inspection', color: 'text-amber-600' },
+  repair:            { label: 'Sent for repair',     color: 'text-purple-600' },
+  write_off:         { label: 'Written off',         color: 'text-red-600' },
+  supplier_return:   { label: 'Returned to supplier', color: 'text-red-500' },
+  display_item:      { label: 'Kept as display',     color: 'text-gray-600' },
+  return_other:      { label: 'Return closed',       color: 'text-gray-600' },
+  damage:            { label: 'Damaged',             color: 'text-red-600' },
+  missing:           { label: 'Missing',             color: 'text-red-600' },
+  transfer_in:       { label: 'Transfer in',         color: 'text-blue-600' },
+  transfer_out:      { label: 'Transfer out',        color: 'text-purple-600' },
+  adjustment_in:     { label: 'Adjustment (+)',      color: 'text-gray-600' },
+  adjustment_out:    { label: 'Adjustment (−)',      color: 'text-gray-600' },
 }
 
 export function InventoryPage() {
@@ -66,6 +74,7 @@ export function InventoryPage() {
 
   const { data: allInventory, isLoading } = useInventory({})
   const { data: transfers } = useWarehouseTransfers()
+  const { data: returnsList } = useReturns()
   const addStock = useAddStock()
   const adjustStock = useAdjustStock()
   const setMinStock = useSetMinStock()
@@ -102,16 +111,19 @@ export function InventoryPage() {
           category: r.product?.category?.name || null,
           rows: [],
           available: 0, physical: 0, reserved: 0, sold: 0, returned: 0, damaged: 0,
+          inspection: 0, repair: 0,
         }
       }
       const g = m[key]
       g.rows.push(r)
-      g.available += Number(r.quantity_available || 0)
-      g.physical  += Number(r.quantity_physical || 0)
-      g.reserved  += Number(r.quantity_reserved || 0)
-      g.sold      += Number(r.quantity_sold || 0)
-      g.returned  += Number(r.quantity_returned || 0)
-      g.damaged   += Number(r.quantity_damaged || 0)
+      g.available  += Number(r.quantity_available || 0)
+      g.physical   += Number(r.quantity_physical || 0)
+      g.reserved   += Number(r.quantity_reserved || 0)
+      g.sold       += Number(r.quantity_sold || 0)
+      g.returned   += Number(r.quantity_returned || 0)
+      g.damaged    += Number(r.quantity_damaged || 0)
+      g.inspection += Number(r.quantity_inspection || 0)
+      g.repair     += Number(r.quantity_repair || 0)
     })
     return Object.values(m).map(g => ({
       ...g,
@@ -196,8 +208,12 @@ export function InventoryPage() {
       totalUnits: rows.reduce((s, r) => s + Number(r.quantity_physical || 0), 0),
       damaged:  rows.reduce((s, r) => s + Number(r.quantity_damaged || 0), 0),
       returned: rows.reduce((s, r) => s + Number(r.quantity_returned || 0), 0),
+      inspection: rows.reduce((s, r) => s + Number(r.quantity_inspection || 0), 0),
+      repair:     rows.reduce((s, r) => s + Number(r.quantity_repair || 0), 0),
     }
   }, [allInventory, productGroups, warehouses, transfers])
+
+  const awaitingReturns = (returnsList || []).filter(r => r.status === 'awaiting_inspection').length
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -289,6 +305,7 @@ export function InventoryPage() {
             { key: 'stock',      label: 'Stock' },
             { key: 'warehouses', label: 'By Warehouse' },
             { key: 'transfers',  label: `Transfers${inTransitTransfers.length > 0 ? ` (${inTransitTransfers.length})` : ''}` },
+            { key: 'returns',    label: `Returns${awaitingReturns > 0 ? ` (${awaitingReturns})` : ''}` },
           ].map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
@@ -370,6 +387,8 @@ export function InventoryPage() {
                   { label: 'Out of Stock', value: health.outCount,      color: 'text-red-600' },
                   { label: 'Damaged',      value: health.damaged,       color: 'text-red-500' },
                   { label: 'Returned',     value: health.returned,      color: 'text-orange-500' },
+                  { label: 'Inspection',   value: health.inspection,    color: 'text-amber-600' },
+                  { label: 'In Repair',    value: health.repair,        color: 'text-purple-600' },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-white rounded-2xl border border-gray-100 px-3 py-2.5">
                     <p className="text-xs text-gray-500 mb-0.5 truncate">{label}</p>
@@ -431,6 +450,8 @@ export function InventoryPage() {
                                 { label: 'Sold',      value: g.sold },
                                 { label: 'Returned',  value: g.returned,  color: 'text-orange-500' },
                                 { label: 'Damaged',   value: g.damaged,   color: 'text-red-500' },
+                                ...(g.inspection > 0 ? [{ label: 'Inspection', value: g.inspection, color: 'text-amber-600' }] : []),
+                                ...(g.repair > 0 ? [{ label: 'In Repair', value: g.repair, color: 'text-purple-600' }] : []),
                               ].map(({ label, value, color }) => (
                                 <div key={label} className="bg-gray-50 rounded-xl px-2.5 py-2">
                                   <p className="text-xs text-gray-400 mb-0.5">{label}</p>
@@ -601,6 +622,9 @@ export function InventoryPage() {
             )
           )
         )}
+
+        {/* ── Returns tab ── */}
+        {tab === 'returns' && <ReturnsTab canManage={canManage} />}
 
         {/* ── Transfers tab ── */}
         {tab === 'transfers' && (

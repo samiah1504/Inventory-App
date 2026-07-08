@@ -331,3 +331,105 @@ export function useReceiveTransfer() {
     onError: (err) => showToast(err.message, 'error'),
   })
 }
+
+// ─── Returns ─────────────────────────────────────────────────────────────────
+
+export function useReturns(filters = {}) {
+  return useQuery({
+    queryKey: ['returns', filters],
+    queryFn: async () => {
+      let query = supabase
+        .from('returns')
+        .select(`
+          *,
+          warehouse:warehouses(name, state),
+          business:businesses(name),
+          timeline:return_timeline(*)
+        `)
+        .order('created_at', { ascending: false })
+      if (filters.status) query = query.eq('status', filters.status)
+      const { data, error } = await query
+      if (error) throw error
+      // Timeline oldest-first for display
+      return (data || []).map(r => ({
+        ...r,
+        timeline: [...(r.timeline || [])].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || '')),
+      }))
+    },
+    staleTime: 30000,
+    retry: false,
+  })
+}
+
+export function useProcessReturn() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+
+  return useMutation({
+    mutationFn: async ({ ret, form }) => {
+      const { applyReturnOutcome, addReturnTimeline } = await import('../lib/stockOps')
+
+      const REASON_LABELS = {
+        changed_mind: 'Customer changed mind', rejected_on_delivery: 'Customer rejected on delivery',
+        wrong_product: 'Wrong product delivered', wrong_colour: 'Wrong colour', wrong_size: 'Wrong size',
+        damaged_delivery: 'Damaged during delivery', factory_defect: 'Factory defect',
+        missing_parts: 'Missing parts', complaint: 'Customer complaint', exchange: 'Exchange request', other: 'Other',
+      }
+      const OUTCOME_LABELS = {
+        restocked: 'Returned to available stock', inspection: 'Sent for inspection', repair: 'Sent for repair',
+        damaged: 'Marked as damaged', written_off: 'Written off', supplier_return: 'Returned to supplier',
+        display_item: 'Kept as display item', other: 'Other',
+      }
+      const RESOLUTION_LABELS = {
+        no_refund: 'No refund', full_refund: 'Full refund', partial_refund: 'Partial refund',
+        exchanged: 'Product exchanged', store_credit: 'Store credit', replacement_sent: 'Replacement sent',
+      }
+
+      const { error } = await supabase.from('returns').update({
+        return_date: form.return_date || ret.return_date,
+        reason: form.reason,
+        reason_note: form.reason_note || null,
+        outcome: form.outcome,
+        outcome_note: form.outcome_note || null,
+        customer_resolution: form.customer_resolution,
+        refund_amount: Number(form.refund_amount) || 0,
+        replacement_product_id: form.replacement_product_id || null,
+        replacement_product_name: form.replacement_product_name || null,
+        replacement_quantity: form.replacement_quantity ? Number(form.replacement_quantity) : null,
+        replacement_order_number: form.replacement_order_number || null,
+        difference_paid: Number(form.difference_paid) || 0,
+        status: 'completed',
+        processed_by: user?.id || null,
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', ret.id)
+      if (error) throw error
+
+      await addReturnTimeline(ret.id, 'inspected',
+        `Inspected — reason: ${REASON_LABELS[form.reason] || form.reason}${form.reason_note ? ` (${form.reason_note})` : ''}`, user)
+
+      // Inventory action (skipped for 'inspection' — stock stays in the inspection bucket)
+      if (form.outcome !== 'inspection') {
+        await applyReturnOutcome(ret, form.outcome, user)
+      } else {
+        await addReturnTimeline(ret.id, 'inspection_hold', 'Kept in inspection — stock unchanged', user)
+      }
+
+      await addReturnTimeline(ret.id, 'resolution',
+        `Customer resolution: ${RESOLUTION_LABELS[form.customer_resolution] || form.customer_resolution}` +
+        (Number(form.refund_amount) > 0 ? ` — ₦${Number(form.refund_amount).toLocaleString()}` : '') +
+        (form.customer_resolution === 'exchanged' && form.replacement_product_name
+          ? ` — replacement: ${form.replacement_product_name} ×${form.replacement_quantity || 1}${form.replacement_order_number ? ` (${form.replacement_order_number})` : ''}`
+          : ''), user)
+      await addReturnTimeline(ret.id, 'completed', `Return processed: ${OUTCOME_LABELS[form.outcome] || form.outcome}`, user)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['returns'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      showToast('Return processed', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+}
