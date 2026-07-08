@@ -14,7 +14,7 @@ import {
   AlertCircle, Download, ChevronDown, ChevronUp, Search, X,
 } from 'lucide-react'
 import { Select, Input } from '../../components/ui/Input'
-import { useBusinesses } from '../../hooks/useBusinesses'
+import { useBusinesses, useProducts, useWarehouses } from '../../hooks/useBusinesses'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -108,6 +108,46 @@ function buildProductStats(revenueOrders, orderItemRows, allExpenses) {
   }).sort((a, b) => b.revenue - a.revenue)
 }
 
+// Product performance (units/orders only, no financials) — same 3-priority
+// item sourcing as buildProductStats, but keeps per-order detail for drill-down.
+function buildProductPerformance(soldOrders, orderItemRows) {
+  const byProduct = {}
+  const addItem = (name, productId, qty, order) => {
+    const key = (name || 'Unknown').trim()
+    if (!byProduct[key]) byProduct[key] = { name: key, productId: null, qty: 0, orders: new Map(), lastSoldAt: null }
+    const p = byProduct[key]
+    if (productId && !p.productId) p.productId = productId
+    p.qty += Number(qty) || 1
+    if (order) {
+      const prev = p.orders.get(order.id)
+      p.orders.set(order.id, { order, qty: (prev?.qty || 0) + (Number(qty) || 1) })
+      if (!p.lastSoldAt || (order.created_at || '') > p.lastSoldAt) p.lastSoldAt = order.created_at
+    }
+  }
+
+  const ordersById = new Map(soldOrders.map(o => [o.id, o]))
+
+  const coveredByJson = new Set()
+  soldOrders.forEach(o => {
+    const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+    if (!fromJson) return
+    coveredByJson.add(o.id)
+    fromJson.forEach(item => addItem(item.product_name || item.name, item.product_id, item.quantity, o))
+  })
+
+  const validItems   = orderItemRows.filter(i => ordersById.has(i.order_id) && !coveredByJson.has(i.order_id))
+  const coveredByTbl = new Set(validItems.map(i => i.order_id))
+  validItems.forEach(item => addItem(item.product_name, item.product_id, item.quantity, ordersById.get(item.order_id)))
+
+  soldOrders.forEach(o => {
+    if (coveredByJson.has(o.id) || coveredByTbl.has(o.id)) return
+    const name = (o.product_name || 'Unknown').replace(/\s*\+\s*\d+\s*more\s*$/i, '').trim() || 'Unknown'
+    addItem(name, o.product_id, o.quantity, o)
+  })
+
+  return Object.values(byProduct)
+}
+
 function downloadCSV(rows, filename) {
   if (!rows.length) return
   const headers = Object.keys(rows[0])
@@ -149,13 +189,17 @@ export function ReportsPage() {
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportRef = useRef(null)
 
-  const [productView, setProductView]               = useState('sales')
-  const [productSearch, setProductSearch]           = useState('')
-  const [productSort, setProductSort]               = useState('revenue')
-  const [productStateFilter, setProductStateFilter] = useState('')
+  const [productSearch, setProductSearch]                   = useState('')
+  const [productSort, setProductSort]                       = useState('units')
+  const [productCategoryFilter, setProductCategoryFilter]   = useState('')
+  const [productFilter, setProductFilter]                   = useState('')
+  const [productWarehouseFilter, setProductWarehouseFilter] = useState('')
+  const [expandedProduct, setExpandedProduct]               = useState(null)
 
   const { user } = useAuthStore()
   const { data: businesses } = useBusinesses()
+  const { data: catalogProducts } = useProducts()
+  const { data: warehouses } = useWarehouses()
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
 
   // Close export menu on outside click
@@ -200,7 +244,7 @@ export function ReportsPage() {
       try {
         let q = supabase
           .from('orders')
-          .select('id, order_number, customer_name, customer_phone, status, state, source, product_name, quantity, total_amount, amount_paid, balance_amount, created_by, created_at, business_id, items_data')
+          .select('id, order_number, customer_name, customer_phone, status, state, source, product_id, product_name, quantity, total_amount, amount_paid, balance_amount, created_by, created_at, business_id, items_data')
           .gte('created_at', `${dateFrom}T00:00:00`)
           .lte('created_at', `${dateTo}T23:59:59`)
           .order('created_at', { ascending: false })
@@ -266,7 +310,7 @@ export function ReportsPage() {
 
   const inventoryMovements = useQuery({
     queryKey: ['report_inventory_movements', dateFrom, dateTo, businessId],
-    enabled: tab === 'inventory',
+    enabled: tab === 'inventory' || tab === 'products',
     queryFn: async () => {
       try {
         let q = supabase
@@ -296,7 +340,7 @@ export function ReportsPage() {
         if (orderIds.length === 0) return []
         const { data, error } = await supabase
           .from('order_items')
-          .select('order_id, product_name, quantity, unit_price, total_amount')
+          .select('order_id, product_id, product_name, quantity, unit_price, total_amount')
           .in('order_id', orderIds)
         if (error) throw error
         return data || []
@@ -339,53 +383,80 @@ export function ReportsPage() {
     return buildProductStats(soldOrders, productsReport.data || [], expenses)
   }, [orders, productsReport.data, expenses])
 
-  const stateFilteredProductStats = useMemo(() => {
-    if (!productStateFilter) return productStats
-    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status) && o.state === productStateFilter)
-    return buildProductStats(soldOrders, productsReport.data || [], expenses)
-  }, [orders, productsReport.data, expenses, productStateFilter, productStats])
+  // Product performance (units / orders / stock — no financials)
+  const productPerf = useMemo(() => {
+    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status))
+    const catalog  = catalogProducts || []
+    const byId     = new Map(catalog.map(p => [p.id, p]))
+    const byName   = new Map(catalog.map(p => [p.name.trim().toLowerCase(), p]))
+    const bizById  = new Map((businesses || []).map(b => [b.id, b.name]))
+    const movements = inventoryMovements.data || []
 
-  const productAvailableStates = useMemo(() =>
-    Array.from(new Set(
-      orders.filter(o => SOLD_STATUSES.includes(o.status) && o.state).map(o => o.state)
-    )).sort()
-  , [orders])
+    return buildProductPerformance(soldOrders, productsReport.data || []).map(p => {
+      const cat = (p.productId && byId.get(p.productId)) || byName.get(p.name.toLowerCase()) || null
+      const catalogId = cat?.id || p.productId || null
+
+      const matchesProduct = r =>
+        catalogId ? r.product_id === catalogId
+                  : (r.product?.name || '').trim().toLowerCase() === p.name.toLowerCase()
+      const matchesWarehouse = r => !productWarehouseFilter || r.warehouse_id === productWarehouseFilter
+
+      const inv = inventoryItems.filter(r => matchesProduct(r) && matchesWarehouse(r))
+      const available = inv.reduce((s, r) => s + Number(r.quantity_available || 0), 0)
+      const received  = movements
+        .filter(m => matchesProduct(m) && matchesWarehouse(m) && Number(m.quantity) > 0)
+        .reduce((s, m) => s + Number(m.quantity || 0), 0)
+
+      const orderRows = Array.from(p.orders.values())
+        .sort((a, b) => (b.order.created_at || '').localeCompare(a.order.created_at || ''))
+      const firstOrder = orderRows[0]?.order
+
+      return {
+        ...p,
+        orderCount: p.orders.size,
+        orderRows,
+        business: cat?.business?.name || bizById.get(firstOrder?.business_id) || '—',
+        category: cat?.category?.name || null,
+        sku: cat?.sku || cat?.barcode || null,
+        hasInventory: inv.length > 0,
+        available,
+        received,
+        opening: available - received + p.qty,
+      }
+    })
+  }, [orders, productsReport.data, catalogProducts, businesses, inventoryItems, inventoryMovements.data, productWarehouseFilter])
+
+  const productCategories = useMemo(() =>
+    Array.from(new Set(productPerf.map(p => p.category).filter(Boolean))).sort()
+  , [productPerf])
 
   const filteredSortedProducts = useMemo(() => {
-    let list = stateFilteredProductStats
+    let list = productPerf
     if (productSearch) {
       const q = productSearch.toLowerCase()
-      list = list.filter(p => p.name.toLowerCase().includes(q))
+      list = list.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        (p.sku && String(p.sku).toLowerCase().includes(q)))
     }
+    if (productCategoryFilter) list = list.filter(p => p.category === productCategoryFilter)
+    if (productFilter)         list = list.filter(p => p.name === productFilter)
     return [...list].sort((a, b) => {
       if (productSort === 'name')   return a.name.localeCompare(b.name)
-      if (productSort === 'units')  return b.qty - a.qty
-      if (productSort === 'profit') return b.netProfit - a.netProfit
       if (productSort === 'orders') return b.orderCount - a.orderCount
-      return b.revenue - a.revenue
+      if (productSort === 'recent') return (b.lastSoldAt || '').localeCompare(a.lastSoldAt || '')
+      return b.qty - a.qty
     })
-  }, [stateFilteredProductStats, productSearch, productSort])
+  }, [productPerf, productSearch, productSort, productCategoryFilter, productFilter])
 
-  const prodSummary = useMemo(() => ({
-    units:       stateFilteredProductStats.reduce((s, p) => s + p.qty, 0),
-    revenue:     stateFilteredProductStats.reduce((s, p) => s + p.revenue, 0),
-    deliveryExp: stateFilteredProductStats.reduce((s, p) => s + p.deliveryExpenses, 0),
-    otherExp:    stateFilteredProductStats.reduce((s, p) => s + p.otherExpenses, 0),
-    totalExp:    stateFilteredProductStats.reduce((s, p) => s + p.totalExpenses, 0),
-    grossProfit: stateFilteredProductStats.reduce((s, p) => s + p.grossProfit, 0),
-    netProfit:   stateFilteredProductStats.reduce((s, p) => s + p.netProfit, 0),
-  }), [stateFilteredProductStats])
-
-  const filteredGrandTotal = useMemo(() => ({
-    units:       filteredSortedProducts.reduce((s, p) => s + p.qty, 0),
-    orders:      filteredSortedProducts.reduce((s, p) => s + p.orderCount, 0),
-    revenue:     filteredSortedProducts.reduce((s, p) => s + p.revenue, 0),
-    deliveryExp: filteredSortedProducts.reduce((s, p) => s + p.deliveryExpenses, 0),
-    otherExp:    filteredSortedProducts.reduce((s, p) => s + p.otherExpenses, 0),
-    totalExp:    filteredSortedProducts.reduce((s, p) => s + p.totalExpenses, 0),
-    grossProfit: filteredSortedProducts.reduce((s, p) => s + p.grossProfit, 0),
-    netProfit:   filteredSortedProducts.reduce((s, p) => s + p.netProfit, 0),
-  }), [filteredSortedProducts])
+  const prodSummary = useMemo(() => {
+    const orderIds = new Set()
+    productPerf.forEach(p => p.orders.forEach((_, id) => orderIds.add(id)))
+    return {
+      units: productPerf.reduce((s, p) => s + p.qty, 0),
+      uniqueProducts: productPerf.length,
+      orders: orderIds.size,
+    }
+  }, [productPerf])
 
   // ── P&L stats ─────────────────────────────────────────────────────────────
 
@@ -495,15 +566,11 @@ export function ReportsPage() {
         })), `inventory-snapshot.csv`)
       }
     } else if (tab === 'products') {
-      downloadCSV(productStats.map(p => ({
-        product_name: p.name, quantity_sold: p.qty, order_count: p.orderCount,
-        revenue: p.revenue.toFixed(2),
-        delivery_expenses: p.deliveryExpenses.toFixed(2),
-        other_expenses: p.otherExpenses.toFixed(2),
-        total_expenses: p.totalExpenses.toFixed(2),
-        gross_profit: p.grossProfit.toFixed(2),
-        net_profit: p.netProfit.toFixed(2),
-        margin_pct: p.margin.toFixed(1),
+      downloadCSV(filteredSortedProducts.map(p => ({
+        product_name: p.name, business: p.business, category: p.category || '',
+        units_sold: p.qty, order_count: p.orderCount,
+        last_sold: p.lastSoldAt?.slice(0, 10) || '',
+        available_stock: p.hasInventory ? p.available : '',
       })), `products-${dateFrom}-to-${dateTo}.csv`)
     } else if (tab === 'compare') {
       downloadCSV(compareStats.map(b => ({
@@ -531,12 +598,11 @@ export function ReportsPage() {
         Description: e.description || '', Category: e.category || '',
       })), 'Expenses', `expenses-${dateFrom}-to-${dateTo}.xlsx`)
     } else if (tab === 'products') {
-      downloadXLSX(productStats.map(p => ({
-        Product: p.name, 'Qty Sold': p.qty, Orders: p.orderCount,
-        Revenue: p.revenue, 'Delivery Exp': +p.deliveryExpenses.toFixed(2),
-        'Other Exp': +p.otherExpenses.toFixed(2), 'Total Exp': +p.totalExpenses.toFixed(2),
-        'Gross Profit': +p.grossProfit.toFixed(2), 'Net Profit': +p.netProfit.toFixed(2),
-        'Margin %': +p.margin.toFixed(1),
+      downloadXLSX(filteredSortedProducts.map(p => ({
+        Product: p.name, Business: p.business, Category: p.category || '',
+        'Units Sold': p.qty, Orders: p.orderCount,
+        'Last Sold': p.lastSoldAt?.slice(0, 10) || '',
+        'Available Stock': p.hasInventory ? p.available : '',
       })), 'Products', `products-${dateFrom}-to-${dateTo}.xlsx`)
     } else if (tab === 'compare') {
       downloadXLSX(compareStats.map(b => ({
@@ -860,7 +926,7 @@ export function ReportsPage() {
           </div>
         )}
 
-        {/* PRODUCTS — Performance Dashboard */}
+        {/* PRODUCTS — Product Performance Report (no financials) */}
         {tab === 'products' && (
           <div className="space-y-4">
             {(productsReport.isLoading && canQueryItems) ? (
@@ -873,47 +939,18 @@ export function ReportsPage() {
                   </div>
                 )}
 
-                {/* ── Period Summary ── */}
-                <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-3">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-                    {productStateFilter ? `${productStateFilter} · ` : ''}Period Summary
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">Revenue</p>
-                      <p className="text-sm font-bold text-green-600">{formatCurrency(prodSummary.revenue)}</p>
+                {/* ── Summary cards ── */}
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { label: 'Units Sold', value: prodSummary.units,          color: 'text-blue-600' },
+                    { label: 'Products',   value: prodSummary.uniqueProducts, color: 'text-gray-900' },
+                    { label: 'Orders',     value: prodSummary.orders,         color: 'text-green-600' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} className="bg-white rounded-2xl border border-gray-100 px-3 py-3">
+                      <p className="text-xs text-gray-500 mb-0.5 truncate">{label}</p>
+                      <p className={`text-xl font-bold ${color}`}>{value}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">Units Sold</p>
-                      <p className="text-sm font-bold text-blue-600">{prodSummary.units}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">Gross Profit</p>
-                      <p className={`text-sm font-bold ${prodSummary.grossProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {formatCurrency(prodSummary.grossProfit)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">Net Profit</p>
-                      <p className={`text-sm font-bold ${prodSummary.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(prodSummary.netProfit)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="border-t border-gray-100 pt-3 space-y-1.5">
-                    <div>
-                      <span className="text-xs text-gray-500">Delivery: </span>
-                      <span className="text-xs font-semibold text-gray-700">{formatCurrency(prodSummary.deliveryExp)}</span>
-                    </div>
-                    <div>
-                      <span className="text-xs text-gray-500">Other: </span>
-                      <span className="text-xs font-semibold text-gray-700">{formatCurrency(prodSummary.otherExp)}</span>
-                    </div>
-                    <div>
-                      <span className="text-xs font-semibold text-gray-800">Total Expenses: </span>
-                      <span className="text-xs font-bold text-red-600">{formatCurrency(prodSummary.totalExp)}</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
 
                 {/* ── Search ── */}
@@ -923,7 +960,7 @@ export function ReportsPage() {
                     type="text"
                     value={productSearch}
                     onChange={e => setProductSearch(e.target.value)}
-                    placeholder="Search products…"
+                    placeholder="Search by name, SKU or barcode…"
                     className="w-full pl-8 pr-8 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400"
                   />
                   {productSearch && (
@@ -934,22 +971,31 @@ export function ReportsPage() {
                   )}
                 </div>
 
-                {/* ── State filter ── */}
-                {productAvailableStates.length > 1 && (
-                  <Select value={productStateFilter} onChange={e => setProductStateFilter(e.target.value)}>
-                    <option value="">All States</option>
-                    {productAvailableStates.map(s => <option key={s} value={s}>{s}</option>)}
+                {/* ── Filters ── */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Select value={productCategoryFilter} onChange={e => setProductCategoryFilter(e.target.value)}>
+                    <option value="">All Categories</option>
+                    {productCategories.map(c => <option key={c} value={c}>{c}</option>)}
                   </Select>
-                )}
+                  <Select value={productFilter} onChange={e => setProductFilter(e.target.value)}>
+                    <option value="">All Products</option>
+                    {[...productPerf].sort((a, b) => a.name.localeCompare(b.name)).map(p => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </Select>
+                </div>
+                <Select value={productWarehouseFilter} onChange={e => setProductWarehouseFilter(e.target.value)}>
+                  <option value="">All Warehouses (stock figures)</option>
+                  {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
+                </Select>
 
                 {/* ── Sort pills ── */}
                 <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
                   {[
-                    { key: 'revenue', label: 'Revenue' },
-                    { key: 'units',   label: 'Units' },
-                    { key: 'profit',  label: 'Profit' },
-                    { key: 'orders',  label: 'Orders' },
-                    { key: 'name',    label: 'A → Z' },
+                    { key: 'units',  label: 'Units Sold' },
+                    { key: 'orders', label: 'Orders' },
+                    { key: 'recent', label: 'Recently Sold' },
+                    { key: 'name',   label: 'A → Z' },
                   ].map(s => (
                     <button key={s.key} onClick={() => setProductSort(s.key)}
                       className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all ${
@@ -960,101 +1006,109 @@ export function ReportsPage() {
                   ))}
                 </div>
 
-                {/* ── View switcher ── */}
-                <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                  {[
-                    { key: 'sales',    label: 'Sales' },
-                    { key: 'expenses', label: 'Expenses' },
-                    { key: 'profit',   label: 'Profit' },
-                  ].map(v => (
-                    <button key={v.key} onClick={() => setProductView(v.key)}
-                      className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
-                        productView === v.key
-                          ? 'bg-white text-gray-900 shadow-sm'
-                          : 'text-gray-500'
-                      }`}>
-                      {v.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* ── Product performance table ── */}
+                {/* ── Product list ── */}
                 <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-                  {/* Column headers */}
-                  <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50 border-b border-gray-100">
+                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100">
                     <span className="text-xs font-semibold text-gray-500">
-                      Product{filteredSortedProducts.length > 0 ? ` · ${filteredSortedProducts.length}` : ''}
-                    </span>
-                    <span className="text-xs font-semibold text-gray-500">
-                      {productView === 'sales' ? 'Revenue' : productView === 'expenses' ? 'Total Exp' : 'Net Profit'}
+                      Products{filteredSortedProducts.length > 0 ? ` · ${filteredSortedProducts.length}` : ''}
                     </span>
                   </div>
 
-                  {/* Rows */}
                   <div className="divide-y divide-gray-50">
                     {filteredSortedProducts.length === 0 ? (
                       <p className="text-sm text-gray-400 text-center py-10">
-                        {productSearch ? `No products matching "${productSearch}"` : 'No product data for this period'}
+                        {productSearch ? `No products matching "${productSearch}"` : 'No products sold in this period'}
                       </p>
-                    ) : filteredSortedProducts.map(p => (
-                      <div key={p.name} className="px-4 py-3">
-                        <p className="text-sm font-medium text-gray-900 leading-snug mb-1">{p.name}</p>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-400">
-                            {productView === 'sales'
-                              ? `${p.qty} unit${p.qty !== 1 ? 's' : ''} · ${p.orderCount} order${p.orderCount !== 1 ? 's' : ''}`
-                              : productView === 'expenses'
-                              ? `Del: ${formatCurrency(p.deliveryExpenses)} · Other: ${formatCurrency(p.otherExpenses)}`
-                              : `Rev: ${formatCurrency(p.revenue)} · ${p.margin.toFixed(1)}% margin`}
-                          </span>
-                          <span className={`text-sm font-bold ml-3 shrink-0 ${
-                            productView === 'profit'
-                              ? p.netProfit >= 0 ? 'text-green-600' : 'text-red-600'
-                              : productView === 'expenses'
-                              ? 'text-red-600'
-                              : 'text-gray-900'
-                          }`}>
-                            {productView === 'sales'
-                              ? formatCurrency(p.revenue)
-                              : productView === 'expenses'
-                              ? formatCurrency(p.totalExpenses)
-                              : formatCurrency(p.netProfit)}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                    ) : filteredSortedProducts.map(p => {
+                      const isOpen = expandedProduct === p.name
+                      return (
+                        <div key={p.name}>
+                          <button
+                            onClick={() => setExpandedProduct(isOpen ? null : p.name)}
+                            className="w-full text-left px-4 py-3.5 active:bg-gray-50 transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-gray-900 leading-snug">{p.name}</p>
+                                <p className="text-xs text-gray-500 mt-0.5 truncate">
+                                  {p.business}{p.category ? ` · ${p.category}` : ''}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-1">
+                                  <span className="font-bold text-blue-600">{p.qty}</span> unit{p.qty !== 1 ? 's' : ''} ·{' '}
+                                  <span className="font-bold text-gray-700">{p.orderCount}</span> order{p.orderCount !== 1 ? 's' : ''}
+                                  {p.hasInventory && <> · <span className="font-bold text-green-600">{p.available}</span> in stock</>}
+                                </p>
+                              </div>
+                              {isOpen
+                                ? <ChevronUp size={18} className="text-gray-400 shrink-0" />
+                                : <ChevronDown size={18} className="text-gray-400 shrink-0" />}
+                            </div>
+                          </button>
 
-                  {/* Grand Total row */}
-                  {filteredSortedProducts.length > 0 && (
-                    <div className="px-4 py-3 bg-gray-900">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-xs font-bold text-white">Grand Total</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {productView === 'sales'
-                              ? `${filteredGrandTotal.units} units · ${filteredGrandTotal.orders} orders`
-                              : productView === 'expenses'
-                              ? `Del: ${formatCurrency(filteredGrandTotal.deliveryExp)} · Other: ${formatCurrency(filteredGrandTotal.otherExp)}`
-                              : `Revenue: ${formatCurrency(filteredGrandTotal.revenue)}`}
-                          </p>
+                          {isOpen && (
+                            <div className="px-4 pb-4 space-y-3">
+                              {/* Product info */}
+                              <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Product Info</p>
+                                <p className="text-xs text-gray-600"><span className="text-gray-400">Business: </span>{p.business}</p>
+                                <p className="text-xs text-gray-600"><span className="text-gray-400">Category: </span>{p.category || '—'}</p>
+                                {p.sku && <p className="text-xs text-gray-600"><span className="text-gray-400">SKU: </span>{p.sku}</p>}
+                              </div>
+
+                              {/* Inventory summary */}
+                              <div className="bg-gray-50 rounded-xl p-3">
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Inventory</p>
+                                {p.hasInventory ? (
+                                  <div className="grid grid-cols-3 gap-2">
+                                    <div>
+                                      <p className="text-xs text-gray-400 mb-0.5">Opening (est.)</p>
+                                      <p className="text-base font-bold text-gray-900">{p.opening}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400 mb-0.5">Received</p>
+                                      <p className="text-base font-bold text-blue-600">{p.received}</p>
+                                    </div>
+                                    <div>
+                                      <p className="text-xs text-gray-400 mb-0.5">Available</p>
+                                      <p className={`text-base font-bold ${p.available <= 0 ? 'text-red-600' : p.available <= 5 ? 'text-amber-600' : 'text-green-600'}`}>
+                                        {p.available}
+                                      </p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-gray-400">No inventory records for this product</p>
+                                )}
+                              </div>
+
+                              {/* Orders containing this product */}
+                              <div className="bg-gray-50 rounded-xl overflow-hidden">
+                                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-3 pt-3 pb-1">
+                                  Orders · {p.orderRows.length}
+                                </p>
+                                <div className="divide-y divide-gray-100">
+                                  {p.orderRows.map(({ order, qty }) => (
+                                    <div key={order.id} className="px-3 py-2.5">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <p className="text-xs font-mono text-gray-400 truncate">{order.order_number}</p>
+                                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full capitalize shrink-0 status-${order.status}`}>
+                                          {(order.status || '').replace(/_/g, ' ')}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between gap-2 mt-0.5">
+                                        <p className="text-sm text-gray-800 truncate">{order.customer_name}</p>
+                                        <p className="text-xs font-semibold text-gray-600 shrink-0">×{qty}</p>
+                                      </div>
+                                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(order.created_at)}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <span className={`text-base font-bold ${
-                          productView === 'profit'
-                            ? filteredGrandTotal.netProfit >= 0 ? 'text-green-400' : 'text-red-400'
-                            : productView === 'expenses'
-                            ? 'text-red-400'
-                            : 'text-green-400'
-                        }`}>
-                          {productView === 'sales'
-                            ? formatCurrency(filteredGrandTotal.revenue)
-                            : productView === 'expenses'
-                            ? formatCurrency(filteredGrandTotal.totalExp)
-                            : formatCurrency(filteredGrandTotal.netProfit)}
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                      )
+                    })}
+                  </div>
                 </div>
               </>
             )}
