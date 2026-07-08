@@ -196,6 +196,13 @@ export function ReportsPage() {
   const [productWarehouseFilter, setProductWarehouseFilter] = useState('')
   const [expandedProduct, setExpandedProduct]               = useState(null)
 
+  const [expSearch, setExpSearch]           = useState('')
+  const [expKindFilter, setExpKindFilter]   = useState('')      // '' | 'order' | 'business'
+  const [expTypeFilter, setExpTypeFilter]   = useState('')
+  const [expStaffFilter, setExpStaffFilter] = useState('')
+  const [expSort, setExpSort]               = useState('recent')
+  const [expandedExpCat, setExpandedExpCat] = useState(null)
+
   const { user } = useAuthStore()
   const { data: businesses } = useBusinesses()
   const { data: catalogProducts } = useProducts()
@@ -263,7 +270,7 @@ export function ReportsPage() {
     enabled: isCeo,
     queryFn: async () => {
       try {
-        let q = supabase.from('expenses').select('*')
+        let q = supabase.from('expenses').select('*, business:businesses(name)')
           .gte('date', dateFrom).lte('date', dateTo)
         if (businessId) q = q.eq('business_id', businessId)
         const { data, error } = await q
@@ -272,6 +279,40 @@ export function ReportsPage() {
       } catch { return [] }
     },
     staleTime: 60000,
+  })
+
+  // Orders referenced by order-linked expenses (may fall outside the date range)
+  const expenseOrderIds = useMemo(() =>
+    Array.from(new Set((expensesReport.data || []).filter(e => e.order_id).map(e => e.order_id)))
+  , [expensesReport.data])
+
+  const expenseOrdersQ = useQuery({
+    queryKey: ['report_expense_orders', expenseOrderIds],
+    enabled: tab === 'expenses' && isCeo && expenseOrderIds.length > 0,
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('id, order_number, customer_name, product_name')
+          .in('id', expenseOrderIds)
+        if (error) throw error
+        return data || []
+      } catch { return [] }
+    },
+    staleTime: 60000,
+  })
+
+  const staffListQ = useQuery({
+    queryKey: ['report_staff_list'],
+    enabled: tab === 'expenses' && isCeo,
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase.from('staff_users').select('id, name')
+        if (error) throw error
+        return data || []
+      } catch { return [] }
+    },
+    staleTime: 60000 * 5,
   })
 
   const staffReport = useQuery({
@@ -373,8 +414,93 @@ export function ReportsPage() {
   const bySource = {}
   orders.forEach(o => { if (o.source) bySource[o.source] = (bySource[o.source] || 0) + 1 })
 
-  const byExpenseType = {}
-  expenses.forEach(e => { byExpenseType[e.expense_type] = (byExpenseType[e.expense_type] || 0) + Number(e.amount) })
+  // ── Expense analytics ─────────────────────────────────────────────────────
+
+  // Enriched + filtered expense list for the Expenses tab
+  const expenseData = useMemo(() => {
+    const ordersById = new Map((expenseOrdersQ.data || []).map(o => [o.id, o]))
+    const staffById  = new Map((staffListQ.data || []).map(s => [s.id, s.name]))
+
+    let list = expenses.map(e => ({
+      ...e,
+      isOrderExpense: !!e.order_id,
+      order: e.order_id ? ordersById.get(e.order_id) || null : null,
+      staffName: staffById.get(e.staff_id) || null,
+      businessName: e.business?.name || null,
+    }))
+
+    if (expSearch) {
+      const q = expSearch.toLowerCase()
+      list = list.filter(e =>
+        (e.expense_type || '').toLowerCase().includes(q) ||
+        (e.description || '').toLowerCase().includes(q) ||
+        (e.order?.order_number || '').toLowerCase().includes(q))
+    }
+    if (expKindFilter)  list = list.filter(e => expKindFilter === 'order' ? e.isOrderExpense : !e.isOrderExpense)
+    if (expTypeFilter)  list = list.filter(e => e.expense_type === expTypeFilter)
+    if (expStaffFilter) list = list.filter(e => e.staff_id === expStaffFilter)
+
+    return list.sort((a, b) => {
+      if (expSort === 'high')   return Number(b.amount) - Number(a.amount)
+      if (expSort === 'low')    return Number(a.amount) - Number(b.amount)
+      if (expSort === 'oldest') return (a.date || '').localeCompare(b.date || '')
+      return (b.date || '').localeCompare(a.date || '')
+    })
+  }, [expenses, expenseOrdersQ.data, staffListQ.data, expSearch, expKindFilter, expTypeFilter, expStaffFilter, expSort])
+
+  // Group filtered expenses by category, split into order-linked vs overhead
+  const expenseGroups = useMemo(() => {
+    const group = (list) => {
+      const m = {}
+      list.forEach(e => {
+        const t = e.expense_type || 'other'
+        if (!m[t]) m[t] = { type: t, total: 0, entries: [], orderIds: new Set() }
+        m[t].total += Number(e.amount || 0)
+        m[t].entries.push(e)
+        if (e.order_id) m[t].orderIds.add(e.order_id)
+      })
+      return Object.values(m).sort((a, b) => b.total - a.total)
+    }
+    return {
+      order:    group(expenseData.filter(e => e.isOrderExpense)),
+      business: group(expenseData.filter(e => !e.isOrderExpense)),
+    }
+  }, [expenseData])
+
+  const expSummary = useMemo(() => {
+    const orderTotal = expenseGroups.order.reduce((s, g) => s + g.total, 0)
+    const bizTotal   = expenseGroups.business.reduce((s, g) => s + g.total, 0)
+    const paidOrderCount = orders.filter(o => REVENUE_STATUSES.includes(o.status)).length
+    return {
+      total: orderTotal + bizTotal,
+      orderTotal,
+      bizTotal,
+      avgPerPaidOrder: paidOrderCount > 0 ? orderTotal / paidOrderCount : 0,
+    }
+  }, [expenseGroups, orders])
+
+  // Combined per-category totals (order + business) for widget + chart
+  const expenseCats = useMemo(() => {
+    const m = {}
+    expenseData.forEach(e => {
+      const t = e.expense_type || 'other'
+      m[t] = (m[t] || 0) + Number(e.amount || 0)
+    })
+    return Object.entries(m).map(([type, total]) => ({ type, total }))
+      .sort((a, b) => b.total - a.total)
+  }, [expenseData])
+
+  // Filter options come from the unfiltered period expenses
+  const expTypeOptions = useMemo(() =>
+    Array.from(new Set(expenses.map(e => e.expense_type).filter(Boolean))).sort()
+  , [expenses])
+
+  const expStaffOptions = useMemo(() => {
+    const staffById = new Map((staffListQ.data || []).map(s => [s.id, s.name]))
+    const ids = Array.from(new Set(expenses.map(e => e.staff_id).filter(Boolean)))
+    return ids.map(id => ({ id, name: staffById.get(id) || 'Unknown' }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [expenses, staffListQ.data])
 
   // ── Product analytics ─────────────────────────────────────────────────────
 
@@ -534,9 +660,11 @@ export function ReportsPage() {
 
   function handleExportCSV() {
     if (tab === 'expenses') {
-      const rows = expenses.map(e => ({
+      const rows = expenseData.map(e => ({
         date: e.date, expense_type: e.expense_type, amount: e.amount,
-        description: e.description || '', category: e.category || '',
+        kind: e.isOrderExpense ? 'order' : 'business',
+        business: e.businessName || '', description: e.description || '',
+        order_number: e.order?.order_number || '', entered_by: e.staffName || '',
       }))
       downloadCSV(rows, `expenses-${dateFrom}-to-${dateTo}.csv`)
     } else if (tab === 'staff') {
@@ -593,9 +721,11 @@ export function ReportsPage() {
 
   function handleExportXLSX() {
     if (tab === 'expenses') {
-      downloadXLSX(expenses.map(e => ({
+      downloadXLSX(expenseData.map(e => ({
         Date: e.date, Type: e.expense_type, Amount: e.amount,
-        Description: e.description || '', Category: e.category || '',
+        Kind: e.isOrderExpense ? 'Order' : 'Business',
+        Business: e.businessName || '', Description: e.description || '',
+        'Order #': e.order?.order_number || '', 'Entered By': e.staffName || '',
       })), 'Expenses', `expenses-${dateFrom}-to-${dateTo}.xlsx`)
     } else if (tab === 'products') {
       downloadXLSX(filteredSortedProducts.map(p => ({
@@ -1297,22 +1427,154 @@ export function ReportsPage() {
           </div>
         )}
 
-        {/* EXPENSES */}
+        {/* EXPENSES — all money going out, split order vs business */}
         {tab === 'expenses' && isCeo && (
           <div className="space-y-4">
-            <StatCard label="Total Expenses" value={formatCurrency(totalExpenses)} icon={<DollarSign size={20} />} color="red" />
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">By Type</h3>
-              <div className="space-y-2">
-                {Object.entries(byExpenseType).sort(([, a], [, b]) => b - a).map(([type, amt]) => (
-                  <div key={type} className="flex justify-between py-1.5 border-b border-gray-50 last:border-0">
-                    <span className="text-sm text-gray-700 capitalize">{type.replace(/_/g, ' ')}</span>
-                    <span className="text-sm font-bold text-gray-900">{formatCurrency(amt)}</span>
-                  </div>
-                ))}
-                {Object.keys(byExpenseType).length === 0 && <p className="text-sm text-gray-400">No expenses</p>}
-              </div>
+
+            {/* ── Summary cards ── */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Total Expenses',    value: expSummary.total,           color: 'text-red-600'    },
+                { label: 'Order Expenses',    value: expSummary.orderTotal,      color: 'text-amber-600'  },
+                { label: 'Business Expenses', value: expSummary.bizTotal,        color: 'text-purple-600' },
+                { label: 'Avg / Paid Order',  value: expSummary.avgPerPaidOrder, color: 'text-gray-900'   },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <p className="text-xs text-gray-500 mb-1">{label}</p>
+                  <p className={`text-lg font-bold leading-tight ${color}`}>{formatCurrency(value)}</p>
+                </div>
+              ))}
             </div>
+
+            {/* ── Top expense categories widget ── */}
+            {expenseCats.length > 0 && (
+              <div className="bg-gray-900 rounded-2xl p-4">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Top Expense Categories</p>
+                <div className="space-y-1.5">
+                  {expenseCats.slice(0, 4).map((c, i) => (
+                    <div key={c.type} className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-gray-500 w-4 shrink-0">{i + 1}</span>
+                      <span className="text-sm text-gray-300 capitalize truncate flex-1 min-w-0">{c.type.replace(/_/g, ' ')}</span>
+                      <span className="text-sm font-bold text-white shrink-0">{formatCurrency(c.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── Expenses by category chart ── */}
+            {expenseCats.length > 0 && (() => {
+              const top       = expenseCats.slice(0, 8)
+              const restTotal = expenseCats.slice(8).reduce((s, c) => s + c.total, 0)
+              const cats      = restTotal > 0 ? [...top, { type: 'other (combined)', total: restTotal }] : top
+              const max       = Math.max(...cats.map(c => c.total), 1)
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Expenses by Category</h3>
+                  <div className="space-y-3">
+                    {cats.map(c => (
+                      <div key={c.type}>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-xs text-gray-600 capitalize truncate min-w-0">{c.type.replace(/_/g, ' ')}</span>
+                          <span className="text-xs font-semibold text-gray-900 shrink-0">{formatCurrency(c.total)}</span>
+                        </div>
+                        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.max((c.total / max) * 100, 2)}%` }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })()}
+
+            {/* ── Search ── */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                type="text"
+                value={expSearch}
+                onChange={e => setExpSearch(e.target.value)}
+                placeholder="Search category, order #, description…"
+                className="w-full pl-8 pr-8 py-2.5 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400"
+              />
+              {expSearch && (
+                <button onClick={() => setExpSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 active:scale-95">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
+            {/* ── Order / Business toggle ── */}
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+              {[
+                { key: '',         label: 'All' },
+                { key: 'order',    label: 'Order' },
+                { key: 'business', label: 'Business' },
+              ].map(v => (
+                <button key={v.key} onClick={() => setExpKindFilter(v.key)}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                    expKindFilter === v.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+                  }`}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Category + staff filters ── */}
+            <div className="grid grid-cols-2 gap-2">
+              <Select value={expTypeFilter} onChange={e => setExpTypeFilter(e.target.value)}>
+                <option value="">All Categories</option>
+                {expTypeOptions.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
+              </Select>
+              <Select value={expStaffFilter} onChange={e => setExpStaffFilter(e.target.value)}>
+                <option value="">All Staff</option>
+                {expStaffOptions.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </Select>
+            </div>
+
+            {/* ── Sort pills ── */}
+            <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+              {[
+                { key: 'recent', label: 'Most Recent' },
+                { key: 'oldest', label: 'Oldest' },
+                { key: 'high',   label: 'Highest' },
+                { key: 'low',    label: 'Lowest' },
+              ].map(s => (
+                <button key={s.key} onClick={() => setExpSort(s.key)}
+                  className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-all ${
+                    expSort === s.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-600'
+                  }`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── A. Order expenses ── */}
+            {expKindFilter !== 'business' && (
+              <ExpenseSection
+                title="Order Expenses"
+                subtitle="Costs tied to fulfilling customer orders"
+                groups={expenseGroups.order}
+                showOrderStats
+                expandedKey="order"
+                expanded={expandedExpCat}
+                onToggle={setExpandedExpCat}
+              />
+            )}
+
+            {/* ── B. Business expenses ── */}
+            {expKindFilter !== 'order' && (
+              <ExpenseSection
+                title="Business Expenses"
+                subtitle="General overhead, not tied to orders"
+                groups={expenseGroups.business}
+                expandedKey="business"
+                expanded={expandedExpCat}
+                onToggle={setExpandedExpCat}
+              />
+            )}
           </div>
         )}
 
@@ -1441,6 +1703,88 @@ export function ReportsPage() {
         )}
 
       </div>
+    </div>
+  )
+}
+
+// ─── Expense report pieces ───────────────────────────────────────────────────
+
+function ExpenseSection({ title, subtitle, groups, showOrderStats, expandedKey, expanded, onToggle }) {
+  const total = groups.reduce((s, g) => s + g.total, 0)
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+        <p className="text-xs text-gray-400">{subtitle}</p>
+        <p className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(total)}</p>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {groups.length === 0 ? (
+          <p className="text-sm text-gray-400 text-center py-6">No expenses in this period</p>
+        ) : groups.map(g => {
+          const key = `${expandedKey}:${g.type}`
+          const isOpen = expanded === key
+          return (
+            <div key={g.type}>
+              <button
+                onClick={() => onToggle(isOpen ? null : key)}
+                className="w-full text-left px-4 py-3 active:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 capitalize truncate">{g.type.replace(/_/g, ' ')}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {showOrderStats
+                        ? `${g.orderIds.size} order${g.orderIds.size !== 1 ? 's' : ''} · avg ${formatCurrency(g.orderIds.size > 0 ? g.total / g.orderIds.size : g.total)}/order`
+                        : `${g.entries.length} ${g.entries.length !== 1 ? 'entries' : 'entry'}`}
+                    </p>
+                    <p className="text-base font-bold text-gray-900 mt-0.5">{formatCurrency(g.total)}</p>
+                  </div>
+                  {isOpen
+                    ? <ChevronUp size={18} className="text-gray-400 shrink-0" />
+                    : <ChevronDown size={18} className="text-gray-400 shrink-0" />}
+                </div>
+              </button>
+              {isOpen && (
+                <div className="px-4 pb-3 space-y-2">
+                  {g.entries.map(e => <ExpenseEntry key={e.id} e={e} />)}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ExpenseEntry({ e }) {
+  return (
+    <div className="bg-gray-50 rounded-xl px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-gray-400">{formatDate(e.date)}</p>
+        <p className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(e.amount)}</p>
+      </div>
+      {e.description && <p className="text-sm text-gray-700 mt-0.5">{e.description}</p>}
+      {(e.businessName || e.staffName) && (
+        <p className="text-xs text-gray-400 mt-0.5 truncate">
+          {[e.businessName, e.staffName ? `by ${e.staffName}` : null].filter(Boolean).join(' · ')}
+        </p>
+      )}
+      {e.order && (
+        <div className="mt-1.5 bg-white rounded-lg px-2.5 py-1.5 border border-gray-100">
+          <p className="text-xs font-mono text-gray-500">{e.order.order_number}</p>
+          <p className="text-xs text-gray-600 truncate">
+            {e.order.customer_name}{e.order.product_name ? ` · ${e.order.product_name}` : ''}
+          </p>
+        </div>
+      )}
+      {e.receipt_url && (
+        <a href={e.receipt_url} target="_blank" rel="noreferrer"
+          className="text-xs text-blue-600 font-medium mt-1.5 inline-block">
+          View receipt →
+        </a>
+      )}
     </div>
   )
 }
