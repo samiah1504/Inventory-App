@@ -49,6 +49,7 @@ export function InventoryPage() {
   const [selectedBusiness, setSelectedBusiness] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('')
   const [expandedProduct, setExpandedProduct] = useState(null)
+  const [expandedWarehouse, setExpandedWarehouse] = useState(null)
 
   const [showAddModal, setShowAddModal] = useState(false)
   const [showAdjustModal, setShowAdjustModal] = useState(false)
@@ -143,6 +144,38 @@ export function InventoryPage() {
     if (statusFilter === 'returned') list = list.filter(g => g.returned > 0)
     return list
   }, [productGroups, search, selectedBusiness, selectedCategory, selectedWarehouse, statusFilter])
+
+  // ── Group inventory rows by warehouse ─────────────────────────────────────
+
+  const warehouseGroups = useMemo(() => {
+    const m = {}
+    ;(allInventory || []).forEach(r => {
+      if (selectedBusiness && r.business_id !== selectedBusiness) return
+      if (search && !(r.product?.name || '').toLowerCase().includes(search.toLowerCase())) return
+      const key = r.warehouse_id || 'unknown'
+      if (!m[key]) {
+        m[key] = {
+          key,
+          name: r.warehouse?.name || 'Unknown warehouse',
+          state: r.warehouse?.state || null,
+          rows: [],
+          available: 0, physical: 0, reserved: 0,
+        }
+      }
+      const g = m[key]
+      g.rows.push(r)
+      g.available += Number(r.quantity_available || 0)
+      g.physical  += Number(r.quantity_physical || 0)
+      g.reserved  += Number(r.quantity_reserved || 0)
+    })
+    return Object.values(m)
+      .map(g => ({
+        ...g,
+        rows: [...g.rows].sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || '')),
+        productCount: g.rows.filter(r => r.quantity_physical > 0).length,
+      }))
+      .sort((a, b) => b.physical - a.physical || a.name.localeCompare(b.name))
+  }, [allInventory, selectedBusiness, search])
 
   // ── Health / summary metrics (unfiltered) ─────────────────────────────────
 
@@ -253,8 +286,9 @@ export function InventoryPage() {
         {/* Main tabs */}
         <div className="flex gap-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {[
-            { key: 'stock',     label: 'Stock' },
-            { key: 'transfers', label: `Transfers${inTransitTransfers.length > 0 ? ` (${inTransitTransfers.length})` : ''}` },
+            { key: 'stock',      label: 'Stock' },
+            { key: 'warehouses', label: 'By Warehouse' },
+            { key: 'transfers',  label: `Transfers${inTransitTransfers.length > 0 ? ` (${inTransitTransfers.length})` : ''}` },
           ].map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
@@ -293,6 +327,13 @@ export function InventoryPage() {
               )}
             </div>
           </>
+        )}
+
+        {tab === 'warehouses' && businesses && businesses.length > 1 && (
+          <Select value={selectedBusiness} onChange={e => setSelectedBusiness(e.target.value)}>
+            <option value="">All Businesses</option>
+            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </Select>
         )}
       </div>
 
@@ -479,6 +520,85 @@ export function InventoryPage() {
                 </div>
               )}
             </div>
+          )
+        )}
+
+        {/* ── By Warehouse tab ── */}
+        {tab === 'warehouses' && (
+          isLoading ? <SkeletonList count={5} /> : (
+            warehouseGroups.length === 0 ? (
+              <EmptyState
+                icon={<Package size={28} />}
+                title="No warehouse stock"
+                description={search ? 'No products match your search' : 'Receive stock to see it distributed by warehouse'}
+              />
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-500">{warehouseGroups.length} warehouse{warehouseGroups.length !== 1 ? 's' : ''} with stock records</p>
+                {warehouseGroups.map(w => {
+                  const isOpen = expandedWarehouse === w.key
+                  return (
+                    <div key={w.key} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+                      <button
+                        onClick={() => setExpandedWarehouse(isOpen ? null : w.key)}
+                        className="w-full text-left p-4 active:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-900 leading-tight">
+                              {w.name}{w.state ? ` · ${w.state}` : ''}
+                            </p>
+                            <p className="text-xs mt-1">
+                              <span className={`text-base font-bold ${w.available <= 0 ? 'text-red-600' : 'text-green-600'}`}>{w.available}</span>
+                              <span className="text-gray-400"> available · </span>
+                              <span className="text-gray-600 font-medium">{w.productCount} product{w.productCount !== 1 ? 's' : ''}</span>
+                              {w.reserved > 0 && <span className="text-amber-600 font-medium"> · {w.reserved} reserved</span>}
+                            </p>
+                          </div>
+                          {isOpen
+                            ? <ChevronUp size={18} className="text-gray-400 shrink-0" />
+                            : <ChevronDown size={18} className="text-gray-400 shrink-0" />}
+                        </div>
+                      </button>
+
+                      {isOpen && (
+                        <div className="px-4 pb-4">
+                          <div className="bg-gray-50 rounded-xl p-3">
+                            <div className="flex items-center gap-2 pb-2 border-b border-gray-200 mb-1">
+                              <span className="text-[11px] font-semibold text-gray-400 uppercase w-8 shrink-0">Qty</span>
+                              <span className="text-[11px] font-semibold text-gray-400 uppercase flex-1">Product</span>
+                            </div>
+                            <div className="divide-y divide-gray-100">
+                              {w.rows.map(r => (
+                                <div key={r.id} className="flex items-center gap-2 py-2">
+                                  <span className={`text-sm font-bold w-8 shrink-0 ${r.quantity_available <= 0 ? 'text-red-600' : r.quantity_available <= (r.low_stock_threshold ?? 5) ? 'text-amber-600' : 'text-green-600'}`}>
+                                    {r.quantity_available}
+                                  </span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm text-gray-800 truncate">{r.product?.name || 'Unknown product'}</p>
+                                    {r.quantity_reserved > 0 && (
+                                      <p className="text-[11px] text-amber-600">{r.quantity_reserved} reserved</p>
+                                    )}
+                                  </div>
+                                  {canManage && (
+                                    <button
+                                      onClick={() => { setAdjustingItem(r); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
+                                      className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
+                                      title="Adjust stock">
+                                      <Sliders size={13} className="text-gray-600" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
           )
         )}
 
