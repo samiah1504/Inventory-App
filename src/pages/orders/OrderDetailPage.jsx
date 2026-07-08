@@ -40,6 +40,7 @@ export function OrderDetailPage() {
   const [expense, setExpense] = useState({ delivery_fee: '', installation_fee: '', offloading_fee: '', misc: '', notes: '' })
   const [note, setNote] = useState('')
   const [failedReason, setFailedReason] = useState('')
+  const [failedStockOutcome, setFailedStockOutcome] = useState('returned')
   const [cancelReason, setCancelReason] = useState('')
   const [returnReason, setReturnReason] = useState('')
   const [pendingStatus, setPendingStatus] = useState(null)
@@ -180,6 +181,7 @@ export function OrderDetailPage() {
       id: order.id,
       status: pendingStatus,
       extra,
+      stockOutcome: pendingStatus === 'failed_delivery' ? failedStockOutcome : undefined,
       timelineDesc: `${statusLabel(pendingStatus)}: ${reason} — by ${user?.name}`
     })
     setShowReasonModal(false)
@@ -574,18 +576,43 @@ export function OrderDetailPage() {
           </div>
         }
       >
-        <Textarea
-          label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : pendingStatus === 'failed_delivery' ? 'Reason for failed delivery' : 'Reason for return'}
-          placeholder="Describe what happened..."
-          value={pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason}
-          onChange={e => {
-            if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
-            else if (pendingStatus === 'failed_delivery') setFailedReason(e.target.value)
-            else setReturnReason(e.target.value)
-          }}
-          rows={4}
-          required
-        />
+        <div className="space-y-4">
+          <Textarea
+            label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : pendingStatus === 'failed_delivery' ? 'Reason for failed delivery' : 'Reason for return'}
+            placeholder="Describe what happened..."
+            value={pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason}
+            onChange={e => {
+              if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
+              else if (pendingStatus === 'failed_delivery') setFailedReason(e.target.value)
+              else setReturnReason(e.target.value)
+            }}
+            rows={4}
+            required
+          />
+          {pendingStatus === 'failed_delivery' && (
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">What happened to the stock?</p>
+              <div className="space-y-2">
+                {[
+                  { key: 'returned', label: 'Returned to warehouse', desc: 'Stock goes back to available' },
+                  { key: 'damaged',  label: 'Damaged',               desc: 'Stock written off as damaged' },
+                  { key: 'missing',  label: 'Missing',               desc: 'Stock lost — removed from inventory' },
+                ].map(o => (
+                  <button key={o.key} type="button"
+                    onClick={() => setFailedStockOutcome(o.key)}
+                    className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
+                      failedStockOutcome === o.key
+                        ? 'border-yellow-400 bg-yellow-50'
+                        : 'border-gray-200 bg-white'
+                    }`}>
+                    <p className="text-sm font-medium text-gray-900">{o.label}</p>
+                    <p className="text-xs text-gray-500">{o.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
 
       {/* Note Modal */}

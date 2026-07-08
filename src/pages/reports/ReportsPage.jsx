@@ -530,8 +530,9 @@ export function ReportsPage() {
       const inv = inventoryItems.filter(r => matchesProduct(r) && matchesWarehouse(r))
       const available = inv.reduce((s, r) => s + Number(r.quantity_available || 0), 0)
       const received  = movements
-        .filter(m => matchesProduct(m) && matchesWarehouse(m) && Number(m.quantity) > 0)
-        .reduce((s, m) => s + Number(m.quantity || 0), 0)
+        .filter(m => matchesProduct(m) && matchesWarehouse(m)
+          && ['purchase', 'transfer_in', 'adjustment_in'].includes(m.movement_type))
+        .reduce((s, m) => s + Math.abs(Number(m.quantity || 0)), 0)
 
       const orderRows = Array.from(p.orders.values())
         .sort((a, b) => (b.order.created_at || '').localeCompare(a.order.created_at || ''))
@@ -1639,8 +1640,9 @@ export function ReportsPage() {
 
             {/* Movements */}
             {(() => {
-              const movements = inventoryMovements.data || []
-              const totalUnits = movements.reduce((s, m) => s + Number(m.quantity || 0), 0)
+              const movements = (inventoryMovements.data || [])
+                .filter(m => ['purchase', 'transfer_in', 'adjustment_in'].includes(m.movement_type))
+              const totalUnits = movements.reduce((s, m) => s + Math.abs(Number(m.quantity || 0)), 0)
               const totalCost  = movements.reduce((s, m) => s + Number(m.total_cost || 0), 0)
               return (
                 <div className="bg-white rounded-2xl border border-gray-100">

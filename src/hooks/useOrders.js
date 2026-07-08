@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { queueAction, isOnline } from '../lib/offline'
+import { reserveStockForOrder, resolveOrderStock } from '../lib/stockOps'
 
 export function useOrders(filters = {}) {
   const { user } = useAuthStore()
@@ -155,10 +156,14 @@ export function useCreateOrder() {
         staff_name: user?.name,
       })
 
+      // Auto-reserve stock for products tracked in inventory
+      await reserveStockForOrder(data, user?.id)
+
       return data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
       showToast('Order created successfully', 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
@@ -171,7 +176,7 @@ export function useUpdateOrderStatus() {
   const { user } = useAuthStore()
 
   return useMutation({
-    mutationFn: async ({ id, status, extra = {}, timelineDesc }) => {
+    mutationFn: async ({ id, status, extra = {}, timelineDesc, stockOutcome }) => {
       if (!isOnline()) {
         await queueAction({ type: 'update_order_status', payload: { id, status, extra } })
         showToast('Saved offline. Will sync when connected.', 'info')
@@ -199,12 +204,21 @@ export function useUpdateOrderStatus() {
         staff_name: user?.name,
       })
 
+      // Inventory side-effects: reserved stock becomes sold on payment,
+      // returns to available on cancel/return, and on failed delivery the
+      // officer's choice (returned / damaged / missing) decides.
+      if (status === 'paid') await resolveOrderStock(data, 'sold', user?.id)
+      else if (status === 'cancelled') await resolveOrderStock(data, 'release', user?.id)
+      else if (status === 'returned') await resolveOrderStock(data, 'returned', user?.id)
+      else if (status === 'failed_delivery' && stockOutcome) await resolveOrderStock(data, stockOutcome, user?.id)
+
       return data
     },
     onSuccess: (data, { id }) => {
       if (!data?.offline) {
         queryClient.invalidateQueries({ queryKey: ['orders'] })
         queryClient.invalidateQueries({ queryKey: ['order', id] })
+        queryClient.invalidateQueries({ queryKey: ['inventory'] })
         showToast('Order updated', 'success')
       }
     },
