@@ -43,6 +43,8 @@ body {
 .status-new { background: #dbeafe; color: #1e40af; }
 .status-awaiting_waybill { background: #fef3c7; color: #92400e; }
 .status-waybilled { background: #e0e7ff; color: #3730a3; }
+.status-arrived_at_park { background: #cffafe; color: #155e75; }
+.status-picked_up_from_park { background: #ccfbf1; color: #115e59; }
 .status-received_at_warehouse { background: #d1fae5; color: #065f46; }
 .status-processing { background: #fde68a; color: #78350f; }
 .status-delivered { background: #bbf7d0; color: #14532d; }

@@ -1,7 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
-import { receiveOrderStockAtWarehouse } from '../lib/stockOps'
 
 export function useWaybillBatch(id) {
   return useQuery({
@@ -251,26 +250,26 @@ export function useAdvanceBatchStatus() {
           })
         }
       } else if (newStatus === 'received') {
+        // Every Lagos-to-state shipment arrives at the State Park first;
+        // fulfillment then decides direct delivery or move to warehouse.
         for (const orderId of orderIds) {
           const { data: fullOrder } = await supabase.from('orders').update({
-            status: 'received_at_warehouse', updated_at: new Date().toISOString(),
+            status: 'arrived_at_park', updated_at: new Date().toISOString(),
           }).eq('id', orderId).select().single()
           await supabase.from('order_timeline').insert({
             order_id: orderId,
-            action: 'received_at_warehouse',
-            description: `Received from batch ${batchNumber}`,
+            action: 'arrived_at_park',
+            description: `Arrived at ${fullOrder?.state || 'destination'} State Park (batch ${batchNumber})`,
             staff_id: user?.id,
             staff_name: user?.name,
           })
-          // Destination warehouse automatically holds this order's stock
-          if (fullOrder) await receiveOrderStockAtWarehouse(fullOrder, user)
         }
       }
 
       const LABELS = {
         packed: 'Packing Confirmed',
         waybilled: 'Dispatched / Waybilled',
-        received: 'Received at Warehouse',
+        received: 'Arrived at State Park',
       }
       await supabase.from('waybill_batch_timeline').insert({
         batch_id: batchId,

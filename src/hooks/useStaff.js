@@ -388,3 +388,13 @@ export function useDeleteStaff() {
     }
   }, ['staff'], 'Staff deleted')
 }
+
+// States a fulfillment officer covers (36 states + FCT)
+export function useSetAssignedStates() {
+  return useHrMutation(async ({ staff_id, states }) => {
+    const { error } = await supabase.from('staff_users')
+      .update({ assigned_states: states, updated_at: new Date().toISOString() })
+      .eq('id', staff_id)
+    if (error) throw error
+  }, ['staff', 'staff_member'], 'Assigned states updated — applies at their next login')
+}

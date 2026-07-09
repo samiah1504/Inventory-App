@@ -54,6 +54,8 @@ export function statusLabel(status) {
     new: 'New Order',
     awaiting_waybill: 'Awaiting Waybill',
     waybilled: 'Waybilled',
+    arrived_at_park: 'At State Park',
+    picked_up_from_park: 'Picked Up from Park',
     received_at_warehouse: 'At Warehouse',
     processing: 'Processing',
     delivered: 'Delivered',
@@ -86,7 +88,8 @@ export const DELIVERY_WINDOWS = [
 ]
 
 export const ORDER_STATUSES = [
-  'new', 'awaiting_waybill', 'waybilled', 'received_at_warehouse',
+  'new', 'awaiting_waybill', 'waybilled', 'arrived_at_park',
+  'picked_up_from_park', 'received_at_warehouse',
   'processing', 'delivered', 'partially_paid', 'paid',
   'failed_delivery', 'cancelled', 'returned'
 ]

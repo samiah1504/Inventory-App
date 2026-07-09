@@ -23,6 +23,11 @@ export function useOrders(filters = {}) {
       if (user?.role === 'customer_support') {
         query = query.eq('created_by', user.id)
       }
+      // Fulfillment officers only see orders for their assigned state(s).
+      // No assignment yet (or migration not run) keeps the legacy all-states view.
+      if (user?.role === 'fulfillment' && Array.isArray(user?.assigned_states) && user.assigned_states.length > 0) {
+        query = query.in('state', user.assigned_states)
+      }
       if (filters.status) query = query.eq('status', filters.status)
       if (filters.delivery_fee_pending) query = query.eq('delivery_fee_pending', true)
       if (filters.statuses) query = query.in('status', filters.statuses)
@@ -177,7 +182,7 @@ export function useUpdateOrderStatus() {
   const { user } = useAuthStore()
 
   return useMutation({
-    mutationFn: async ({ id, status, extra = {}, timelineDesc, stockOutcome }) => {
+    mutationFn: async ({ id, status, extra = {}, extraSafe, timelineDesc, extraTimeline, stockOutcome }) => {
       if (!isOnline()) {
         await queueAction({ type: 'update_order_status', payload: { id, status, extra } })
         showToast('Saved offline. Will sync when connected.', 'info')
@@ -197,6 +202,11 @@ export function useUpdateOrderStatus() {
         .single()
       if (error) throw error
 
+      // Best-effort details (columns that may not exist before the migration)
+      if (extraSafe && Object.keys(extraSafe).length > 0) {
+        await supabase.from('orders').update(extraSafe).eq('id', id) // error ignored by design
+      }
+
       await supabase.from('order_timeline').insert({
         order_id: id,
         action: status,
@@ -204,6 +214,17 @@ export function useUpdateOrderStatus() {
         staff_id: user?.id,
         staff_name: user?.name,
       })
+
+      // Optional second timeline entry (e.g. park → warehouse transfer + receipt)
+      if (extraTimeline) {
+        await supabase.from('order_timeline').insert({
+          order_id: id,
+          action: extraTimeline.action || status,
+          description: extraTimeline.description,
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
+      }
 
       // Inventory side-effects: reserved stock becomes sold on payment,
       // releases on cancel, and on failed delivery the officer's choice

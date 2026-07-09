@@ -14,14 +14,17 @@ import { useAppStore } from '../../stores/appStore'
 import { supabase } from '../../lib/supabase'
 
 const TABS = [
-  { key: 'new', label: 'New' },
+  { key: 'new', label: 'New / Review' },
   { key: 'awaiting_waybill', label: 'Awaiting Waybill' },
   { key: 'waybilled', label: 'Waybilled' },
+  { key: 'arrived_at_park', label: 'At State Park' },
+  { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
   { key: 'today', label: 'Today' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'failed_delivery', label: 'Failed' },
+  { key: 'returned', label: 'Returned' },
   { key: 'by_state', label: 'By State' },
 ]
 
@@ -42,7 +45,7 @@ export function FulfillmentPage() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing']
+  const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing']
 
   const filters = {
     search: search || undefined,

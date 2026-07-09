@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Plus, SlidersHorizontal, X } from 'lucide-react'
+import { supabase } from '../../lib/supabase'
 import { useOrders } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
@@ -15,9 +17,12 @@ import { Input } from '../../components/ui/Input'
 
 const ALL_STATUS_TABS = [
   { key: 'all', label: 'All' },
+  { key: 'unassigned', label: 'Unassigned States' },
   { key: 'new', label: 'New' },
   { key: 'awaiting_waybill', label: 'Awaiting' },
   { key: 'waybilled', label: 'Waybilled' },
+  { key: 'arrived_at_park', label: 'At State Park' },
+  { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
   { key: 'delivered', label: 'Delivered' },
@@ -41,6 +46,8 @@ const FULFILLMENT_STATUS_TABS = [
   { key: 'new', label: 'New' },
   { key: 'awaiting_waybill', label: 'Awaiting' },
   { key: 'waybilled', label: 'Waybilled' },
+  { key: 'arrived_at_park', label: 'At State Park' },
+  { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
   { key: 'delivered', label: 'Delivered' },
@@ -58,7 +65,9 @@ export function OrdersPage() {
   const isCS = role === 'customer_support'
   const isFulfillment = role === 'fulfillment'
 
-  const statusTabs = isCS ? CS_STATUS_TABS : isFulfillment ? FULFILLMENT_STATUS_TABS : ALL_STATUS_TABS
+  const canSeeUnassigned = ['ceo', 'super_admin', 'operations_manager'].includes(role)
+  const statusTabs = (isCS ? CS_STATUS_TABS : isFulfillment ? FULFILLMENT_STATUS_TABS : ALL_STATUS_TABS)
+    .filter(t => t.key !== 'unassigned' || canSeeUnassigned)
   const defaultTab = isFulfillment ? 'new' : 'all'
 
   const statusParam = searchParams.get('status') || defaultTab
@@ -76,9 +85,14 @@ export function OrdersPage() {
 
   const hasDateFilter = !!(dateFrom || dateTo)
 
+  const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing']
+
   const filters = {
     search: search || undefined,
-    status: activeTab === 'fee_pending' ? 'paid' : activeTab !== 'all' ? activeTab : undefined,
+    status: activeTab === 'fee_pending' ? 'paid'
+      : ['all', 'unassigned'].includes(activeTab) ? undefined
+      : activeTab,
+    statuses: activeTab === 'unassigned' ? ACTIVE_STATUSES : undefined,
     delivery_fee_pending: activeTab === 'fee_pending' ? true : undefined,
     business_id: businessFilter || undefined,
     state: stateFilter || undefined,
@@ -88,6 +102,31 @@ export function OrdersPage() {
   }
 
   const { data: orders, isLoading } = useOrders(filters)
+
+  // States covered by active fulfillment officers — orders outside them form
+  // the Unassigned States queue (CEO / Operations Manager)
+  const coveredStatesQ = useQuery({
+    queryKey: ['fulfillment_covered_states'],
+    enabled: canSeeUnassigned,
+    staleTime: 60000,
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('staff_users')
+          .select('assigned_states')
+          .eq('role', 'fulfillment')
+          .eq('is_active', true)
+        if (error) throw error
+        const covered = new Set()
+        ;(data || []).forEach(r => (r.assigned_states || []).forEach(s => covered.add(s)))
+        return Array.from(covered)
+      } catch { return [] }
+    },
+  })
+
+  const displayOrders = activeTab === 'unassigned'
+    ? (orders || []).filter(o => o.state && !(coveredStatesQ.data || []).includes(o.state))
+    : (orders || [])
 
   const canCreate = ['ceo', 'super_admin', 'customer_support', 'operations_manager'].includes(user?.role)
 
@@ -183,23 +222,30 @@ export function OrdersPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
+        {activeTab === 'unassigned' && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+            Active orders in states no fulfillment officer covers. Assign states from Staff Management.
+          </p>
+        )}
         {isLoading ? (
           <SkeletonList count={5} />
-        ) : orders?.length === 0 ? (
+        ) : displayOrders.length === 0 ? (
           <EmptyState
             icon={<ShoppingCart size={28} />}
-            title="No orders found"
-            description={search ? 'Try adjusting your search' : 'No orders in this status yet'}
-            action={canCreate ? () => navigate('/orders/new') : undefined}
+            title={activeTab === 'unassigned' ? 'All states are covered' : 'No orders found'}
+            description={activeTab === 'unassigned'
+              ? 'Every active order is in a state with an assigned fulfillment officer'
+              : search ? 'Try adjusting your search' : 'No orders in this status yet'}
+            action={canCreate && activeTab !== 'unassigned' ? () => navigate('/orders/new') : undefined}
             actionLabel="Create Order"
           />
         ) : (
           <>
             <p className="text-xs text-gray-500">
-              {orders.length} order{orders.length !== 1 ? 's' : ''}
-              {orders.length === 250 && ' (showing latest 250 — use date filter to narrow)'}
+              {displayOrders.length} order{displayOrders.length !== 1 ? 's' : ''}
+              {displayOrders.length === 250 && ' (showing latest 250 — use date filter to narrow)'}
             </p>
-            {orders.map(order => (
+            {displayOrders.map(order => (
               <OrderCard key={order.id} order={order} onClick={() => navigate(`/orders/${order.id}`)} />
             ))}
           </>

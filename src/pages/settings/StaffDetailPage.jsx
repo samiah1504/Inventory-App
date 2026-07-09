@@ -16,7 +16,8 @@ import {
   useIssueWarning, useSaveDocument, useDeleteDocument, useAddStaffNote, useDeleteStaffNote,
   LEAVE_TYPES, WARNING_TYPES, DOCUMENT_CATEGORIES, STAFF_STATUSES, labelOf,
 } from '../../hooks/useStaff'
-import { useSetStaffStatus, useDeleteStaff, useSetStaffAccess, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
+import { useSetStaffStatus, useDeleteStaff, useSetStaffAccess, useSetAssignedStates, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
+import { NIGERIAN_STATES } from '../../utils/format'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
 import { savePdf } from '../../lib/pdf'
@@ -77,7 +78,9 @@ export function StaffDetailPage() {
   const deleteNote = useDeleteStaffNote()
   const deleteStaff = useDeleteStaff()
   const setAccess = useSetStaffAccess()
+  const setAssignedStates = useSetAssignedStates()
   const [accessDraft, setAccessDraft] = useState(null)
+  const [statesDraft, setStatesDraft] = useState(null)
 
   const staff = staffQ.data
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
@@ -209,6 +212,50 @@ export function StaffDetailPage() {
                 </div>
               ))}
             </div>
+
+            {/* Assigned states — which states this fulfillment officer covers */}
+            {isManager && staff.role === 'fulfillment' && (() => {
+              const current = statesDraft ?? (Array.isArray(staff.assigned_states) ? staff.assigned_states : [])
+              const dirty = statesDraft !== null
+              const toggle = (s) => setStatesDraft(
+                current.includes(s) ? current.filter(x => x !== s) : [...current, s]
+              )
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Assigned States</p>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    {staff.name.split(' ')[0]} only sees orders for the ticked states. No ticks = sees all states. Applies at their next login.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {NIGERIAN_STATES.map(s => {
+                      const on = current.includes(s)
+                      return (
+                        <button key={s} onClick={() => toggle(s)}
+                          className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-left transition-all active:scale-[0.99] ${
+                            on ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'
+                          }`}>
+                          <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+                            on ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-transparent'
+                          }`}>
+                            <Check size={12} />
+                          </span>
+                          <span className="text-xs text-gray-800 truncate">{s}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {dirty && (
+                    <Button className="w-full mt-3" size="sm" loading={setAssignedStates.isPending}
+                      onClick={async () => {
+                        await setAssignedStates.mutateAsync({ staff_id: staff.id, states: current })
+                        setStatesDraft(null)
+                      }}>
+                      Save Assigned States
+                    </Button>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* App access — tick what this staff member can open */}
             {isCeo && !['ceo', 'super_admin'].includes(staff.role) && (() => {

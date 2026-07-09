@@ -282,3 +282,18 @@ CREATE TABLE IF NOT EXISTS staff_notes (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_staff_notes_staff ON staff_notes(staff_id);
+
+-- ===================================================
+-- State-based fulfillment + State Park workflow
+-- ===================================================
+
+-- States each fulfillment officer covers
+ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS assigned_states TEXT[] DEFAULT '{}';
+
+-- State Park pickup / warehouse receipt details on orders
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS rider_phone TEXT,
+  ADD COLUMN IF NOT EXISTS park_pickup_time TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS warehouse_received_qty INT,
+  ADD COLUMN IF NOT EXISTS warehouse_received_time TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS warehouse_received_condition TEXT;

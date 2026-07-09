@@ -12,26 +12,44 @@ export function FulfillmentDashboard() {
 
   const today = new Date().toISOString().split('T')[0]
 
+  // Officers with assigned states only count orders in those states
+  const myStates = Array.isArray(user?.assigned_states) && user.assigned_states.length > 0
+    ? user.assigned_states : null
+
   const counts = useQuery({
-    queryKey: ['fulfillment_counts', today],
+    queryKey: ['fulfillment_counts', today, myStates],
     queryFn: async () => {
-      const [newR, awaitingR, waybilledR, atWarehouseR, processingR, deliveredR, todayR, overdueR] = await Promise.all([
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'new'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'waybilled'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'received_at_warehouse'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'delivered'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('planned_delivery_date', today),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing').lt('planned_delivery_date', today),
+      const scoped = (q) => myStates ? q.in('state', myStates) : q
+      const byStatus = (status) =>
+        scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', status))
+
+      const [newR, awaitingR, waybilledR, atParkR, pickedR, atWarehouseR, processingR, deliveredR, paidR, failedR, returnedR, todayR, overdueR] = await Promise.all([
+        byStatus('new'),
+        byStatus('awaiting_waybill'),
+        byStatus('waybilled'),
+        byStatus('arrived_at_park'),
+        byStatus('picked_up_from_park'),
+        byStatus('received_at_warehouse'),
+        byStatus('processing'),
+        byStatus('delivered'),
+        byStatus('paid'),
+        byStatus('failed_delivery'),
+        byStatus('returned'),
+        scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('planned_delivery_date', today)),
+        scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing').lt('planned_delivery_date', today)),
       ])
       return {
         new: newR.count || 0,
         awaiting_waybill: awaitingR.count || 0,
         waybilled: waybilledR.count || 0,
+        at_park: atParkR.count || 0,
+        picked_up: pickedR.count || 0,
         at_warehouse: atWarehouseR.count || 0,
         processing: processingR.count || 0,
         delivered: deliveredR.count || 0,
+        paid: paidR.count || 0,
+        failed: failedR.count || 0,
+        returned: returnedR.count || 0,
         today: todayR.count || 0,
         overdue: overdueR.count || 0,
       }
@@ -48,22 +66,37 @@ export function FulfillmentDashboard() {
         <p className="text-yellow-400 text-sm font-medium">Fulfillment</p>
         <h1 className="text-2xl font-bold">{user?.name}</h1>
         <p className="text-gray-400 text-sm mt-0.5">{user?.staff_code}</p>
+        {myStates && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {myStates.map(s => (
+              <span key={s} className="text-[11px] font-medium bg-gray-800 text-yellow-400 px-2 py-0.5 rounded-full">{s}</span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
         <div className="grid grid-cols-2 gap-3">
-          <StatCard label="New Orders" value={loading ? '...' : c.new} icon={<Package size={20} />} color="blue"
+          <StatCard label="New / To Review" value={loading ? '...' : c.new} icon={<Package size={20} />} color="blue"
             onClick={() => navigate('/fulfillment?tab=new')} />
           <StatCard label="Awaiting Waybill" value={loading ? '...' : c.awaiting_waybill} icon={<Clock size={20} />} color="amber"
             onClick={() => navigate('/fulfillment?tab=awaiting_waybill')} />
           <StatCard label="Waybilled" value={loading ? '...' : c.waybilled} icon={<Truck size={20} />} color="purple"
             onClick={() => navigate('/fulfillment?tab=waybilled')} />
+          <StatCard label="At State Park" value={loading ? '...' : c.at_park} icon={<MapPin size={20} />} color="blue"
+            onClick={() => navigate('/fulfillment?tab=arrived_at_park')} />
+          <StatCard label="Picked Up from Park" value={loading ? '...' : c.picked_up} icon={<Truck size={20} />} color="green"
+            onClick={() => navigate('/fulfillment?tab=picked_up_from_park')} />
           <StatCard label="At Warehouse" value={loading ? '...' : c.at_warehouse} icon={<MapPin size={20} />} color="indigo"
             onClick={() => navigate('/fulfillment?tab=received_at_warehouse')} />
           <StatCard label="Processing" value={loading ? '...' : c.processing} icon={<AlertTriangle size={20} />} color="green"
             onClick={() => navigate('/fulfillment?tab=processing')} />
           <StatCard label="Delivered (Unpaid)" value={loading ? '...' : c.delivered} icon={<CheckCircle size={20} />} color="gray"
             onClick={() => navigate('/fulfillment?tab=delivered')} />
+          <StatCard label="Paid" value={loading ? '...' : c.paid} icon={<CheckCircle size={20} />} color="green"
+            onClick={() => navigate('/orders?status=paid')} />
+          <StatCard label="Failed / Returned" value={loading ? '...' : c.failed + c.returned} icon={<AlertTriangle size={20} />} color={c && (c.failed + c.returned) > 0 ? 'red' : 'gray'}
+            onClick={() => navigate('/fulfillment?tab=failed_delivery')} />
         </div>
 
         {/* Scheduled Today + Overdue */}

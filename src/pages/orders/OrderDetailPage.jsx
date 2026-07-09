@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { Phone, MessageCircle, Copy, FileText, Plus, Pencil, Calendar } from 'lucide-react'
 import { useOrder, useUpdateOrderStatus } from '../../hooks/useOrders'
 import { useAuthStore } from '../../stores/authStore'
@@ -15,13 +16,33 @@ import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from 
 import { supabase } from '../../lib/supabase'
 
 const STATUS_TRANSITIONS = {
-  ceo: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
-  super_admin: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
-  operations_manager: ['awaiting_waybill', 'waybilled', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled'],
+  ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
+  super_admin: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
+  operations_manager: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled'],
   customer_support: ['cancelled'],
-  fulfillment: ['processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery'],
-  waybill: ['awaiting_waybill', 'waybilled', 'received_at_warehouse'],
+  fulfillment: ['awaiting_waybill', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery'],
+  waybill: ['awaiting_waybill', 'waybilled', 'arrived_at_park'],
   inventory: ['received_at_warehouse'],
+}
+
+// The real route an order can take from each status. Enforces the workflow:
+// new → review (processing if stock in destination / awaiting waybill),
+// every Lagos shipment arrives at the State Park first, and from the park
+// fulfillment either picks up for direct delivery or moves to the warehouse.
+const NEXT_STATUSES = {
+  new: ['processing', 'awaiting_waybill', 'cancelled'],
+  awaiting_waybill: ['waybilled', 'processing', 'cancelled'],
+  waybilled: ['arrived_at_park', 'cancelled'],
+  arrived_at_park: ['picked_up_from_park', 'received_at_warehouse', 'cancelled'],
+  picked_up_from_park: ['processing', 'delivered', 'failed_delivery'],
+  received_at_warehouse: ['processing', 'cancelled'],
+  processing: ['delivered', 'failed_delivery', 'cancelled'],
+  delivered: ['paid', 'partially_paid', 'returned', 'failed_delivery'],
+  partially_paid: ['paid', 'returned'],
+  paid: ['returned'],
+  failed_delivery: ['processing', 'returned', 'cancelled'],
+  cancelled: [],
+  returned: [],
 }
 
 export function OrderDetailPage() {
@@ -47,6 +68,32 @@ export function OrderDetailPage() {
   const [showReasonModal, setShowReasonModal] = useState(false)
   const [showProcessingModal, setShowProcessingModal] = useState(false)
   const [processingDate, setProcessingDate] = useState(new Date().toISOString().split('T')[0])
+  const [showParkPickupModal, setShowParkPickupModal] = useState(false)
+  const [parkForm, setParkForm] = useState({ rider_phone: '', pickup_time: '', notes: '' })
+  const [showWhReceiptModal, setShowWhReceiptModal] = useState(false)
+  const [whForm, setWhForm] = useState({ qty: '', time: '', condition: 'good', notes: '' })
+
+  // Destination-state stock check for the procurement review (new orders)
+  const destStock = useQuery({
+    queryKey: ['dest_stock', id, order?.state],
+    enabled: !!order && order.status === 'new' && showStatusModal,
+    queryFn: async () => {
+      try {
+        const { data: whs } = await supabase.from('warehouses').select('id, name').eq('state', order.state)
+        if (!whs || whs.length === 0) return { hasWarehouse: false, available: 0 }
+        const items = Array.isArray(order.items_data) && order.items_data.length > 0
+          ? order.items_data.filter(i => i.product_id)
+          : (order.product_id ? [{ product_id: order.product_id }] : [])
+        if (items.length === 0) return { hasWarehouse: true, available: null }
+        const { data: inv } = await supabase.from('inventory')
+          .select('quantity_available, product_id, warehouse_id')
+          .in('warehouse_id', whs.map(w => w.id))
+          .in('product_id', items.map(i => i.product_id))
+        const available = (inv || []).reduce((s, r) => s + Number(r.quantity_available || 0), 0)
+        return { hasWarehouse: true, available }
+      } catch { return null }
+    },
+  })
 
   if (isLoading) return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
@@ -67,9 +114,8 @@ export function OrderDetailPage() {
   )
 
   const roleTransitions = STATUS_TRANSITIONS[user?.role] || []
-  const allowedTransitions = order.status === 'paid'
-    ? roleTransitions.filter(s => s === 'returned')
-    : roleTransitions
+  const nextStatuses = NEXT_STATUSES[order.status] ?? Object.keys(NEXT_STATUSES)
+  const allowedTransitions = roleTransitions.filter(s => nextStatuses.includes(s))
   const canChangeStatus = allowedTransitions.length > 0
   const canViewDocs = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
   const canEdit = order.status === 'new' && (
@@ -101,20 +147,82 @@ export function OrderDetailPage() {
       setShowStatusModal(false)
       return
     }
+    if (newStatus === 'picked_up_from_park') {
+      setParkForm({ rider_phone: '', pickup_time: new Date().toISOString().slice(0, 16), notes: '' })
+      setShowParkPickupModal(true)
+      setShowStatusModal(false)
+      return
+    }
+    if (newStatus === 'received_at_warehouse' && order.status === 'arrived_at_park') {
+      setWhForm({ qty: String(order.quantity || 1), time: new Date().toISOString().slice(0, 16), condition: 'good', notes: '' })
+      setShowWhReceiptModal(true)
+      setShowStatusModal(false)
+      return
+    }
+
+    let timelineDesc = `Marked ${statusLabel(newStatus)} by ${user?.name}`
+    if (newStatus === 'awaiting_waybill' && order.status === 'new') {
+      timelineDesc = `Order marked Awaiting Waybill because stock is not available in destination warehouse — by ${user?.name}`
+    } else if (newStatus === 'arrived_at_park') {
+      timelineDesc = `Arrived at ${order.state} State Park — confirmed by ${user?.name}`
+    }
     await updateStatus.mutateAsync({
       id: order.id,
       status: newStatus,
-      timelineDesc: `Marked ${statusLabel(newStatus)} by ${user?.name}`
+      timelineDesc,
     })
     setShowStatusModal(false)
   }
 
+  async function handleParkPickupSubmit() {
+    if (!parkForm.rider_phone.trim()) {
+      showToast("Enter the rider's phone number", 'error')
+      return
+    }
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'picked_up_from_park',
+      extraSafe: {
+        rider_phone: parkForm.rider_phone.trim(),
+        park_pickup_time: parkForm.pickup_time ? new Date(parkForm.pickup_time).toISOString() : new Date().toISOString(),
+      },
+      timelineDesc: `Order picked up from ${order.state} State Park for direct delivery — rider ${parkForm.rider_phone.trim()}${parkForm.notes ? ` · ${parkForm.notes}` : ''} — by ${user?.name}`,
+    })
+    setShowParkPickupModal(false)
+  }
+
+  async function handleWhReceiptSubmit() {
+    if (!whForm.qty || Number(whForm.qty) <= 0) {
+      showToast('Enter the quantity received', 'error')
+      return
+    }
+    const condLabel = { good: 'Good condition', minor_damage: 'Minor damage', damaged: 'Damaged', incomplete: 'Incomplete' }[whForm.condition] || whForm.condition
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'received_at_warehouse',
+      extraSafe: {
+        warehouse_received_qty: Number(whForm.qty),
+        warehouse_received_time: whForm.time ? new Date(whForm.time).toISOString() : new Date().toISOString(),
+        warehouse_received_condition: whForm.condition,
+      },
+      timelineDesc: `Order transferred from ${order.state} State Park to warehouse — by ${user?.name}`,
+      extraTimeline: {
+        action: 'received_at_warehouse',
+        description: `Order received at warehouse — ${whForm.qty} unit${Number(whForm.qty) !== 1 ? 's' : ''}, ${condLabel}${whForm.notes ? ` · ${whForm.notes}` : ''} — by ${user?.name}`,
+      },
+    })
+    setShowWhReceiptModal(false)
+  }
+
   async function handleProcessingSubmit() {
+    const timelineDesc = order.status === 'new'
+      ? `Order marked Processing because stock is already available in destination warehouse. Scheduled for delivery on ${processingDate} — by ${user?.name}`
+      : `Scheduled for delivery on ${processingDate} by ${user?.name}`
     await updateStatus.mutateAsync({
       id: order.id,
       status: 'processing',
       extra: { planned_delivery_date: processingDate || null },
-      timelineDesc: `Scheduled for delivery on ${processingDate} by ${user?.name}`
+      timelineDesc,
     })
     setShowProcessingModal(false)
   }
@@ -507,6 +615,33 @@ export function OrderDetailPage() {
         onClose={() => setShowStatusModal(false)}
         title="Update Order Status"
       >
+        {/* Procurement review: does the destination state already hold the stock? */}
+        {order.status === 'new' && (
+          <div className={`rounded-xl p-3 mb-3 text-xs ${
+            destStock.data?.available > 0 ? 'bg-green-50 text-green-800' : 'bg-amber-50 text-amber-800'
+          }`}>
+            {destStock.isLoading ? (
+              <p>Checking {order.state} warehouse stock…</p>
+            ) : destStock.data?.hasWarehouse === false ? (
+              <p className="font-medium">No warehouse in {order.state} — this order will need a waybill.</p>
+            ) : destStock.data?.available > 0 ? (
+              <p className="font-medium">{destStock.data.available} unit{destStock.data.available !== 1 ? 's' : ''} available in the {order.state} warehouse — you can mark Processing directly.</p>
+            ) : (
+              <p className="font-medium">No stock of this product in the {order.state} warehouse — choose Awaiting Waybill to ship it.</p>
+            )}
+            <p className="mt-1 text-[11px] opacity-80">
+              Processing = stock already at destination · Awaiting Waybill = ship from Lagos
+            </p>
+          </div>
+        )}
+        {order.status === 'arrived_at_park' && (
+          <div className="rounded-xl p-3 mb-3 text-xs bg-cyan-50 text-cyan-900">
+            <p className="font-medium">The shipment is at the {order.state} State Park.</p>
+            <p className="mt-1 text-[11px] opacity-80">
+              Picked Up from Park = deliver straight to the customer · At Warehouse = move it to the state warehouse first
+            </p>
+          </div>
+        )}
         <div className="space-y-2">
           {allowedTransitions.map(status => (
             <button
@@ -523,6 +658,67 @@ export function OrderDetailPage() {
               {order.status === status && <span className="text-xs text-gray-400">Current</span>}
             </button>
           ))}
+        </div>
+      </Modal>
+
+      {/* Park Pickup Modal — direct delivery from State Park */}
+      <Modal
+        isOpen={showParkPickupModal}
+        onClose={() => setShowParkPickupModal(false)}
+        title={`Picked Up from ${order.state} State Park`}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowParkPickupModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={handleParkPickupSubmit} loading={updateStatus.isPending} className="flex-1"
+              disabled={!parkForm.rider_phone.trim()}>
+              Confirm Pickup
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">The product goes straight from the State Park to the customer.</p>
+          <Input label="Rider's Phone Number" type="tel" inputMode="tel" required placeholder="08012345678"
+            value={parkForm.rider_phone} onChange={e => setParkForm({ ...parkForm, rider_phone: e.target.value })} />
+          <Input label="Pick-up Time" type="datetime-local" required
+            value={parkForm.pickup_time} onChange={e => setParkForm({ ...parkForm, pickup_time: e.target.value })} />
+          <Textarea label="Notes (optional)" rows={2} placeholder="Vehicle, landmark, instructions..."
+            value={parkForm.notes} onChange={e => setParkForm({ ...parkForm, notes: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Warehouse Receipt Modal — park → state warehouse */}
+      <Modal
+        isOpen={showWhReceiptModal}
+        onClose={() => setShowWhReceiptModal(false)}
+        title={`Received at ${order.state} Warehouse`}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowWhReceiptModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={handleWhReceiptSubmit} loading={updateStatus.isPending} className="flex-1"
+              disabled={!whForm.qty || Number(whForm.qty) <= 0}>
+              Confirm Receipt
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">The product moves from the State Park into the state warehouse.</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Quantity Received" type="number" inputMode="numeric" required min="1"
+              value={whForm.qty} onChange={e => setWhForm({ ...whForm, qty: e.target.value })} />
+            <Input label="Time Received" type="datetime-local" required
+              value={whForm.time} onChange={e => setWhForm({ ...whForm, time: e.target.value })} />
+          </div>
+          <Select label="Condition" required value={whForm.condition}
+            onChange={e => setWhForm({ ...whForm, condition: e.target.value })}>
+            <option value="good">Good condition</option>
+            <option value="minor_damage">Minor damage</option>
+            <option value="damaged">Damaged</option>
+            <option value="incomplete">Incomplete / missing parts</option>
+          </Select>
+          <Textarea label="Notes (optional)" rows={2}
+            value={whForm.notes} onChange={e => setWhForm({ ...whForm, notes: e.target.value })} />
         </div>
       </Modal>
 
