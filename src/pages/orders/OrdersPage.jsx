@@ -27,7 +27,6 @@ const ALL_STATUS_TABS = [
   { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
-  { key: 'today', label: 'Due Today' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
   { key: 'fee_pending', label: 'Fee Pending' },
@@ -115,9 +114,10 @@ export function OrdersPage() {
   const updateStatus = useUpdateOrderStatus()
   const advanceBatch = useAdvanceBatchStatus()
   const [actingOrder, setActingOrder] = useState(null)
-  const canFulfill = ['ceo', 'super_admin', 'operations_manager', 'fulfillment'].includes(role)
-  const showQuickActions = canFulfill && ['processing', 'today'].includes(activeTab)
-  const showBatchArrive = canFulfill && activeTab === 'waybilled'
+  // Board actions live here only for the fulfillment officer — other roles
+  // keep using the separate Fulfillment board
+  const showQuickActions = isFulfillment && ['processing', 'today'].includes(activeTab)
+  const showBatchArrive = isFulfillment && activeTab === 'waybilled'
 
   async function quickDeliver(order) {
     if (actingOrder === order.id) return
