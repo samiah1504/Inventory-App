@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, SlidersHorizontal, X } from 'lucide-react'
+import { Plus, SlidersHorizontal, X, CheckCircle, XCircle, Inbox } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
-import { useOrders } from '../../hooks/useOrders'
+import { useOrders, useUpdateOrderStatus } from '../../hooks/useOrders'
+import { useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
+import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
@@ -25,6 +27,7 @@ const ALL_STATUS_TABS = [
   { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
+  { key: 'today', label: 'Due Today' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
   { key: 'fee_pending', label: 'Fee Pending' },
@@ -50,10 +53,12 @@ const FULFILLMENT_STATUS_TABS = [
   { key: 'picked_up_from_park', label: 'Picked Up' },
   { key: 'received_at_warehouse', label: 'At Warehouse' },
   { key: 'processing', label: 'Processing' },
+  { key: 'today', label: 'Due Today' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
   { key: 'fee_pending', label: 'Fee Pending' },
   { key: 'failed_delivery', label: 'Failed' },
+  { key: 'returned', label: 'Returned' },
 ]
 
 export function OrdersPage() {
@@ -86,13 +91,15 @@ export function OrdersPage() {
   const hasDateFilter = !!(dateFrom || dateTo)
 
   const ACTIVE_STATUSES = ['new', 'awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing']
+  const today = new Date().toISOString().split('T')[0]
 
   const filters = {
     search: search || undefined,
     status: activeTab === 'fee_pending' ? 'paid'
-      : ['all', 'unassigned'].includes(activeTab) ? undefined
+      : ['all', 'unassigned', 'today'].includes(activeTab) ? undefined
       : activeTab,
     statuses: activeTab === 'unassigned' ? ACTIVE_STATUSES : undefined,
+    planned_delivery_date: activeTab === 'today' ? today : undefined,
     delivery_fee_pending: activeTab === 'fee_pending' ? true : undefined,
     business_id: businessFilter || undefined,
     state: stateFilter || undefined,
@@ -102,6 +109,77 @@ export function OrdersPage() {
   }
 
   const { data: orders, isLoading } = useOrders(filters)
+
+  // Fulfillment board actions (merged in for the fulfillment officer)
+  const { showToast } = useAppStore()
+  const updateStatus = useUpdateOrderStatus()
+  const advanceBatch = useAdvanceBatchStatus()
+  const [actingOrder, setActingOrder] = useState(null)
+  const canFulfill = ['ceo', 'super_admin', 'operations_manager', 'fulfillment'].includes(role)
+  const showQuickActions = canFulfill && ['processing', 'today'].includes(activeTab)
+  const showBatchArrive = canFulfill && activeTab === 'waybilled'
+
+  async function quickDeliver(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      await updateStatus.mutateAsync({
+        id: order.id,
+        status: 'delivered',
+        extra: { delivered_at: new Date().toISOString() },
+        timelineDesc: `Marked delivered by ${user?.name}`,
+      })
+    } finally { setActingOrder(null) }
+  }
+
+  async function quickFail(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      await updateStatus.mutateAsync({
+        id: order.id,
+        status: 'failed_delivery',
+        extra: { failed_reason: 'Failed delivery (marked from orders board)' },
+        timelineDesc: `Marked failed delivery by ${user?.name}`,
+      })
+    } finally { setActingOrder(null) }
+  }
+
+  async function batchArrived(order) {
+    if (actingOrder === order.id) return
+    setActingOrder(order.id)
+    try {
+      const { data: batchOrderData } = await supabase
+        .from('waybill_batch_orders')
+        .select('batch_id, batch:waybill_batches(id, batch_number, status)')
+        .eq('order_id', order.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (!batchOrderData?.batch_id) {
+        showToast('No waybill batch found for this order', 'error')
+        return
+      }
+      const batchInfo = batchOrderData.batch
+      if (batchInfo.status === 'received') {
+        navigate(`/waybill/batches/${batchOrderData.batch_id}?tab=expenses`)
+        return
+      }
+      const { data: allBatchOrders } = await supabase
+        .from('waybill_batch_orders')
+        .select('order_id')
+        .eq('batch_id', batchOrderData.batch_id)
+      await advanceBatch.mutateAsync({
+        batchId: batchOrderData.batch_id,
+        newStatus: 'received',
+        batchNumber: batchInfo.batch_number,
+        orderIds: (allBatchOrders || []).map(bo => bo.order_id).filter(Boolean),
+      })
+      showToast(`Batch ${batchInfo.batch_number} arrived at State Park`, 'success')
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally { setActingOrder(null) }
+  }
 
   // States covered by active fulfillment officers — orders outside them form
   // the Unassigned States queue (CEO / Operations Manager)
@@ -193,14 +271,15 @@ export function OrdersPage() {
             {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
-        {canFilterBusiness && (
+        {(canFilterBusiness || isFulfillment) && (
           <select
             value={stateFilter}
             onChange={e => setStateFilter(e.target.value)}
             className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">All States</option>
-            {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            <option value="">{isFulfillment && user?.assigned_states?.length > 0 ? 'All My States' : 'All States'}</option>
+            {(isFulfillment && user?.assigned_states?.length > 0 ? user.assigned_states : NIGERIAN_STATES)
+              .map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         )}
         {/* Status tabs */}
@@ -246,7 +325,41 @@ export function OrdersPage() {
               {displayOrders.length === 250 && ' (showing latest 250 — use date filter to narrow)'}
             </p>
             {displayOrders.map(order => (
-              <OrderCard key={order.id} order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+              <div key={order.id}>
+                <OrderCard order={order} onClick={() => navigate(`/orders/${order.id}`)} />
+                {showQuickActions && (
+                  <div className="flex gap-2 mt-1 px-0.5">
+                    <button
+                      onClick={() => quickDeliver(order)}
+                      disabled={actingOrder === order.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-green-700 bg-green-50 border border-green-100 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <CheckCircle size={14} />
+                      {actingOrder === order.id ? 'Saving...' : 'Delivered'}
+                    </button>
+                    <button
+                      onClick={() => quickFail(order)}
+                      disabled={actingOrder === order.id}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-semibold text-red-700 bg-red-50 border border-red-100 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <XCircle size={14} />
+                      Failed
+                    </button>
+                  </div>
+                )}
+                {showBatchArrive && (
+                  <div className="mt-1 px-0.5">
+                    <button
+                      onClick={() => batchArrived(order)}
+                      disabled={actingOrder === order.id}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded-xl active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      <Inbox size={14} />
+                      {actingOrder === order.id ? 'Processing...' : 'Arrived at State Park'}
+                    </button>
+                  </div>
+                )}
+              </div>
             ))}
           </>
         )}

@@ -78,31 +78,31 @@ export function FulfillmentDashboard() {
       <div className="px-4 -mt-4 space-y-4 pb-6">
         <div className="grid grid-cols-2 gap-3">
           <StatCard label="New / To Review" value={loading ? '...' : c.new} icon={<Package size={20} />} color="blue"
-            onClick={() => navigate('/fulfillment?tab=new')} />
+            onClick={() => navigate('/orders?status=new')} />
           <StatCard label="Awaiting Waybill" value={loading ? '...' : c.awaiting_waybill} icon={<Clock size={20} />} color="amber"
-            onClick={() => navigate('/fulfillment?tab=awaiting_waybill')} />
+            onClick={() => navigate('/orders?status=awaiting_waybill')} />
           <StatCard label="Waybilled" value={loading ? '...' : c.waybilled} icon={<Truck size={20} />} color="purple"
-            onClick={() => navigate('/fulfillment?tab=waybilled')} />
+            onClick={() => navigate('/orders?status=waybilled')} />
           <StatCard label="At State Park" value={loading ? '...' : c.at_park} icon={<MapPin size={20} />} color="blue"
-            onClick={() => navigate('/fulfillment?tab=arrived_at_park')} />
+            onClick={() => navigate('/orders?status=arrived_at_park')} />
           <StatCard label="Picked Up from Park" value={loading ? '...' : c.picked_up} icon={<Truck size={20} />} color="green"
-            onClick={() => navigate('/fulfillment?tab=picked_up_from_park')} />
+            onClick={() => navigate('/orders?status=picked_up_from_park')} />
           <StatCard label="At Warehouse" value={loading ? '...' : c.at_warehouse} icon={<MapPin size={20} />} color="indigo"
-            onClick={() => navigate('/fulfillment?tab=received_at_warehouse')} />
+            onClick={() => navigate('/orders?status=received_at_warehouse')} />
           <StatCard label="Processing" value={loading ? '...' : c.processing} icon={<AlertTriangle size={20} />} color="green"
-            onClick={() => navigate('/fulfillment?tab=processing')} />
+            onClick={() => navigate('/orders?status=processing')} />
           <StatCard label="Delivered (Unpaid)" value={loading ? '...' : c.delivered} icon={<CheckCircle size={20} />} color="gray"
-            onClick={() => navigate('/fulfillment?tab=delivered')} />
+            onClick={() => navigate('/orders?status=delivered')} />
           <StatCard label="Paid" value={loading ? '...' : c.paid} icon={<CheckCircle size={20} />} color="green"
             onClick={() => navigate('/orders?status=paid')} />
           <StatCard label="Failed / Returned" value={loading ? '...' : c.failed + c.returned} icon={<AlertTriangle size={20} />} color={c && (c.failed + c.returned) > 0 ? 'red' : 'gray'}
-            onClick={() => navigate('/fulfillment?tab=failed_delivery')} />
+            onClick={() => navigate('/orders?status=failed_delivery')} />
         </div>
 
         {/* Scheduled Today + Overdue */}
         <div className="grid grid-cols-2 gap-3">
           <button
-            onClick={() => navigate('/fulfillment?tab=today')}
+            onClick={() => navigate('/orders?status=today')}
             className="bg-white rounded-2xl p-4 border border-gray-100 text-left active:scale-[0.99] transition-all"
           >
             <p className="text-xs text-gray-500 mb-1">Today</p>
@@ -110,7 +110,7 @@ export function FulfillmentDashboard() {
             <p className="text-xs text-gray-400 mt-0.5">{formatDate(new Date().toISOString())}</p>
           </button>
           <button
-            onClick={() => navigate('/fulfillment?tab=processing')}
+            onClick={() => navigate('/orders?status=processing')}
             className={`rounded-2xl p-4 border text-left active:scale-[0.99] transition-all ${(!loading && c.overdue > 0) ? 'bg-red-50 border-red-200' : 'bg-white border-gray-100'}`}
           >
             <p className={`text-xs mb-1 ${(!loading && c.overdue > 0) ? 'text-red-600 font-medium' : 'text-gray-500'}`}>Overdue</p>
@@ -121,20 +121,12 @@ export function FulfillmentDashboard() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            onClick={() => navigate('/fulfillment')}
-            className="py-3.5 bg-blue-600 text-black rounded-2xl font-semibold text-sm active:scale-95 transition-all"
-          >
-            Fulfillment Board
-          </button>
-          <button
-            onClick={() => navigate('/fulfillment?tab=by_state')}
-            className="py-3.5 bg-white border border-gray-200 text-gray-700 rounded-2xl font-semibold text-sm active:scale-95 transition-all"
-          >
-            By State
-          </button>
-        </div>
+        <button
+          onClick={() => navigate('/orders')}
+          className="w-full py-3.5 bg-blue-600 text-black rounded-2xl font-semibold text-sm active:scale-95 transition-all"
+        >
+          Open Orders Board
+        </button>
       </div>
     </div>
   )
