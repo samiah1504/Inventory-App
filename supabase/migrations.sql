@@ -206,3 +206,79 @@ CREATE INDEX IF NOT EXISTS idx_return_timeline_return ON return_timeline(return_
 -- Delivery Fee Pending workflow
 -- ===================================================
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee_pending BOOLEAN DEFAULT false;
+
+-- ===================================================
+-- Staff Management (HR): profiles, leave, discipline,
+-- documents, private notes
+-- ===================================================
+
+ALTER TABLE staff_users
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS address TEXT,
+  ADD COLUMN IF NOT EXISTS department TEXT,
+  ADD COLUMN IF NOT EXISTS position TEXT,
+  ADD COLUMN IF NOT EXISTS employment_type TEXT,   -- full_time / part_time / contract / intern
+  ADD COLUMN IF NOT EXISTS date_joined DATE,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active',  -- active / on_leave / suspended / inactive
+  ADD COLUMN IF NOT EXISTS business_id UUID REFERENCES businesses(id);
+
+CREATE TABLE IF NOT EXISTS staff_leave (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  leave_type TEXT NOT NULL,   -- annual / sick / maternity / emergency / unpaid / other
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  reason TEXT,
+  attachment_url TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / approved / rejected / cancelled
+  reviewed_by UUID REFERENCES staff_users(id),
+  reviewed_by_name TEXT,
+  reviewed_at TIMESTAMPTZ,
+  review_note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_leave_staff ON staff_leave(staff_id);
+CREATE INDEX IF NOT EXISTS idx_staff_leave_status ON staff_leave(status);
+
+CREATE TABLE IF NOT EXISTS staff_warnings (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  warning_type TEXT NOT NULL,   -- verbal / first_written / final_written / performance / attendance / misconduct / policy_violation / customer_complaint / other
+  category TEXT,
+  incident_details TEXT,
+  corrective_action TEXT,
+  review_date DATE,
+  consequence TEXT,
+  issued_by UUID REFERENCES staff_users(id),
+  issued_by_name TEXT,
+  date_issued DATE DEFAULT CURRENT_DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_warnings_staff ON staff_warnings(staff_id);
+
+CREATE TABLE IF NOT EXISTS staff_documents (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  category TEXT NOT NULL,   -- employment_agreement / offer_letter / job_description / salary_increment / warning_letter / suspension_letter / leave_approval / promotion_letter / performance_review / other
+  title TEXT NOT NULL,
+  file_url TEXT,            -- external link (e.g. Drive) when uploaded elsewhere
+  source TEXT DEFAULT 'manual',  -- manual / generated (rebuilt as PDF on demand)
+  body TEXT,                -- letter body for generated documents
+  reference_id UUID,        -- e.g. staff_warnings.id for warning letters
+  notes TEXT,
+  uploaded_by UUID REFERENCES staff_users(id),
+  uploaded_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_documents_staff ON staff_documents(staff_id);
+
+CREATE TABLE IF NOT EXISTS staff_notes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  note TEXT NOT NULL,
+  created_by UUID REFERENCES staff_users(id),
+  created_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_notes_staff ON staff_notes(staff_id);

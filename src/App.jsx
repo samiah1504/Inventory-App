@@ -16,6 +16,8 @@ import { CustomerDetailPage } from './pages/customers/CustomerDetailPage'
 import { ReportsPage } from './pages/reports/ReportsPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { StaffPage } from './pages/settings/StaffPage'
+import { StaffDetailPage } from './pages/settings/StaffDetailPage'
+import { MyLeavePage } from './pages/settings/MyLeavePage'
 import { BusinessesPage } from './pages/settings/BusinessesPage'
 import { WarehousesPage } from './pages/settings/WarehousesPage'
 import { ProductsPage } from './pages/settings/ProductsPage'
@@ -117,6 +119,8 @@ export default function App() {
             <Route path="/analytics" element={<SalesAnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/staff" element={<StaffPage />} />
+            <Route path="/settings/staff/:id" element={<StaffDetailPage />} />
+            <Route path="/settings/leave" element={<MyLeavePage />} />
             <Route path="/settings/businesses" element={<BusinessesPage />} />
             <Route path="/settings/warehouses" element={<WarehousesPage />} />
             <Route path="/settings/products" element={<ProductsPage />} />

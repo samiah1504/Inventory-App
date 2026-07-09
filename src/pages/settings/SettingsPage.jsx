@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign } from 'lucide-react'
+import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -32,6 +32,7 @@ export function SettingsPage() {
           { label: 'Warehouses', icon: Warehouse, to: '/settings/warehouses', sub: 'Add and manage warehouses' },
           { label: 'Expenses', icon: AlertCircle, to: '/accounting', sub: 'Admin-only expense tracking' },
           { label: 'Alerts', icon: Bell, to: '/settings/alerts', sub: 'Configure alert thresholds' },
+          { label: 'My Leave', icon: CalendarDays, to: '/settings/leave', sub: 'Apply for and track your leave' },
         ].map(({ label, icon: Icon, to, sub }) => (
           <button
             key={label}
@@ -97,6 +98,21 @@ function NonAdminSettings({ user, logout }) {
             <LogOut size={16} /> Sign Out
           </button>
         </div>
+
+        {/* Leave self-service for all staff */}
+        <button
+          onClick={() => navigate('/settings/leave')}
+          className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+        >
+          <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+            <CalendarDays size={20} />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <p className="text-sm font-semibold text-gray-900">My Leave</p>
+            <p className="text-xs text-gray-500">Apply for and track your leave</p>
+          </div>
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        </button>
 
         {/* Ops Manager gets access to alert config and accounting */}
         {isOpsManager && (
