@@ -63,7 +63,8 @@ export function statusLabel(status) {
     partially_paid: 'Partially Paid',
     failed_delivery: 'Failed Delivery',
     cancelled: 'Cancelled',
-    returned: 'Returned'
+    returned: 'Returned',
+    sent_to_park: 'Sent to State Park'
   }
   return labels[status] || status
 }
@@ -91,5 +92,5 @@ export const ORDER_STATUSES = [
   'new', 'awaiting_waybill', 'waybilled', 'arrived_at_park',
   'picked_up_from_park', 'received_at_warehouse',
   'processing', 'delivered', 'partially_paid', 'paid',
-  'failed_delivery', 'cancelled', 'returned'
+  'failed_delivery', 'cancelled', 'returned', 'sent_to_park'
 ]

@@ -315,3 +315,17 @@ CREATE TABLE IF NOT EXISTS waybill_batch_state_arrivals (
   UNIQUE(batch_id, state)
 );
 CREATE INDEX IF NOT EXISTS idx_wbsa_batch ON waybill_batch_state_arrivals(batch_id);
+
+-- ===================================================
+-- Returned order workflow (condition, decision, re-shipment)
+-- ===================================================
+ALTER TABLE orders
+  ADD COLUMN IF NOT EXISTS return_condition TEXT,
+  ADD COLUMN IF NOT EXISTS return_photos TEXT,
+  ADD COLUMN IF NOT EXISTS return_decision TEXT,
+  ADD COLUMN IF NOT EXISTS return_decision_notes TEXT,
+  ADD COLUMN IF NOT EXISTS return_decision_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS park_sent_name TEXT,
+  ADD COLUMN IF NOT EXISTS park_sent_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS park_sent_by TEXT,
+  ADD COLUMN IF NOT EXISTS park_origin_state TEXT;

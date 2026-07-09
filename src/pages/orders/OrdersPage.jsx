@@ -34,6 +34,7 @@ const ALL_STATUS_TABS = [
   { key: 'failed_delivery', label: 'Failed' },
   { key: 'cancelled', label: 'Cancelled' },
   { key: 'returned', label: 'Returned' },
+  { key: 'sent_to_park', label: 'Sent to Park' },
 ]
 
 // Customer Support only sees their own active orders

@@ -111,6 +111,9 @@ export async function receiveOrderStockAtWarehouse(order, staff) {
       reservedAt[product_id] = { warehouse_id, qty }
     })
 
+    // Re-shipped returned stock isn't held for a customer — it lands available
+    const asAvailable = order.return_decision === 'send_another_state'
+
     const items = await getOrderItems(order)
     for (const item of items) {
       if (!item.product_id) continue
@@ -155,7 +158,9 @@ export async function receiveOrderStockAtWarehouse(order, staff) {
       if (destRow) {
         await supabase.from('inventory').update({
           quantity_physical: (destRow.quantity_physical || 0) + qty,
-          quantity_reserved: (destRow.quantity_reserved || 0) + qty,
+          ...(asAvailable
+            ? { quantity_available: (destRow.quantity_available || 0) + qty }
+            : { quantity_reserved: (destRow.quantity_reserved || 0) + qty }),
         }).eq('id', destRow.id)
       } else {
         await supabase.from('inventory').insert({
@@ -163,16 +168,18 @@ export async function receiveOrderStockAtWarehouse(order, staff) {
           warehouse_id: dest.id,
           business_id: order.business_id || null,
           quantity_physical: qty,
-          quantity_reserved: qty,
-          quantity_available: 0,
+          quantity_reserved: asAvailable ? 0 : qty,
+          quantity_available: asAvailable ? qty : 0,
         })
       }
       await supabase.from('inventory_movements').insert({
         product_id: item.product_id, warehouse_id: dest.id, business_id: order.business_id || null,
-        movement_type: 'reserve',
+        movement_type: asAvailable ? 'return' : 'reserve',
         quantity: qty,
         reference_id: order.id, reference_type: 'order',
-        notes: `Received at ${dest.name} — held for ${order.order_number}`,
+        notes: asAvailable
+          ? `Returned stock received at ${dest.name} — available (${order.order_number})`
+          : `Received at ${dest.name} — held for ${order.order_number}`,
         staff_id: staff?.id || null,
       })
     }
@@ -634,5 +641,105 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
     }
   } catch (e) {
     console.warn('Failed delivery stock resolution failed:', e)
+  }
+}
+
+// ─── Returned order decision workflow ────────────────────────────────────────
+// The decision itself happens on WhatsApp; the app records the outcome and
+// applies the matching stock action to the order's awaiting-inspection
+// return records.
+
+const RETURN_DECISION_OUTCOMES = {
+  returned_warehouse: 'restocked',
+  returned_supplier:  'supplier_return',
+  damaged:            'damaged',
+  repair:             'repair',
+  other:              'other',
+}
+
+export async function recordReturnDecision(order, decision, notes, staff) {
+  try {
+    const { data: rows, error } = await supabase
+      .from('returns')
+      .select('*')
+      .eq('order_id', order.id)
+      .eq('status', 'awaiting_inspection')
+    if (error) return // returns table missing — timeline still records the decision
+    const returnRows = rows || []
+
+    const outcome = RETURN_DECISION_OUTCOMES[decision]
+    for (const ret of returnRows) {
+      if (outcome) {
+        // Terminal stock outcome — complete the return record and move stock
+        await supabase.from('returns').update({
+          outcome,
+          outcome_note: notes || null,
+          customer_resolution: ret.customer_resolution || 'no_refund',
+          status: 'completed',
+          processed_by: staff?.id || null,
+          processed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq('id', ret.id)
+        await addReturnTimeline(ret.id, 'decision', `Operations decision: ${decision.replace(/_/g, ' ')}${notes ? ` — ${notes}` : ''}`, staff)
+        await applyReturnOutcome(ret, outcome, staff)
+      } else if (decision === 'customer_refunded' || decision === 'product_exchanged') {
+        // Customer resolution recorded; stock stays in inspection until the
+        // physical product's location is finalised from Inventory > Returns
+        await supabase.from('returns').update({
+          customer_resolution: decision === 'customer_refunded' ? 'full_refund' : 'exchanged',
+          updated_at: new Date().toISOString(),
+        }).eq('id', ret.id)
+        await addReturnTimeline(ret.id, 'decision', `Operations decision: ${decision.replace(/_/g, ' ')}${notes ? ` — ${notes}` : ''}`, staff)
+      } else if (decision === 'send_another_state') {
+        await addReturnTimeline(ret.id, 'decision', `Operations decision: send to another state${notes ? ` — ${notes}` : ''}`, staff)
+      }
+    }
+  } catch (e) {
+    console.warn('Return decision recording failed:', e)
+  }
+}
+
+// Returned product leaves for another state (via the State Park). Takes the
+// goods out of the source inspection bucket; they re-enter inventory when the
+// destination confirms Received at Warehouse on the order.
+export async function sendReturnToAnotherState(order, destinationState, staff) {
+  try {
+    const { data: rows } = await supabase
+      .from('returns')
+      .select('*')
+      .eq('order_id', order.id)
+      .in('status', ['awaiting_inspection', 'completed'])
+    for (const ret of (rows || [])) {
+      if (!ret.product_id || !ret.warehouse_id) continue
+      const { data: inv } = await supabase.from('inventory').select('*')
+        .eq('product_id', ret.product_id).eq('warehouse_id', ret.warehouse_id).single()
+      if (!inv) continue
+      const qty = Number(ret.quantity) || 1
+      const upd = { quantity_physical: Math.max(0, (inv.quantity_physical || 0) - qty) }
+      if ('quantity_inspection' in inv) upd.quantity_inspection = Math.max(0, (inv.quantity_inspection || 0) - qty)
+      await supabase.from('inventory').update(upd).eq('id', inv.id)
+      await supabase.from('inventory_movements').insert({
+        product_id: ret.product_id,
+        warehouse_id: ret.warehouse_id,
+        business_id: inv.business_id,
+        movement_type: 'reserve_out',
+        quantity: -qty,
+        reference_id: order.id,
+        reference_type: 'order',
+        notes: `Returned stock sent to ${destinationState} — ${order.order_number}`,
+        staff_id: staff?.id || null,
+      })
+      await supabase.from('returns').update({
+        outcome: 'other',
+        outcome_note: `Sent to ${destinationState}`,
+        status: 'completed',
+        processed_by: staff?.id || null,
+        processed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', ret.id)
+      await addReturnTimeline(ret.id, 'sent_to_park', `Sent to ${destinationState} via State Park`, staff)
+    }
+  } catch (e) {
+    console.warn('Send-to-state stock update failed:', e)
   }
 }

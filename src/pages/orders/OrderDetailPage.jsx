@@ -14,6 +14,7 @@ import { buildOrderMessage, openDialer, openWhatsApp } from '../../utils/whatsap
 import { useAppStore } from '../../stores/appStore'
 import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from '../../lib/pdf'
 import { supabase } from '../../lib/supabase'
+import { recordReturnDecision, sendReturnToAnotherState } from '../../lib/stockOps'
 
 const STATUS_TRANSITIONS = {
   ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
@@ -42,8 +43,20 @@ const NEXT_STATUSES = {
   paid: ['returned'],
   failed_delivery: ['processing', 'returned', 'cancelled'],
   cancelled: [],
-  returned: [],
+  returned: [],   // decision is recorded via the Return Decision card
+  sent_to_park: ['waybilled', 'arrived_at_park', 'cancelled'],
 }
+
+const RETURN_DECISIONS = [
+  { value: 'returned_warehouse', label: 'Returned to Warehouse' },
+  { value: 'send_another_state', label: 'Send to Another State' },
+  { value: 'returned_supplier',  label: 'Returned to Supplier' },
+  { value: 'damaged',            label: 'Marked as Damaged' },
+  { value: 'repair',             label: 'Sent for Repair' },
+  { value: 'customer_refunded',  label: 'Customer Refunded' },
+  { value: 'product_exchanged',  label: 'Product Exchanged' },
+  { value: 'other',              label: 'Other' },
+]
 
 export function OrderDetailPage() {
   const { id } = useParams()
@@ -66,6 +79,11 @@ export function OrderDetailPage() {
   })
   const [cancelReason, setCancelReason] = useState('')
   const [returnReason, setReturnReason] = useState('')
+  const [returnExtra, setReturnExtra] = useState({ condition: 'good', photos: '' })
+  const [showDecisionModal, setShowDecisionModal] = useState(false)
+  const [decisionForm, setDecisionForm] = useState({ decision: '', notes: '' })
+  const [showParkSendModal, setShowParkSendModal] = useState(false)
+  const [parkSendForm, setParkSendForm] = useState({ park_name: '', date_sent: '', time_sent: '', person: '', destination: '', notes: '' })
   const [pendingStatus, setPendingStatus] = useState(null)
   const [showReasonModal, setShowReasonModal] = useState(false)
   const [showProcessingModal, setShowProcessingModal] = useState(false)
@@ -328,11 +346,78 @@ export function OrderDetailPage() {
       id: order.id,
       status: pendingStatus,
       extra,
-      timelineDesc: `${statusLabel(pendingStatus)}: ${reason} — by ${user?.name}`
+      extraSafe: pendingStatus === 'returned' ? {
+        return_condition: returnExtra.condition,
+        return_photos: returnExtra.photos.trim() || null,
+      } : undefined,
+      timelineDesc: `${statusLabel(pendingStatus)}: ${reason}${pendingStatus === 'returned' ? ` · condition: ${returnExtra.condition.replace(/_/g, ' ')}` : ''} — by ${user?.name} (${user?.role})`,
     })
     setShowReasonModal(false)
     setCancelReason('')
     setReturnReason('')
+    setReturnExtra({ condition: 'good', photos: '' })
+  }
+
+  const canDecide = ['fulfillment', 'operations_manager', 'ceo', 'super_admin'].includes(user?.role)
+
+  async function handleDecisionSubmit() {
+    const d = decisionForm
+    if (!d.decision) return
+    if (d.decision === 'other' && !d.notes.trim()) {
+      showToast('Add notes when choosing Other', 'error')
+      return
+    }
+    const label = RETURN_DECISIONS.find(x => x.value === d.decision)?.label || d.decision
+    // Decision columns are best-effort (migration may not be run); the timeline is the record
+    await supabase.from('orders').update({
+      return_decision: d.decision,
+      return_decision_notes: d.notes.trim() || null,
+      return_decision_at: new Date().toISOString(),
+    }).eq('id', order.id)
+    await supabase.from('order_timeline').insert({
+      order_id: order.id,
+      action: 'return_decision',
+      description: `Return decision recorded: ${label}${d.notes.trim() ? ` — ${d.notes.trim()}` : ''} — by ${user?.name} (${user?.role})`,
+      staff_id: user?.id,
+      staff_name: user?.name,
+    })
+    await recordReturnDecision(order, d.decision, d.notes.trim(), user)
+    setShowDecisionModal(false)
+    showToast('Decision recorded', 'success')
+    if (d.decision === 'send_another_state') {
+      const now = new Date()
+      setParkSendForm({
+        park_name: '', notes: '', destination: '',
+        date_sent: now.toISOString().split('T')[0],
+        time_sent: now.toTimeString().slice(0, 5),
+        person: user?.name || '',
+      })
+      setShowParkSendModal(true)
+    }
+    refetch()
+  }
+
+  async function handleParkSendSubmit() {
+    const f = parkSendForm
+    if (!f.park_name.trim() || !f.date_sent || !f.time_sent || !f.person.trim() || !f.destination) {
+      showToast('Fill in all required fields', 'error')
+      return
+    }
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'sent_to_park',
+      extra: { state: f.destination },
+      extraSafe: {
+        park_sent_name: f.park_name.trim(),
+        park_sent_at: new Date(`${f.date_sent}T${f.time_sent}`).toISOString(),
+        park_sent_by: f.person.trim(),
+        park_origin_state: order.state,
+        return_decision: 'send_another_state',
+      },
+      timelineDesc: `Sent to State Park (${f.park_name.trim()}) — ${order.state} → ${f.destination} · sent by ${f.person.trim()}${f.notes.trim() ? ` · ${f.notes.trim()}` : ''} — by ${user?.name} (${user?.role})`,
+    })
+    await sendReturnToAnotherState(order, f.destination, user)
+    setShowParkSendModal(false)
   }
 
   const FAILED_REASONS = [
@@ -478,6 +563,63 @@ export function OrderDetailPage() {
               <p className="text-xs text-orange-700 bg-orange-50 rounded-lg p-2 mt-2">Returned: {order.return_reason}</p>
             )}
           </div>
+
+          {/* Return decision (recorded after the WhatsApp discussion) */}
+          {(order.status === 'returned' || order.status === 'sent_to_park' || order.return_decision) && (
+            <div className="bg-white rounded-2xl p-4 border border-gray-100">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Return Decision</h3>
+              {order.return_decision ? (
+                <>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {RETURN_DECISIONS.find(d => d.value === order.return_decision)?.label || order.return_decision}
+                  </p>
+                  {order.return_decision_notes && (
+                    <p className="text-xs text-gray-500 mt-0.5">{order.return_decision_notes}</p>
+                  )}
+                  {order.park_sent_name && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Park: {order.park_sent_name} · Sent by {order.park_sent_by}
+                      {order.park_sent_at ? ` · ${formatDateTime(order.park_sent_at)}` : ''}
+                      {order.park_origin_state ? ` · ${order.park_origin_state} → ${order.state}` : ''}
+                    </p>
+                  )}
+                  {order.return_decision === 'send_another_state' && order.status === 'returned' && canDecide && (
+                    <Button size="sm" className="w-full mt-3" onClick={() => {
+                      const now = new Date()
+                      setParkSendForm({
+                        park_name: '', notes: '', destination: '',
+                        date_sent: now.toISOString().split('T')[0],
+                        time_sent: now.toTimeString().slice(0, 5),
+                        person: user?.name || '',
+                      })
+                      setShowParkSendModal(true)
+                    }}>
+                      Sent to State Park
+                    </Button>
+                  )}
+                </>
+              ) : canDecide ? (
+                <>
+                  <p className="text-xs text-gray-500 mb-2">
+                    Discuss the return with the Operations Manager on WhatsApp, then record the final decision here.
+                  </p>
+                  <Button size="sm" className="w-full" onClick={() => { setDecisionForm({ decision: '', notes: '' }); setShowDecisionModal(true) }}>
+                    Record Decision
+                  </Button>
+                </>
+              ) : (
+                <p className="text-xs text-gray-400">Awaiting decision from the operations discussion</p>
+              )}
+              {order.return_condition && (
+                <p className="text-xs text-gray-400 mt-2 capitalize">Condition on return: {order.return_condition.replace(/_/g, ' ')}</p>
+              )}
+              {order.return_photos && (
+                <a href={order.return_photos} target="_blank" rel="noreferrer" className="text-xs text-blue-600 font-medium mt-1 inline-block">
+                  View photos →
+                </a>
+              )}
+            </div>
+          )}
 
           {/* Customer card */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100">
@@ -884,17 +1026,121 @@ export function OrderDetailPage() {
           </div>
         }
       >
-        <Textarea
-          label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : 'Reason for return'}
-          placeholder="Describe what happened..."
-          value={pendingStatus === 'cancelled' ? cancelReason : returnReason}
-          onChange={e => {
-            if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
-            else setReturnReason(e.target.value)
-          }}
-          rows={4}
-          required
-        />
+        <div className="space-y-4">
+          <Textarea
+            label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : 'Reason for return'}
+            placeholder="Describe what happened..."
+            value={pendingStatus === 'cancelled' ? cancelReason : returnReason}
+            onChange={e => {
+              if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
+              else setReturnReason(e.target.value)
+            }}
+            rows={4}
+            required
+          />
+          {pendingStatus === 'returned' && (
+            <>
+              <Select label="Condition of Product" required value={returnExtra.condition}
+                onChange={e => setReturnExtra({ ...returnExtra, condition: e.target.value })}>
+                <option value="good">Good condition</option>
+                <option value="minor_damage">Minor damage</option>
+                <option value="damaged">Damaged</option>
+                <option value="incomplete">Incomplete / missing parts</option>
+              </Select>
+              <Input label="Photo link (optional)" placeholder="https://... (photos of the product)"
+                value={returnExtra.photos}
+                onChange={e => setReturnExtra({ ...returnExtra, photos: e.target.value })} />
+              <p className="text-[11px] text-gray-400">
+                After saving, discuss with the Operations Manager on WhatsApp, then record the decision on this order.
+              </p>
+            </>
+          )}
+        </div>
+      </Modal>
+
+      {/* Return decision modal */}
+      <Modal
+        isOpen={showDecisionModal}
+        onClose={() => setShowDecisionModal(false)}
+        title="Record Return Decision"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowDecisionModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={handleDecisionSubmit} loading={updateStatus.isPending}
+              className="flex-1"
+              disabled={!decisionForm.decision || (decisionForm.decision === 'other' && !decisionForm.notes.trim())}>
+              Record Decision
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Record the decision agreed with the Operations Manager in the WhatsApp group.
+          </p>
+          <div className="space-y-2">
+            {RETURN_DECISIONS.map(d => (
+              <button key={d.value} type="button"
+                onClick={() => setDecisionForm({ ...decisionForm, decision: d.value })}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
+                  decisionForm.decision === d.value ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'
+                }`}>
+                <p className="text-sm font-medium text-gray-900">{d.label}</p>
+              </button>
+            ))}
+          </div>
+          <Textarea
+            label={decisionForm.decision === 'other' ? 'Notes (required)' : 'Notes (optional)'}
+            rows={2}
+            value={decisionForm.notes}
+            onChange={e => setDecisionForm({ ...decisionForm, notes: e.target.value })}
+          />
+        </div>
+      </Modal>
+
+      {/* Sent to State Park modal (send to another state) */}
+      <Modal
+        isOpen={showParkSendModal}
+        onClose={() => setShowParkSendModal(false)}
+        title="Sent to State Park"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowParkSendModal(false)} className="flex-1">Cancel</Button>
+            <Button onClick={handleParkSendSubmit} loading={updateStatus.isPending}
+              className="flex-1"
+              disabled={!parkSendForm.park_name.trim() || !parkSendForm.date_sent || !parkSendForm.time_sent || !parkSendForm.person.trim() || !parkSendForm.destination}>
+              Confirm
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <Input label="State Park Name" required placeholder="e.g. GUO Transport Park, Jibowu"
+            value={parkSendForm.park_name}
+            onChange={e => setParkSendForm({ ...parkSendForm, park_name: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Date Sent" type="date" required
+              value={parkSendForm.date_sent}
+              onChange={e => setParkSendForm({ ...parkSendForm, date_sent: e.target.value })} />
+            <Input label="Time Sent" type="time" required
+              value={parkSendForm.time_sent}
+              onChange={e => setParkSendForm({ ...parkSendForm, time_sent: e.target.value })} />
+          </div>
+          <Input label="Person Sending" required
+            value={parkSendForm.person}
+            onChange={e => setParkSendForm({ ...parkSendForm, person: e.target.value })} />
+          <Select label="Destination State" required value={parkSendForm.destination}
+            onChange={e => setParkSendForm({ ...parkSendForm, destination: e.target.value })}>
+            <option value="">Select state...</option>
+            {NIGERIAN_STATES.filter(s => s !== order.state).map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+          <Textarea label="Notes (optional)" rows={2}
+            value={parkSendForm.notes}
+            onChange={e => setParkSendForm({ ...parkSendForm, notes: e.target.value })} />
+          <p className="text-[11px] text-gray-400">
+            The order becomes "Sent to State Park" and the Waybill Officer takes over — it will appear in their list for a new waybill to {parkSendForm.destination || 'the destination'}.
+          </p>
+        </div>
       </Modal>
 
       {/* Failed Delivery Modal — reason + where the stock is now */}

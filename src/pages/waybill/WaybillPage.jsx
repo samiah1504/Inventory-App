@@ -42,7 +42,7 @@ export function WaybillPage() {
     product_id: '', from_warehouse_id: '', to_warehouse_id: '', quantity: '', notes: ''
   })
 
-  const awaitingOrders = useOrders({ statuses: ['awaiting_waybill', 'batch_processing'] })
+  const awaitingOrders = useOrders({ statuses: ['awaiting_waybill', 'sent_to_park', 'batch_processing'] })
   const waybilledOrders = useOrders({ status: 'waybilled' })
 
   const batches = useQuery({
@@ -134,7 +134,7 @@ export function WaybillPage() {
   }
 
   function toggleSelectAll() {
-    const selectableIds = (awaitingOrders.data || []).filter(o => o.status === 'awaiting_waybill').map(o => o.id)
+    const selectableIds = (awaitingOrders.data || []).filter(o => ['awaiting_waybill', 'sent_to_park'].includes(o.status)).map(o => o.id)
     if (selectedOrders.length === selectableIds.length) {
       setSelectedOrders([])
     } else {
@@ -172,7 +172,7 @@ export function WaybillPage() {
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {tab === 'awaiting' && (() => {
           const orders = awaitingOrders.data || []
-          const selectableOrders = orders.filter(o => o.status === 'awaiting_waybill')
+          const selectableOrders = orders.filter(o => ['awaiting_waybill', 'sent_to_park'].includes(o.status))
           const inBatchCount = orders.filter(o => o.status === 'batch_processing').length
           return (
             <div className="space-y-3">
