@@ -37,7 +37,29 @@ export const useAuthStore = create(
       },
 
       logout: () => {
-        set({ user: null, profile: null, error: null })
+        set({ user: null, profile: null, realUser: null, error: null })
+      },
+
+      // ── Role preview (CEO/Super Admin only) ─────────────────────────────
+      // Simulates another role app-wide without touching real permissions:
+      // the stored user temporarily wears the previewed role; identity
+      // (id, name, staff_code) stays the CEO's. realUser holds the original.
+      realUser: null,
+
+      startPreview: (role) => {
+        const { user, realUser } = get()
+        const base = realUser || user
+        if (!base || !['ceo', 'super_admin'].includes(base.role)) return
+        if (['ceo', 'super_admin'].includes(role)) {
+          set({ user: base, realUser: null })
+          return
+        }
+        set({ realUser: base, user: { ...base, role, _preview: true } })
+      },
+
+      endPreview: () => {
+        const { realUser } = get()
+        if (realUser) set({ user: realUser, realUser: null })
       },
 
       hasPermission: (permission) => {
@@ -58,7 +80,7 @@ export const useAuthStore = create(
     }),
     {
       name: 'kanziy-auth',
-      partialize: (state) => ({ user: state.user, profile: state.profile })
+      partialize: (state) => ({ user: state.user, profile: state.profile, realUser: state.realUser })
     }
   )
 )

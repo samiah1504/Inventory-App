@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays } from 'lucide-react'
+import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays, Eye } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -12,8 +12,16 @@ import { Input, Select, Textarea } from '../../components/ui/Input'
 import { useAppStore } from '../../stores/appStore'
 import { NIGERIAN_STATES } from '../../utils/format'
 
+const PREVIEW_ROLES = [
+  { role: 'operations_manager', label: 'Operations Manager' },
+  { role: 'customer_support',   label: 'Customer Support' },
+  { role: 'fulfillment',        label: 'Fulfillment Officer' },
+  { role: 'waybill',            label: 'Waybill Officer' },
+  { role: 'inventory',          label: 'Inventory / Warehouse' },
+]
+
 export function SettingsPage() {
-  const { user, logout } = useAuthStore()
+  const { user, logout, startPreview } = useAuthStore()
   const navigate = useNavigate()
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
 
@@ -49,6 +57,28 @@ export function SettingsPage() {
             <ChevronRight size={18} className="text-gray-400 shrink-0" />
           </button>
         ))}
+
+        {/* Role preview — see the app exactly as each role does */}
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <div className="flex items-center gap-2 mb-1">
+            <Eye size={16} className="text-gray-500" />
+            <h3 className="text-sm font-semibold text-gray-900">Preview Role Views</h3>
+          </div>
+          <p className="text-xs text-gray-400 mb-3">
+            See the app exactly as each role sees it. Your CEO account and permissions stay unchanged — use the banner to return.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {PREVIEW_ROLES.map(({ role, label }) => (
+              <button
+                key={role}
+                onClick={() => { startPreview(role); navigate('/') }}
+                className="px-3 py-2.5 rounded-xl border border-gray-200 bg-white text-left text-sm font-medium text-gray-700 active:scale-[0.98] transition-all"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
           <div className="flex items-center gap-3 mb-3">

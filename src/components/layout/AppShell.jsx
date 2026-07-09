@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import { BottomNav } from './BottomNav'
 import { Toast } from '../ui/Toast'
+import { RolePreviewBanner } from '../ui/RolePreviewBanner'
 
 export function AppShell() {
   return (
@@ -9,6 +10,7 @@ export function AppShell() {
       <main className="flex-1 pb-20 overflow-hidden w-full">
         <Outlet />
       </main>
+      <RolePreviewBanner />
       <BottomNav />
     </div>
   )
