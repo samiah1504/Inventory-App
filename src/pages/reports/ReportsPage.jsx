@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
@@ -12,6 +12,7 @@ import { useAuthStore } from '../../stores/authStore'
 import {
   BarChart3, TrendingUp, Package, Truck, Users, DollarSign,
   AlertCircle, Download, ChevronDown, ChevronUp, Search, X,
+  Plus, ArrowRight,
 } from 'lucide-react'
 import { Select, Input } from '../../components/ui/Input'
 import { Modal } from '../../components/ui/Modal'
@@ -258,6 +259,7 @@ function downloadXLSX(rows, sheetName, filename) {
 
 export function ReportsPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [tab, setTab] = useState(searchParams.get('tab') || 'overview')
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
@@ -383,6 +385,60 @@ export function ReportsPage() {
     staleTime: 60000,
   })
 
+  // ── Overview (executive dashboard) queries — current state, not date-filtered ──
+
+  const opsOrdersQ = useQuery({
+    queryKey: ['report_ops_orders', businessId],
+    enabled: tab === 'overview',
+    queryFn: async () => {
+      try {
+        let q = supabase.from('orders')
+          .select('id, order_number, status, created_at, business_id')
+          .in('status', ['awaiting_waybill', 'processing', 'delivered', 'failed_delivery'])
+          .order('created_at', { ascending: true })
+          .limit(300)
+        if (businessId) q = q.eq('business_id', businessId)
+        const { data, error } = await q
+        if (error) throw error
+        return data || []
+      } catch { return [] }
+    },
+    staleTime: 60000,
+  })
+
+  const activityQ = useQuery({
+    queryKey: ['report_activity'],
+    enabled: tab === 'overview',
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('order_timeline')
+          .select('*, order:orders(order_number, business:businesses(name))')
+          .order('created_at', { ascending: false })
+          .limit(12)
+        if (error) throw error
+        return data || []
+      } catch { return [] }
+    },
+    staleTime: 30000,
+  })
+
+  const inspectionCountQ = useQuery({
+    queryKey: ['report_returns_awaiting'],
+    enabled: tab === 'overview' && isCeo,
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('returns')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'awaiting_inspection')
+        if (error) throw error
+        return count || 0
+      } catch { return 0 }
+    },
+    staleTime: 60000,
+  })
+
   const staffListQ = useQuery({
     queryKey: ['report_staff_list'],
     enabled: tab === 'expenses' && isCeo,
@@ -450,8 +506,8 @@ export function ReportsPage() {
     staleTime: 60000,
   })
 
-  // Products query — run when tab = products / sales / profit (COGS needs items), orders loaded, ≤500 orders
-  const canQueryItems = (tab === 'products' || tab === 'sales' || tab === 'profit') && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
+  // Products query — run when the tab needs order items (COGS/product stats), orders loaded, ≤500 orders
+  const canQueryItems = ['products', 'sales', 'profit', 'overview'].includes(tab) && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
   const productsReport = useQuery({
     queryKey: ['report_products', dateFrom, dateTo, businessId],
     enabled: canQueryItems,
@@ -1033,48 +1089,200 @@ export function ReportsPage() {
       {/* ── Tab content ── */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 
-        {/* OVERVIEW */}
-        {tab === 'overview' && (
-          <>
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard label="Total Orders" value={totalOrders}                icon={<BarChart3 size={20} />} color="blue" />
-              <StatCard label="Total Sales"  value={formatCurrency(totalSales)} icon={<DollarSign size={20} />} color="green" />
-              {isCeo && <StatCard label="Total Expenses" value={formatCurrency(totalExpenses)} icon={<TrendingUp size={20} />} color="red" />}
-              {isCeo && <StatCard label="Net Profit"     value={formatCurrency(netProfit)} icon={<TrendingUp size={20} />} color={netProfit >= 0 ? 'green' : 'red'} />}
-              <StatCard label="Outstanding" value={formatCurrency(outstanding)} icon={<AlertCircle size={20} />} color="amber" sub={`${outstandingOrders.length} orders`} />
-            </div>
+        {/* OVERVIEW — CEO executive dashboard */}
+        {tab === 'overview' && (() => {
+          const paidCount   = orders.filter(o => REVENUE_STATUSES.includes(o.status)).length
+          const delivered   = byStatus['delivered'] || 0
+          const paidFull    = byStatus['paid'] || 0
+          const partial     = byStatus['partially_paid'] || 0
+          const failed      = byStatus['failed_delivery'] || 0
+          const returnedC   = byStatus['returned'] || 0
+          const reached     = delivered + paidFull + partial + failed + returnedC
+          const paymentBase = delivered + paidFull + partial
+          const metrics = [
+            { label: 'Payment Success',  pct: paymentBase > 0 ? ((paidFull + partial) / paymentBase) * 100 : 0, invert: false },
+            { label: 'Delivery Success', pct: reached > 0 ? ((delivered + paidFull + partial) / reached) * 100 : 0, invert: false },
+            { label: 'Failed Delivery',  pct: reached > 0 ? (failed / reached) * 100 : 0, invert: true },
+            { label: 'Return Rate',      pct: reached > 0 ? (returnedC / reached) * 100 : 0, invert: true },
+          ]
 
-            {/* Orders by status */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Orders by Status</h3>
-              <div className="divide-y divide-gray-50">
-                {Object.entries(byStatus).sort(([, a], [, b]) => b - a).map(([status, count]) => (
-                  <div key={status} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
-                    <span className="text-sm text-gray-700 capitalize">{status.replace(/_/g, ' ')}</span>
-                    <span className="text-sm font-bold text-gray-900">{count}</span>
-                  </div>
-                ))}
-                {Object.keys(byStatus).length === 0 && <p className="text-sm text-gray-400">No orders</p>}
+          const opsO           = opsOrdersQ.data || []
+          const awaitingWb     = opsO.filter(o => o.status === 'awaiting_waybill')
+          const processingO    = opsO.filter(o => o.status === 'processing')
+          const deliveredUnpaid = opsO.filter(o => o.status === 'delivered')
+          const failedFollow   = opsO.filter(o => o.status === 'failed_delivery')
+          const staleWaybill   = awaitingWb.filter(o => Date.now() - new Date(o.created_at).getTime() > 86400000)
+
+          const lowRows     = inventoryItems.filter(r => r.quantity_available > 0 && r.quantity_available <= (r.low_stock_threshold ?? 5))
+          const lowProducts = new Set(lowRows.map(r => r.product_id)).size
+          const stockedWh   = new Set(inventoryItems.filter(r => r.quantity_available > 0).map(r => r.warehouse_id))
+          const emptyWh     = Math.max(0, (warehouses || []).length - stockedWh.size)
+          const awaitingInspection = inspectionCountQ.data || 0
+
+          const alerts = [
+            staleWaybill.length > 0 && { text: `${staleWaybill.length} order${staleWaybill.length !== 1 ? 's' : ''} awaiting waybill for over 24 hours`, to: '/orders?status=awaiting_waybill', tone: 'red' },
+            failedFollow.length > 0 && { text: `${failedFollow.length} failed deliver${failedFollow.length !== 1 ? 'ies' : 'y'} to follow up`, to: '/orders?status=failed_delivery', tone: 'red' },
+            deliveredUnpaid.length > 0 && { text: `${deliveredUnpaid.length} delivered order${deliveredUnpaid.length !== 1 ? 's' : ''} awaiting payment`, to: '/orders?status=delivered', tone: 'amber' },
+            lowProducts > 0 && { text: `${lowProducts} product${lowProducts !== 1 ? 's' : ''} low on stock`, to: '/inventory?filter=low_stock', tone: 'amber' },
+            awaitingInspection > 0 && { text: `${awaitingInspection} returned item${awaitingInspection !== 1 ? 's' : ''} awaiting inspection`, to: '/inventory', tone: 'amber' },
+            emptyWh > 0 && { text: `${emptyWh} warehouse${emptyWh !== 1 ? 's' : ''} with no available stock`, to: '/inventory', tone: 'gray' },
+          ].filter(Boolean)
+
+          const toneCls = {
+            red:   'bg-red-50 border-red-100 text-red-800',
+            amber: 'bg-amber-50 border-amber-100 text-amber-800',
+            gray:  'bg-gray-50 border-gray-100 text-gray-700',
+          }
+
+          return (
+            <div className="space-y-4">
+
+              {/* 1 ── Business summary (selected period) */}
+              <div className="grid grid-cols-2 gap-3">
+                <StatCard label="Total Orders" value={totalOrders} icon={<BarChart3 size={20} />} color="blue" />
+                <StatCard label="Paid Orders"  value={paidCount}   icon={<TrendingUp size={20} />} color="green" />
+                <StatCard label="Sales Revenue" value={formatCurrency(plData.revenue)} icon={<DollarSign size={20} />} color="green" />
+                {isCeo && (
+                  <StatCard label="Net Profit" value={formatCurrency(plData.netProfit)} icon={<TrendingUp size={20} />}
+                    color={plData.netProfit >= 0 ? 'green' : 'red'} />
+                )}
               </div>
-            </div>
 
-            {/* Top products */}
-            {productStats.length > 0 && (
-              <div className="bg-white rounded-2xl p-4 border border-gray-100">
-                <h3 className="text-sm font-semibold text-gray-900 mb-3">Top Products</h3>
+              {/* 6 ── Alerts & attention required */}
+              {alerts.length > 0 && (
                 <div className="space-y-2">
-                  {productStats.slice(0, 8).map(p => (
-                    <div key={p.name} className="flex items-center justify-between gap-2 py-1 border-b border-gray-50 last:border-0">
-                      <p className="text-sm text-gray-700 truncate flex-1">{p.name}</p>
-                      <span className="text-xs text-gray-500 shrink-0">{p.orderCount} orders</span>
-                      <span className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(p.revenue)}</span>
-                    </div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">Needs Attention</p>
+                  {alerts.map(a => (
+                    <button key={a.text} onClick={() => navigate(a.to)}
+                      className={`w-full flex items-center justify-between gap-2 text-left border rounded-2xl px-4 py-3 active:opacity-70 ${toneCls[a.tone]}`}>
+                      <span className="text-sm font-medium flex-1 min-w-0">{a.text}</span>
+                      <ArrowRight size={16} className="shrink-0 opacity-60" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* 2 ── Operations health (current state) */}
+              <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Operations Health</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { label: 'Awaiting Waybill',  value: awaitingWb.length,      to: '/orders?status=awaiting_waybill', color: awaitingWb.length > 0 ? 'text-amber-600' : 'text-green-600' },
+                    { label: 'In Processing',     value: processingO.length,     to: '/orders?status=processing',       color: 'text-gray-900' },
+                    { label: 'Awaiting Payment',  value: deliveredUnpaid.length, to: '/orders?status=delivered',        color: deliveredUnpaid.length > 0 ? 'text-amber-600' : 'text-green-600' },
+                    { label: 'Low Stock',         value: lowProducts,            to: '/inventory?filter=low_stock',     color: lowProducts > 0 ? 'text-red-600' : 'text-green-600' },
+                  ].map(({ label, value, to, color }) => (
+                    <button key={label} onClick={() => navigate(to)}
+                      className="bg-gray-50 rounded-xl px-3 py-2.5 text-left active:opacity-70">
+                      <p className="text-xs text-gray-500 mb-0.5 truncate">{label}</p>
+                      <p className={`text-xl font-bold ${color}`}>{value}</p>
+                    </button>
                   ))}
                 </div>
               </div>
-            )}
-          </>
-        )}
+
+              {/* 3 ── Business health metrics (selected period) */}
+              <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Business Health</h3>
+                {reached === 0 ? (
+                  <p className="text-sm text-gray-400">No completed deliveries in this period yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {metrics.map(({ label, pct, invert }) => {
+                      const good = invert ? pct <= 10 : pct >= 70
+                      const mid  = invert ? pct <= 25 : pct >= 40
+                      const color = good ? 'bg-green-500' : mid ? 'bg-amber-400' : 'bg-red-500'
+                      const text  = good ? 'text-green-600' : mid ? 'text-amber-600' : 'text-red-600'
+                      return (
+                        <div key={label}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-600">{label}</span>
+                            <span className={`text-xs font-bold ${text}`}>{pct.toFixed(1)}%</span>
+                          </div>
+                          <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, Math.max(pct, 2))}%` }} />
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* 4 ── Per-business summary */}
+              {perBusinessPL.length > 0 && (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">By Business</h3>
+                  <div className="divide-y divide-gray-50">
+                    {perBusinessPL.map(({ business, pl }) => (
+                      <button key={business.id} onClick={() => setBusinessId(business.id)}
+                        className="w-full text-left py-3 first:pt-0 last:pb-0 active:opacity-70">
+                        <p className="text-sm font-semibold text-gray-900 mb-1.5">{business.name}</p>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <p className="text-[11px] text-gray-400">Orders</p>
+                            <p className="text-sm font-bold text-gray-900">{orders.filter(o => o.business_id === business.id).length}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-gray-400">Revenue</p>
+                            <p className="text-sm font-bold text-gray-900">{formatCurrency(pl.revenue)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] text-gray-400">Net Profit</p>
+                            <p className={`text-sm font-bold ${pl.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{formatCurrency(pl.netProfit)}</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 7 ── Quick actions */}
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { label: 'New Order',     icon: <Plus size={18} />,       to: '/orders/new' },
+                  { label: 'Receive Stock', icon: <Package size={18} />,    to: '/inventory' },
+                  { label: 'Add Expense',   icon: <DollarSign size={18} />, to: '/accounting' },
+                  { label: 'Waybill',       icon: <Truck size={18} />,      to: '/waybill' },
+                ].map(({ label, icon, to }) => (
+                  <button key={label} onClick={() => navigate(to)}
+                    className="flex items-center gap-2.5 bg-white border border-gray-200 rounded-2xl px-4 py-3.5 active:scale-[0.98] transition-all">
+                    <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg shrink-0">{icon}</span>
+                    <span className="text-sm font-semibold text-gray-800">{label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* 5 ── Recent activity */}
+              <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Recent Activity</h3>
+                {(activityQ.data || []).length === 0 ? (
+                  <p className="text-sm text-gray-400">No activity yet</p>
+                ) : (
+                  <div className="space-y-3">
+                    {(activityQ.data || []).map(t => (
+                      <div key={t.id} className="flex gap-2.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 mt-1.5 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-800 leading-snug">{t.description || (t.action || '').replace(/_/g, ' ')}</p>
+                          <p className="text-[11px] text-gray-400 mt-0.5 truncate">
+                            {[
+                              t.order?.order_number,
+                              t.order?.business?.name,
+                              t.staff_name,
+                              new Date(t.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+                            ].filter(Boolean).join(' · ')}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ORDERS */}
         {tab === 'orders' && (
