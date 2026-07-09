@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Plus, Package, Sliders, ChevronDown, ChevronUp, ArrowLeftRight, Bell } from 'lucide-react'
 import {
   useInventory, useAddStock, useAdjustStock, useSetMinStock,
-  useWarehouseTransfers, useTransferStock, useReceiveTransfer, useProductMovements,
+  useWarehouseTransfers, useTransferStock, useReceiveTransfer, useTransferAtPark, useProductMovements,
   useReturns,
 } from '../../hooks/useInventory'
 import { ReturnsTab } from './ReturnsTab'
@@ -33,6 +33,8 @@ const MOVEMENT_LABELS = {
   sale:              { label: 'Sold',                color: 'text-green-600' },
   reserve:           { label: 'Reserved',            color: 'text-amber-600' },
   reserve_out:       { label: 'Moved with order',    color: 'text-purple-600' },
+  left_at_park:      { label: 'Left at State Park',  color: 'text-cyan-700' },
+  at_state_park:     { label: 'At State Park',       color: 'text-cyan-700' },
   release:           { label: 'Released',            color: 'text-gray-600' },
   return:            { label: 'Returned to stock',   color: 'text-orange-500' },
   return_inspection: { label: 'Awaiting inspection', color: 'text-amber-600' },
@@ -81,6 +83,7 @@ export function InventoryPage() {
   const setMinStock = useSetMinStock()
   const transferStock = useTransferStock()
   const receiveTransfer = useReceiveTransfer()
+  const transferAtPark = useTransferAtPark()
   const movementsQ = useProductMovements(expandedProduct)
 
   const [adjustForm, setAdjustForm] = useState({ adjustment: '', reason: '' })
@@ -274,7 +277,7 @@ export function InventoryPage() {
     setMinForm('')
   }
 
-  const inTransitTransfers = (transfers || []).filter(t => t.status === 'in_transit')
+  const inTransitTransfers = (transfers || []).filter(t => ['in_transit', 'at_park'].includes(t.status))
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -646,9 +649,11 @@ export function InventoryPage() {
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <p className="text-xs font-mono text-gray-400">{t.transfer_number}</p>
                   <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
-                    t.status === 'in_transit' ? 'bg-amber-50 text-amber-700' : 'bg-green-50 text-green-700'
+                    t.status === 'in_transit' ? 'bg-amber-50 text-amber-700'
+                    : t.status === 'at_park' ? 'bg-cyan-50 text-cyan-700'
+                    : 'bg-green-50 text-green-700'
                   }`}>
-                    {t.status === 'in_transit' ? 'IN TRANSIT' : 'RECEIVED'}
+                    {t.status === 'in_transit' ? 'IN TRANSIT' : t.status === 'at_park' ? 'AT STATE PARK' : 'RECEIVED'}
                   </span>
                 </div>
                 <p className="text-sm font-semibold text-gray-900">{t.product?.name || t.product_name}</p>
@@ -659,11 +664,28 @@ export function InventoryPage() {
                 <p className="text-xs text-gray-400 mt-0.5">{t.date_transferred || formatDate(t.created_at)}</p>
                 {t.notes && <p className="text-xs text-gray-500 mt-1">{t.notes}</p>}
                 {t.status === 'in_transit' && canManage && (
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      variant="secondary"
+                      onClick={() => transferAtPark.mutateAsync(t)}
+                      loading={transferAtPark.isPending}
+                      className="flex-1" size="sm">
+                      At State Park
+                    </Button>
+                    <Button
+                      onClick={() => receiveTransfer.mutateAsync(t)}
+                      loading={receiveTransfer.isPending}
+                      className="flex-1" size="sm">
+                      Into Warehouse
+                    </Button>
+                  </div>
+                )}
+                {t.status === 'at_park' && canManage && (
                   <Button
                     onClick={() => receiveTransfer.mutateAsync(t)}
                     loading={receiveTransfer.isPending}
                     className="w-full mt-3" size="sm">
-                    Mark Received at {t.to_warehouse?.name || 'destination'}
+                    Receive into {t.to_warehouse?.name || 'warehouse'}
                   </Button>
                 )}
               </div>

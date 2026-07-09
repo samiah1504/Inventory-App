@@ -450,3 +450,189 @@ export async function applyReturnOutcome(ret, outcome, staff) {
 }
 
 export { addReturnTimeline }
+
+// ─── Failed delivery dispositions ────────────────────────────────────────────
+
+// Net outstanding reservation per product+warehouse for an order
+async function getOutstandingReservations(orderId) {
+  const { data: moves } = await supabase
+    .from('inventory_movements')
+    .select('*')
+    .eq('reference_id', orderId)
+    .eq('reference_type', 'order')
+  const all = moves || []
+  const key = m => `${m.product_id}|${m.warehouse_id}`
+  const net = {}
+  all.filter(m => m.movement_type === 'reserve')
+    .forEach(m => { net[key(m)] = (net[key(m)] || 0) + Math.abs(m.quantity) })
+  all.filter(m => ['sale', 'release', 'return', 'damage', 'missing', 'return_inspection', 'reserve_out'].includes(m.movement_type))
+    .forEach(m => { net[key(m)] = (net[key(m)] || 0) - Math.abs(m.quantity) })
+  return Object.entries(net)
+    .filter(([, q]) => q > 0)
+    .map(([k, qty]) => {
+      const [product_id, warehouse_id] = k.split('|')
+      return { product_id, warehouse_id, qty }
+    })
+}
+
+const TRANSFER_REASON_LABELS = {
+  customer_relocated: 'Customer relocated',
+  another_order: 'Another customer order',
+  stock_balancing: 'Stock balancing',
+  management_instruction: 'Management instruction',
+  other: 'Other',
+}
+
+// Where is the stock now, after a failed delivery?
+// outcome: legacy string ('returned'|'damaged'|'missing') or
+// { disposition: 'returned_warehouse'|'left_at_park'|'transferred_state'|'damaged',
+//   destinationState?, transferReason? }
+export async function resolveFailedDeliveryStock(order, outcome, staff) {
+  try {
+    if (!outcome) return
+    if (typeof outcome === 'string') return resolveOrderStock(order, outcome, staff?.id)
+    const { disposition, destinationState, transferReason } = outcome
+
+    if (disposition === 'damaged') return resolveOrderStock(order, 'damaged', staff?.id)
+
+    const reservations = await getOutstandingReservations(order.id)
+    const movement = (fields) => supabase.from('inventory_movements').insert({
+      business_id: order.business_id || null,
+      reference_id: order.id,
+      reference_type: 'order',
+      staff_id: staff?.id || null,
+      ...fields,
+    })
+
+    // ── Left at State Park: goods wait at the park, still held for review ──
+    if (disposition === 'left_at_park') {
+      const targets = reservations.length > 0
+        ? reservations
+        : (order.product_id ? [{ product_id: order.product_id, warehouse_id: null, qty: Number(order.quantity) || 1 }] : [])
+      for (const r of targets) {
+        await movement({
+          product_id: r.product_id,
+          warehouse_id: r.warehouse_id,
+          movement_type: 'left_at_park',
+          quantity: 0,
+          notes: `Left at ${order.state} State Park after failed delivery — ${order.order_number}`,
+        })
+      }
+      return
+    }
+
+    // ── Returned to the current state's warehouse: available again ──
+    if (disposition === 'returned_warehouse') {
+      const { data: destRows } = await supabase
+        .from('warehouses').select('*').eq('state', order.state).eq('is_active', true)
+      const dest = (destRows || [])[0] || null
+
+      for (const r of reservations) {
+        if (!dest || r.warehouse_id === dest.id) {
+          // Release where it's reserved
+          const { data: row } = await supabase.from('inventory').select('*')
+            .eq('product_id', r.product_id).eq('warehouse_id', r.warehouse_id).single()
+          if (!row) continue
+          await supabase.from('inventory').update({
+            quantity_reserved: Math.max(0, (row.quantity_reserved || 0) - r.qty),
+            quantity_available: (row.quantity_available || 0) + r.qty,
+            quantity_returned: (row.quantity_returned || 0) + r.qty,
+          }).eq('id', row.id)
+          await movement({
+            product_id: r.product_id, warehouse_id: r.warehouse_id,
+            movement_type: 'return', quantity: r.qty,
+            notes: `Returned to warehouse after failed delivery — ${order.order_number}`,
+          })
+        } else {
+          // Move from the source into this state's warehouse as available
+          const { data: src } = await supabase.from('inventory').select('*')
+            .eq('product_id', r.product_id).eq('warehouse_id', r.warehouse_id).single()
+          if (src) {
+            await supabase.from('inventory').update({
+              quantity_reserved: Math.max(0, (src.quantity_reserved || 0) - r.qty),
+              quantity_physical: Math.max(0, (src.quantity_physical || 0) - r.qty),
+            }).eq('id', src.id)
+            await movement({
+              product_id: r.product_id, warehouse_id: r.warehouse_id,
+              movement_type: 'reserve_out', quantity: -r.qty,
+              notes: `Moved to ${dest.name} after failed delivery — ${order.order_number}`,
+            })
+          }
+          const { data: destRow } = await supabase.from('inventory').select('*')
+            .eq('product_id', r.product_id).eq('warehouse_id', dest.id).single()
+          if (destRow) {
+            await supabase.from('inventory').update({
+              quantity_physical: (destRow.quantity_physical || 0) + r.qty,
+              quantity_available: (destRow.quantity_available || 0) + r.qty,
+              quantity_returned: (destRow.quantity_returned || 0) + r.qty,
+            }).eq('id', destRow.id)
+          } else {
+            await supabase.from('inventory').insert({
+              product_id: r.product_id, warehouse_id: dest.id,
+              business_id: order.business_id || null,
+              quantity_physical: r.qty, quantity_available: r.qty,
+              quantity_returned: r.qty,
+            })
+          }
+          await movement({
+            product_id: r.product_id, warehouse_id: dest.id,
+            movement_type: 'return', quantity: r.qty,
+            notes: `Returned to ${dest.name} after failed delivery — ${order.order_number}`,
+          })
+        }
+      }
+      return
+    }
+
+    // ── Transferred to another state: in transit + incoming transfer record ──
+    if (disposition === 'transferred_state') {
+      if (!destinationState) return
+      const { data: destRows } = await supabase
+        .from('warehouses').select('*').eq('state', destinationState).eq('is_active', true)
+      const destWh = (destRows || [])[0] || null
+
+      const items = await getOrderItems(order)
+      const nameOf = (pid) => items.find(i => i.product_id === pid)?.product_name || order.product_name || 'Unknown'
+      const targets = reservations.length > 0
+        ? reservations
+        : items.filter(i => i.product_id).map(i => ({ product_id: i.product_id, warehouse_id: null, qty: i.quantity }))
+
+      const year = new Date().getFullYear()
+      for (let i = 0; i < targets.length; i++) {
+        const r = targets[i]
+        // Stock leaves the current state
+        if (r.warehouse_id) {
+          const { data: src } = await supabase.from('inventory').select('*')
+            .eq('product_id', r.product_id).eq('warehouse_id', r.warehouse_id).single()
+          if (src) {
+            await supabase.from('inventory').update({
+              quantity_reserved: Math.max(0, (src.quantity_reserved || 0) - r.qty),
+              quantity_physical: Math.max(0, (src.quantity_physical || 0) - r.qty),
+            }).eq('id', src.id)
+            await movement({
+              product_id: r.product_id, warehouse_id: r.warehouse_id,
+              movement_type: 'reserve_out', quantity: -r.qty,
+              notes: `In transit to ${destinationState} after failed delivery — ${order.order_number}`,
+            })
+          }
+        }
+        // Incoming transfer for the destination state
+        await supabase.from('warehouse_transfers').insert({
+          transfer_number: `TRF-${year}-${Date.now().toString().slice(-6)}${i > 0 ? `-${i + 1}` : ''}`,
+          product_id: r.product_id,
+          product_name: nameOf(r.product_id),
+          quantity: r.qty,
+          from_warehouse_id: r.warehouse_id,
+          to_warehouse_id: destWh?.id || null,
+          date_transferred: new Date().toISOString().split('T')[0],
+          status: 'in_transit',
+          notes: `Failed delivery transfer from ${order.state || 'origin'} — ${TRANSFER_REASON_LABELS[transferReason] || transferReason || 'no reason given'} (${order.order_number})`,
+          created_by: staff?.id || null,
+        })
+      }
+      return
+    }
+  } catch (e) {
+    console.warn('Failed delivery stock resolution failed:', e)
+  }
+}

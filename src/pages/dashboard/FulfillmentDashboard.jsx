@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom'
-import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle, Inbox } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
 import { formatDate } from '../../utils/format'
+import { useReceiveTransfer, useTransferAtPark } from '../../hooks/useInventory'
 
 export function FulfillmentDashboard() {
   const { user } = useAuthStore()
@@ -57,6 +59,32 @@ export function FulfillmentDashboard() {
     staleTime: 30000,
   })
 
+  // Incoming transfers heading to this officer's state(s)
+  const incomingQ = useQuery({
+    queryKey: ['incoming_transfers', myStates],
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('warehouse_transfers')
+          .select(`
+            *,
+            product:products(name),
+            from_warehouse:warehouses!warehouse_transfers_from_warehouse_id_fkey(name, state),
+            to_warehouse:warehouses!warehouse_transfers_to_warehouse_id_fkey(name, state)
+          `)
+          .in('status', ['in_transit', 'at_park'])
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        const list = data || []
+        return myStates ? list.filter(t => t.to_warehouse?.state && myStates.includes(t.to_warehouse.state)) : list
+      } catch { return [] }
+    },
+    staleTime: 30000,
+  })
+  const receiveTransfer = useReceiveTransfer()
+  const transferAtPark = useTransferAtPark()
+  const incoming = incomingQ.data || []
+
   const c = counts.data
   const loading = counts.isLoading
 
@@ -76,6 +104,52 @@ export function FulfillmentDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Incoming transfers to this officer's state(s) */}
+        {incoming.length > 0 && (
+          <div className="bg-white rounded-2xl border border-cyan-200 overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex items-center gap-2 bg-cyan-50">
+              <Inbox size={16} className="text-cyan-700" />
+              <h3 className="text-sm font-semibold text-cyan-900">
+                Incoming Transfer{incoming.length !== 1 ? 's' : ''} ({incoming.length})
+              </h3>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {incoming.map(t => (
+                <div key={t.id} className="px-4 py-3">
+                  <p className="text-sm text-gray-800">
+                    <span className="font-bold">{t.quantity}</span> × {t.product?.name || t.product_name}
+                    {t.status === 'in_transit'
+                      ? ` on the way from ${t.from_warehouse?.state || 'origin'} to ${t.to_warehouse?.state}`
+                      : ` at the ${t.to_warehouse?.state} State Park`}
+                  </p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">{t.transfer_number}{t.notes ? ` · ${t.notes}` : ''}</p>
+                  {t.status === 'in_transit' ? (
+                    <div className="flex gap-2 mt-2">
+                      <Button variant="secondary" size="sm" className="flex-1"
+                        loading={transferAtPark.isPending}
+                        onClick={() => transferAtPark.mutateAsync(t)}>
+                        Received at State Park
+                      </Button>
+                      <Button size="sm" className="flex-1"
+                        loading={receiveTransfer.isPending}
+                        onClick={() => receiveTransfer.mutateAsync(t)}>
+                        Received at Warehouse
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button size="sm" className="w-full mt-2"
+                      loading={receiveTransfer.isPending}
+                      onClick={() => receiveTransfer.mutateAsync(t)}>
+                      Receive into Warehouse
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
           <StatCard label="New / To Review" value={loading ? '...' : c.new} icon={<Package size={20} />} color="blue"
             onClick={() => navigate('/orders?status=new')} />

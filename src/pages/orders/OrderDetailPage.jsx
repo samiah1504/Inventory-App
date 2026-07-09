@@ -9,7 +9,7 @@ import { StatusBadge } from '../../components/ui/Badge'
 import { Modal, ConfirmModal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
 import { Input, Select, Textarea } from '../../components/ui/Input'
-import { formatCurrency, formatDate, formatDateTime, statusLabel } from '../../utils/format'
+import { formatCurrency, formatDate, formatDateTime, statusLabel, NIGERIAN_STATES } from '../../utils/format'
 import { buildOrderMessage, openDialer, openWhatsApp } from '../../utils/whatsapp'
 import { useAppStore } from '../../stores/appStore'
 import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from '../../lib/pdf'
@@ -60,8 +60,10 @@ export function OrderDetailPage() {
   const [paymentData, setPaymentData] = useState({ amount_paid: '', type: 'full', balance_due_date: '', balance_notes: '' })
   const [expense, setExpense] = useState({ delivery_fee: '', installation_fee: '', offloading_fee: '', misc: '', notes: '' })
   const [note, setNote] = useState('')
-  const [failedReason, setFailedReason] = useState('')
-  const [failedStockOutcome, setFailedStockOutcome] = useState('returned')
+  const [showFailedModal, setShowFailedModal] = useState(false)
+  const [failedForm, setFailedForm] = useState({
+    reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated',
+  })
   const [cancelReason, setCancelReason] = useState('')
   const [returnReason, setReturnReason] = useState('')
   const [pendingStatus, setPendingStatus] = useState(null)
@@ -129,7 +131,13 @@ export function OrderDetailPage() {
   }
 
   async function handleStatusChange(newStatus) {
-    if (newStatus === 'cancelled' || newStatus === 'failed_delivery' || newStatus === 'returned') {
+    if (newStatus === 'failed_delivery') {
+      setFailedForm({ reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated' })
+      setShowFailedModal(true)
+      setShowStatusModal(false)
+      return
+    }
+    if (newStatus === 'cancelled' || newStatus === 'returned') {
       setPendingStatus(newStatus)
       setShowReasonModal(true)
       setShowStatusModal(false)
@@ -312,9 +320,6 @@ export function OrderDetailPage() {
     if (pendingStatus === 'cancelled') {
       reason = cancelReason
       extra = { cancellation_reason: reason }
-    } else if (pendingStatus === 'failed_delivery') {
-      reason = failedReason
-      extra = { failed_reason: reason }
     } else {
       reason = returnReason
       extra = { return_reason: reason }
@@ -323,13 +328,69 @@ export function OrderDetailPage() {
       id: order.id,
       status: pendingStatus,
       extra,
-      stockOutcome: pendingStatus === 'failed_delivery' ? failedStockOutcome : undefined,
       timelineDesc: `${statusLabel(pendingStatus)}: ${reason} — by ${user?.name}`
     })
     setShowReasonModal(false)
     setCancelReason('')
-    setFailedReason('')
     setReturnReason('')
+  }
+
+  const FAILED_REASONS = [
+    { value: 'customer_absent',      label: 'Customer absent' },
+    { value: 'customer_unreachable', label: 'Customer unreachable' },
+    { value: 'customer_refused',     label: 'Customer refused order' },
+    { value: 'reschedule_requested', label: 'Customer requested reschedule' },
+    { value: 'wrong_address',        label: 'Wrong address' },
+    { value: 'other',                label: 'Other' },
+  ]
+
+  const STOCK_DISPOSITIONS = [
+    { value: 'returned_warehouse', label: 'Returned to State Warehouse',
+      desc: 'Back in the warehouse and available for future orders' },
+    { value: 'left_at_park', label: 'Left at State Park',
+      desc: 'At the transport park, awaiting further instruction' },
+    { value: 'transferred_state', label: 'Transferred to Another State',
+      desc: 'Sent to another state — creates an incoming transfer' },
+    { value: 'damaged', label: 'Damaged',
+      desc: 'Can no longer be sold — written off as damaged' },
+  ]
+
+  const TRANSFER_REASONS = [
+    { value: 'customer_relocated',     label: 'Customer relocated' },
+    { value: 'another_order',          label: 'Another customer order' },
+    { value: 'stock_balancing',        label: 'Stock balancing' },
+    { value: 'management_instruction', label: 'Management instruction' },
+    { value: 'other',                  label: 'Other' },
+  ]
+
+  const failedValid = failedForm.reason &&
+    (failedForm.reason !== 'other' || failedForm.custom.trim()) &&
+    failedForm.disposition &&
+    (failedForm.disposition !== 'transferred_state' || failedForm.destinationState)
+
+  async function handleFailedSubmit() {
+    if (!failedValid) return
+    const reasonLabel = FAILED_REASONS.find(r => r.value === failedForm.reason)?.label || failedForm.reason
+    const reasonText = failedForm.reason === 'other'
+      ? failedForm.custom.trim()
+      : `${reasonLabel}${failedForm.custom.trim() ? ` — ${failedForm.custom.trim()}` : ''}`
+    const dispLabel = STOCK_DISPOSITIONS.find(d => d.value === failedForm.disposition)?.label || ''
+    const stockText = failedForm.disposition === 'transferred_state'
+      ? `${dispLabel} (${failedForm.destinationState} — ${TRANSFER_REASONS.find(t => t.value === failedForm.transferReason)?.label || ''})`
+      : dispLabel
+
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'failed_delivery',
+      extra: { failed_reason: reasonText },
+      stockOutcome: {
+        disposition: failedForm.disposition,
+        destinationState: failedForm.destinationState || undefined,
+        transferReason: failedForm.transferReason || undefined,
+      },
+      timelineDesc: `Failed Delivery: ${reasonText} — stock: ${stockText} — by ${user?.name}`,
+    })
+    setShowFailedModal(false)
   }
 
   async function handleAddNote() {
@@ -807,7 +868,7 @@ export function OrderDetailPage() {
       <Modal
         isOpen={showReasonModal}
         onClose={() => setShowReasonModal(false)}
-        title={pendingStatus === 'cancelled' ? 'Cancel Order' : pendingStatus === 'failed_delivery' ? 'Mark Failed Delivery' : 'Mark as Returned'}
+        title={pendingStatus === 'cancelled' ? 'Cancel Order' : 'Mark as Returned'}
         footer={
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setShowReasonModal(false)} className="flex-1">Back</Button>
@@ -816,47 +877,90 @@ export function OrderDetailPage() {
               onClick={handleReasonSubmit}
               loading={updateStatus.isPending}
               className="flex-1"
-              disabled={!(pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason).trim()}
+              disabled={!(pendingStatus === 'cancelled' ? cancelReason : returnReason).trim()}
             >
               Confirm
             </Button>
           </div>
         }
       >
+        <Textarea
+          label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : 'Reason for return'}
+          placeholder="Describe what happened..."
+          value={pendingStatus === 'cancelled' ? cancelReason : returnReason}
+          onChange={e => {
+            if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
+            else setReturnReason(e.target.value)
+          }}
+          rows={4}
+          required
+        />
+      </Modal>
+
+      {/* Failed Delivery Modal — reason + where the stock is now */}
+      <Modal
+        isOpen={showFailedModal}
+        onClose={() => setShowFailedModal(false)}
+        title="Mark Failed Delivery"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setShowFailedModal(false)} className="flex-1">Back</Button>
+            <Button variant="danger" onClick={handleFailedSubmit} loading={updateStatus.isPending}
+              className="flex-1" disabled={!failedValid}>
+              Confirm
+            </Button>
+          </div>
+        }
+      >
         <div className="space-y-4">
+          <Select label="Reason for Failed Delivery" required value={failedForm.reason}
+            onChange={e => setFailedForm({ ...failedForm, reason: e.target.value })}>
+            <option value="">Select reason...</option>
+            {FAILED_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+          </Select>
           <Textarea
-            label={pendingStatus === 'cancelled' ? 'Reason for cancellation' : pendingStatus === 'failed_delivery' ? 'Reason for failed delivery' : 'Reason for return'}
-            placeholder="Describe what happened..."
-            value={pendingStatus === 'cancelled' ? cancelReason : pendingStatus === 'failed_delivery' ? failedReason : returnReason}
-            onChange={e => {
-              if (pendingStatus === 'cancelled') setCancelReason(e.target.value)
-              else if (pendingStatus === 'failed_delivery') setFailedReason(e.target.value)
-              else setReturnReason(e.target.value)
-            }}
-            rows={4}
-            required
+            label={failedForm.reason === 'other' ? 'Describe the reason (required)' : 'Additional details (optional)'}
+            placeholder="What happened?"
+            rows={2}
+            value={failedForm.custom}
+            onChange={e => setFailedForm({ ...failedForm, custom: e.target.value })}
           />
-          {pendingStatus === 'failed_delivery' && (
-            <div>
-              <p className="text-sm font-medium text-gray-700 mb-2">What happened to the stock?</p>
-              <div className="space-y-2">
-                {[
-                  { key: 'returned', label: 'Returned to warehouse', desc: 'Stock goes back to available' },
-                  { key: 'damaged',  label: 'Damaged',               desc: 'Stock written off as damaged' },
-                  { key: 'missing',  label: 'Missing',               desc: 'Stock lost — removed from inventory' },
-                ].map(o => (
-                  <button key={o.key} type="button"
-                    onClick={() => setFailedStockOutcome(o.key)}
-                    className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
-                      failedStockOutcome === o.key
-                        ? 'border-yellow-400 bg-yellow-50'
-                        : 'border-gray-200 bg-white'
-                    }`}>
-                    <p className="text-sm font-medium text-gray-900">{o.label}</p>
-                    <p className="text-xs text-gray-500">{o.desc}</p>
-                  </button>
+
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-2">Where is the stock now?</p>
+            <div className="space-y-2">
+              {STOCK_DISPOSITIONS.map(o => (
+                <button key={o.value} type="button"
+                  onClick={() => setFailedForm({ ...failedForm, disposition: o.value })}
+                  className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all ${
+                    failedForm.disposition === o.value
+                      ? 'border-yellow-400 bg-yellow-50'
+                      : 'border-gray-200 bg-white'
+                  }`}>
+                  <p className="text-sm font-medium text-gray-900">{o.label}</p>
+                  <p className="text-xs text-gray-500">{o.desc}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {failedForm.disposition === 'transferred_state' && (
+            <div className="bg-blue-50 rounded-xl p-3 space-y-3">
+              <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Transfer Details</p>
+              <Select label="Destination State" required value={failedForm.destinationState}
+                onChange={e => setFailedForm({ ...failedForm, destinationState: e.target.value })}>
+                <option value="">Select state...</option>
+                {NIGERIAN_STATES.filter(s => s !== order.state).map(s => (
+                  <option key={s} value={s}>{s}</option>
                 ))}
-              </div>
+              </Select>
+              <Select label="Reason for Transfer" value={failedForm.transferReason}
+                onChange={e => setFailedForm({ ...failedForm, transferReason: e.target.value })}>
+                {TRANSFER_REASONS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </Select>
+              <p className="text-[11px] text-blue-800">
+                Stock goes In Transit and the {failedForm.destinationState || 'destination'} fulfillment officer gets an incoming transfer to receive.
+              </p>
             </div>
           )}
         </div>

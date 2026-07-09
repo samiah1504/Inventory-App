@@ -256,6 +256,7 @@ export function useTransferStock() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['warehouse_transfers'] })
+      queryClient.invalidateQueries({ queryKey: ['incoming_transfers'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
       showToast('Transfer created — stock in transit', 'success')
     },
@@ -275,7 +276,7 @@ export function useReceiveTransfer() {
         .from('warehouse_transfers')
         .update({ status: 'received', received_by: user?.id, received_at: new Date().toISOString() })
         .eq('id', transfer.id)
-        .eq('status', 'in_transit')
+        .in('status', ['in_transit', 'at_park'])
       if (updErr) throw updErr
 
       // Upsert destination inventory row
@@ -325,8 +326,46 @@ export function useReceiveTransfer() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['warehouse_transfers'] })
+      queryClient.invalidateQueries({ queryKey: ['incoming_transfers'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
       showToast('Transfer received into warehouse', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+}
+
+// Transfer arrived at the destination State Park — physically in the state but
+// NOT yet available for orders. Receiving into the warehouse completes it.
+export function useTransferAtPark() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+
+  return useMutation({
+    mutationFn: async (transfer) => {
+      const { error } = await supabase
+        .from('warehouse_transfers')
+        .update({ status: 'at_park' })
+        .eq('id', transfer.id)
+        .eq('status', 'in_transit')
+      if (error) throw error
+
+      await supabase.from('inventory_movements').insert({
+        product_id: transfer.product_id,
+        warehouse_id: transfer.to_warehouse_id,
+        movement_type: 'at_state_park',
+        quantity: 0,
+        reference_id: transfer.id,
+        reference_type: 'transfer',
+        notes: `${transfer.transfer_number} received at ${transfer.to_warehouse?.state || 'destination'} State Park — not yet available`,
+        staff_id: user?.id,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['warehouse_transfers'] })
+      queryClient.invalidateQueries({ queryKey: ['incoming_transfers'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      showToast('Received at State Park — not yet available for orders', 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
   })
