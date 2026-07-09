@@ -319,3 +319,63 @@ export function useDeleteStaffNote() {
     if (error) throw error
   }, ['staff_notes'], 'Note deleted')
 }
+
+// ─── Access control & deletion ───────────────────────────────────────────────
+
+export const ACCESS_AREAS = [
+  { key: 'orders',      label: 'View Orders' },
+  { key: 'new_order',   label: 'Create Orders' },
+  { key: 'fulfillment', label: 'Fulfillment' },
+  { key: 'waybill',     label: 'Waybill' },
+  { key: 'inventory',   label: 'Inventory' },
+  { key: 'customers',   label: 'Customers' },
+  { key: 'reports',     label: 'Reports' },
+  { key: 'accounting',  label: 'Accounting / Expenses' },
+  { key: 'documents',   label: 'Documents' },
+  { key: 'analytics',   label: 'Sales Analytics' },
+]
+
+export const ROLE_DEFAULT_ACCESS = {
+  ceo:                ACCESS_AREAS.map(a => a.key),
+  super_admin:        ACCESS_AREAS.map(a => a.key),
+  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'accounting', 'documents'],
+  customer_support:   ['orders', 'new_order', 'customers'],
+  fulfillment:        ['fulfillment', 'orders'],
+  waybill:            ['waybill', 'orders'],
+  inventory:          ['inventory', 'customers'],
+  accountant:         ['accounting', 'reports'],
+}
+
+// Effective access for a staff row: explicit ticks when set, else role defaults
+export function accessFor(staff) {
+  if (!staff) return []
+  if (['ceo', 'super_admin'].includes(staff.role)) return ACCESS_AREAS.map(a => a.key)
+  const explicit = Array.isArray(staff.extra_permissions) ? staff.extra_permissions.filter(p => typeof p === 'string') : []
+  return explicit.length > 0 ? explicit : (ROLE_DEFAULT_ACCESS[staff.role] || [])
+}
+
+export function useSetStaffAccess() {
+  return useHrMutation(async ({ staff_id, access }) => {
+    const { error } = await supabase.from('staff_users')
+      .update({ extra_permissions: access, updated_at: new Date().toISOString() })
+      .eq('id', staff_id)
+    if (error) throw error
+  }, ['staff', 'staff_member'], 'Access updated — applies at their next login')
+}
+
+// Hard delete when possible; staff referenced by orders/expenses/etc. can't be
+// removed without losing history, so they're deactivated instead.
+export function useDeleteStaff() {
+  return useHrMutation(async ({ staff_id }) => {
+    const { error } = await supabase.from('staff_users').delete().eq('id', staff_id)
+    if (error) {
+      if (error.code === '23503' || /foreign key|violates/i.test(error.message || '')) {
+        await supabase.from('staff_users')
+          .update({ is_active: false, status: 'inactive', updated_at: new Date().toISOString() })
+          .eq('id', staff_id)
+        throw new Error('This staff member has history (orders, expenses…) so the record was kept but marked Inactive — they can no longer log in.')
+      }
+      throw error
+    }
+  }, ['staff'], 'Staff deleted')
+}

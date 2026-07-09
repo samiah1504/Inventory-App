@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
-import { Pencil, KeyRound, FileText, Download, Trash2, ExternalLink, Plus } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { Pencil, KeyRound, FileText, Download, Trash2, ExternalLink, Plus, Check } from 'lucide-react'
 import { TopBar } from '../../components/layout/TopBar'
 import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
@@ -16,7 +16,7 @@ import {
   useIssueWarning, useSaveDocument, useDeleteDocument, useAddStaffNote, useDeleteStaffNote,
   LEAVE_TYPES, WARNING_TYPES, DOCUMENT_CATEGORIES, STAFF_STATUSES, labelOf,
 } from '../../hooks/useStaff'
-import { useSetStaffStatus } from '../../hooks/useStaff'
+import { useSetStaffStatus, useDeleteStaff, useSetStaffAccess, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
 import { savePdf } from '../../lib/pdf'
@@ -44,6 +44,7 @@ function MigrationNotice() {
 
 export function StaffDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const { data: businesses } = useBusinesses()
@@ -74,6 +75,9 @@ export function StaffDetailPage() {
   const deleteDocument = useDeleteDocument()
   const addNote = useAddStaffNote()
   const deleteNote = useDeleteStaffNote()
+  const deleteStaff = useDeleteStaff()
+  const setAccess = useSetStaffAccess()
+  const [accessDraft, setAccessDraft] = useState(null)
 
   const staff = staffQ.data
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
@@ -129,6 +133,20 @@ export function StaffDetailPage() {
         title={staff.name}
         actions={isCeo && (
           <div className="flex gap-2">
+            {staff.id !== user?.id && (
+              <button
+                title="Delete staff"
+                onClick={async () => {
+                  if (!window.confirm(`Delete ${staff.name}? This cannot be undone.`)) return
+                  try {
+                    await deleteStaff.mutateAsync({ staff_id: staff.id })
+                    navigate('/settings/staff')
+                  } catch { /* toast shown; may have been deactivated instead */ }
+                }}
+                className="p-2 bg-red-50 text-red-600 rounded-xl active:scale-95 transition-all">
+                <Trash2 size={18} />
+              </button>
+            )}
             <button onClick={() => setShowReset(true)} title="Reset password"
               className="p-2 bg-gray-100 text-gray-700 rounded-xl active:scale-95 transition-all">
               <KeyRound size={18} />
@@ -191,6 +209,48 @@ export function StaffDetailPage() {
                 </div>
               ))}
             </div>
+
+            {/* App access — tick what this staff member can open */}
+            {isCeo && !['ceo', 'super_admin'].includes(staff.role) && (() => {
+              const current = accessDraft ?? accessFor(staff)
+              const dirty = accessDraft !== null
+              const toggle = (key) => setAccessDraft(
+                current.includes(key) ? current.filter(k => k !== key) : [...current, key]
+              )
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">App Access</p>
+                  <p className="text-[11px] text-gray-400 mb-3">Tick what {staff.name.split(' ')[0]} can open. Changes apply the next time they log in.</p>
+                  <div className="space-y-1.5">
+                    {ACCESS_AREAS.map(a => {
+                      const on = current.includes(a.key)
+                      return (
+                        <button key={a.key} onClick={() => toggle(a.key)}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border text-left transition-all active:scale-[0.99] ${
+                            on ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'
+                          }`}>
+                          <span className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${
+                            on ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-transparent'
+                          }`}>
+                            <Check size={14} />
+                          </span>
+                          <span className="text-sm text-gray-800">{a.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {dirty && (
+                    <Button className="w-full mt-3" size="sm" loading={setAccess.isPending}
+                      onClick={async () => {
+                        await setAccess.mutateAsync({ staff_id: staff.id, access: current })
+                        setAccessDraft(null)
+                      }}>
+                      Save Access
+                    </Button>
+                  )}
+                </div>
+              )
+            })()}
 
             {isCeo && (
               <div className="bg-white rounded-2xl p-4 border border-gray-100">
