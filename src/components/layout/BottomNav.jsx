@@ -9,6 +9,7 @@ const NAV_CONFIG = {
   ceo: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
     { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/settings', icon: Settings, label: 'Settings' },
@@ -16,6 +17,7 @@ const NAV_CONFIG = {
   super_admin: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
     { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/reports', icon: BarChart3, label: 'Reports' },
     { to: '/settings', icon: Settings, label: 'Settings' },
@@ -23,6 +25,7 @@ const NAV_CONFIG = {
   operations_manager: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/inventory', icon: Package, label: 'Inventory' },
     { to: '/waybill', icon: Truck, label: 'Waybill' },
     { to: '/fulfillment', icon: Warehouse, label: 'Fulfillment' },
     { to: '/settings', icon: Settings, label: 'Settings' },
@@ -68,7 +71,7 @@ export function BottomNav() {
             to={to}
             end={endProp ?? to === '/'}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-xl min-w-[60px] transition-all ${
+              `flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded-xl min-w-[48px] flex-1 max-w-[72px] transition-all ${
                 isActive
                   ? 'text-blue-600'
                   : 'text-gray-500 hover:text-gray-700'
