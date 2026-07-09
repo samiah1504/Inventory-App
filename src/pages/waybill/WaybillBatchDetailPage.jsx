@@ -263,9 +263,9 @@ export function WaybillBatchDetailPage() {
                 </Button>
               )}
               {isTransit && (
-                <Button size="sm" onClick={() => handleAdvance('received')} disabled={advanceBatchStatus.isPending}
+                <Button size="sm" onClick={() => setTab('transit')}
                   className="flex-1">
-                  Mark Received
+                  Product Arrived at State Park
                 </Button>
               )}
             </div>
@@ -288,7 +288,7 @@ export function WaybillBatchDetailPage() {
         {isDone && (
           <div className="mt-3 flex items-center gap-2 text-green-400">
             <CheckCircle size={16} />
-            <span className="text-sm font-medium">Received at warehouse</span>
+            <span className="text-sm font-medium">All states received at State Park</span>
           </div>
         )}
       </div>
