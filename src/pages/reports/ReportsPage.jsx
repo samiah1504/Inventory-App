@@ -14,6 +14,7 @@ import {
   AlertCircle, Download, ChevronDown, ChevronUp, Search, X,
 } from 'lucide-react'
 import { Select, Input } from '../../components/ui/Input'
+import { Modal } from '../../components/ui/Modal'
 import { useBusinesses, useProducts, useWarehouses } from '../../hooks/useBusinesses'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -148,6 +149,83 @@ function buildProductPerformance(soldOrders, orderItemRows) {
   return Object.values(byProduct)
 }
 
+// ─── P&L engine ──────────────────────────────────────────────────────────────
+
+// Items of an order without extra queries: items_data JSONB → pre-fetched
+// order_items rows → the order's own product fields.
+function orderItemsSync(o, itemRowsByOrder) {
+  if (Array.isArray(o.items_data) && o.items_data.length > 0) {
+    return o.items_data.map(i => ({
+      product_id: i.product_id || null,
+      product_name: (i.product_name || i.name || '').trim(),
+      quantity: Number(i.quantity) || 1,
+    }))
+  }
+  const rows = itemRowsByOrder?.get(o.id)
+  if (rows && rows.length > 0) {
+    return rows.map(i => ({
+      product_id: i.product_id || null,
+      product_name: (i.product_name || '').trim(),
+      quantity: Number(i.quantity) || 1,
+    }))
+  }
+  return [{
+    product_id: o.product_id || null,
+    product_name: (o.product_name || '').replace(/\s*\+\s*\d+\s*more\s*$/i, '').trim(),
+    quantity: Number(o.quantity) || 1,
+  }]
+}
+
+// Standard-accounting P&L for a set of orders + expenses.
+// Revenue: paid orders at full amount, partially-paid at cash received.
+// COGS: catalog cost_price × quantity across paid orders' items.
+// Order expenses (order_id set) and operating expenses (no order_id) are
+// deducted after gross profit.
+function computePL(orders, expenses, catalogById, catalogByName, itemRowsByOrder) {
+  const paidOrders = orders.filter(o => REVENUE_STATUSES.includes(o.status))
+  const revenueOf = o => o.status === 'paid' ? Number(o.total_amount || 0) : Number(o.amount_paid || 0)
+  const revenue = paidOrders.reduce((s, o) => s + revenueOf(o), 0)
+
+  const cogsByProduct = {}
+  let cogs = 0
+  paidOrders.forEach(o => {
+    orderItemsSync(o, itemRowsByOrder).forEach(it => {
+      const prod = (it.product_id && catalogById.get(it.product_id)) ||
+        catalogByName.get(it.product_name.toLowerCase()) || null
+      const unitCost = Number(prod?.cost_price) || 0
+      const name = prod?.name || it.product_name || 'Unknown'
+      if (!cogsByProduct[name]) cogsByProduct[name] = { name, qty: 0, unitCost, total: 0, hasCost: unitCost > 0 }
+      cogsByProduct[name].qty   += it.quantity
+      cogsByProduct[name].total += unitCost * it.quantity
+      cogs += unitCost * it.quantity
+    })
+  })
+
+  const orderExpEntries = expenses.filter(e => e.order_id)
+  const opExEntries     = expenses.filter(e => !e.order_id)
+  const sumAmt = list => list.reduce((s, e) => s + Number(e.amount || 0), 0)
+  const byType = list => {
+    const m = {}
+    list.forEach(e => { const t = e.expense_type || 'other'; m[t] = (m[t] || 0) + Number(e.amount || 0) })
+    return Object.entries(m).map(([type, total]) => ({ type, total })).sort((a, b) => b.total - a.total)
+  }
+
+  const orderExpTotal = sumAmt(orderExpEntries)
+  const opExTotal     = sumAmt(opExEntries)
+  const grossProfit   = revenue - cogs
+  const netProfit     = grossProfit - orderExpTotal - opExTotal
+
+  return {
+    paidOrders, revenue,
+    cogs, cogsLines: Object.values(cogsByProduct).sort((a, b) => b.total - a.total),
+    orderExpEntries, opExEntries, orderExpTotal, opExTotal,
+    orderExpByType: byType(orderExpEntries), opExByType: byType(opExEntries),
+    grossProfit, netProfit,
+    grossMargin: revenue > 0 ? (grossProfit / revenue) * 100 : 0,
+    netMargin: revenue > 0 ? (netProfit / revenue) * 100 : 0,
+  }
+}
+
 function downloadCSV(rows, filename) {
   if (!rows.length) return
   const headers = Object.keys(rows[0])
@@ -240,6 +318,9 @@ export function ReportsPage() {
       const firstOfPrev = new Date(lastOfPrev.getFullYear(), lastOfPrev.getMonth(), 1)
       setDateFrom(firstOfPrev.toISOString().split('T')[0])
       setDateTo(lastOfPrev.toISOString().split('T')[0])
+    } else if (preset === 'year') {
+      setDateFrom(`${now.getFullYear()}-01-01`)
+      setDateTo(todayISO)
     }
   }
 
@@ -369,8 +450,8 @@ export function ReportsPage() {
     staleTime: 60000,
   })
 
-  // Products query — run when tab = products OR sales, orders loaded, and ≤500 orders
-  const canQueryItems = (tab === 'products' || tab === 'sales') && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
+  // Products query — run when tab = products / sales / profit (COGS needs items), orders loaded, ≤500 orders
+  const canQueryItems = (tab === 'products' || tab === 'sales' || tab === 'profit') && ordersReport.isSuccess && (ordersReport.data?.length || 0) > 0 && (ordersReport.data?.length || 0) <= 500
   const productsReport = useQuery({
     queryKey: ['report_products', dateFrom, dateTo, businessId],
     enabled: canQueryItems,
@@ -587,24 +668,82 @@ export function ReportsPage() {
 
   // ── P&L stats ─────────────────────────────────────────────────────────────
 
-  const plStats = useMemo(() => {
-    const revenueOrds = orders.filter(o => REVENUE_STATUSES.includes(o.status))
-    const grossSales   = revenueOrds.reduce((s, o) => s + Number(o.total_amount || 0), 0)
-    const cashCollected = orders.filter(o => ['paid', 'partially_paid'].includes(o.status))
-      .reduce((s, o) => s + Number(o.amount_paid || 0), 0)
-    const pendingCollection = Math.max(0, grossSales - cashCollected)
+  const [plDrill, setPlDrill] = useState(null) // { type, title, pl }
 
-    const opsExpenses   = expenses.filter(e => !e.is_admin_only).reduce((s, e) => s + Number(e.amount || 0), 0)
-    const adminExpenses = expenses.filter(e =>  e.is_admin_only).reduce((s, e) => s + Number(e.amount || 0), 0)
-    const totalExp      = opsExpenses + adminExpenses
-    const netPrft       = grossSales - totalExp
-    const margin        = grossSales > 0 ? (netPrft / grossSales) * 100 : 0
+  const itemRowsByOrder = useMemo(() => {
+    const m = new Map()
+    ;(productsReport.data || []).forEach(r => {
+      if (!m.has(r.order_id)) m.set(r.order_id, [])
+      m.get(r.order_id).push(r)
+    })
+    return m
+  }, [productsReport.data])
 
-    const byType = {}
-    expenses.forEach(e => { byType[e.expense_type] = (byType[e.expense_type] || 0) + Number(e.amount || 0) })
+  const plCatalog = useMemo(() => {
+    const catalog = catalogProducts || []
+    return {
+      byId:   new Map(catalog.map(p => [p.id, p])),
+      byName: new Map(catalog.map(p => [p.name.trim().toLowerCase(), p])),
+    }
+  }, [catalogProducts])
 
-    return { grossSales, cashCollected, pendingCollection, opsExpenses, adminExpenses, totalExpenses: totalExp, netProfit: netPrft, margin, byType }
-  }, [orders, expenses])
+  const plData = useMemo(() =>
+    computePL(orders, expenses, plCatalog.byId, plCatalog.byName, itemRowsByOrder)
+  , [orders, expenses, plCatalog, itemRowsByOrder])
+
+  const perBusinessPL = useMemo(() => {
+    if (businessId || !businesses || businesses.length <= 1) return []
+    return businesses.map(b => ({
+      business: b,
+      pl: computePL(
+        orders.filter(o => o.business_id === b.id),
+        expenses.filter(e => e.business_id === b.id),
+        plCatalog.byId, plCatalog.byName, itemRowsByOrder,
+      ),
+    }))
+  }, [orders, expenses, businesses, businessId, plCatalog, itemRowsByOrder])
+
+  // Monthly trend (last 6 months) — independent of the selected date range
+  const plTrend = useQuery({
+    queryKey: ['report_pl_trend', businessId],
+    enabled: tab === 'profit' && isCeo,
+    queryFn: async () => {
+      try {
+        const start = new Date(); start.setDate(1); start.setMonth(start.getMonth() - 5)
+        const startISO = start.toISOString().split('T')[0]
+        let oq = supabase.from('orders')
+          .select('id, status, total_amount, amount_paid, created_at, business_id, product_id, product_name, quantity, items_data')
+          .gte('created_at', `${startISO}T00:00:00`)
+          .in('status', ['paid', 'partially_paid'])
+        if (businessId) oq = oq.eq('business_id', businessId)
+        let eq = supabase.from('expenses')
+          .select('id, amount, date, order_id, business_id, expense_type')
+          .gte('date', startISO)
+        if (businessId) eq = eq.eq('business_id', businessId)
+        const [oR, eR] = await Promise.all([oq, eq])
+        if (oR.error || eR.error) throw oR.error || eR.error
+        return { orders: oR.data || [], expenses: eR.data || [] }
+      } catch { return { orders: [], expenses: [] } }
+    },
+    staleTime: 60000,
+  })
+
+  const trendMonths = useMemo(() => {
+    const t = plTrend.data
+    if (!t) return []
+    const months = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
+      const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      const pl = computePL(
+        t.orders.filter(o => (o.created_at || '').startsWith(ym)),
+        t.expenses.filter(e => (e.date || '').startsWith(ym)),
+        plCatalog.byId, plCatalog.byName, null,
+      )
+      months.push({ label: d.toLocaleString('en', { month: 'short' }), revenue: pl.revenue, gross: pl.grossProfit, net: pl.netProfit })
+    }
+    return months
+  }, [plTrend.data, plCatalog])
 
   // ── Compare stats ─────────────────────────────────────────────────────────
 
@@ -753,10 +892,11 @@ export function ReportsPage() {
   }
 
   function handleExportPDF() {
-    const { grossSales, cashCollected, pendingCollection, opsExpenses, adminExpenses, totalExpenses: totExp, netProfit: netPrft, margin } = plStats
+    const pl = plData
     const doc = new jsPDF()
     const fmtAmt = (v) => `NGN ${Number(v).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     const LINE = 8
+    const RX = 185
     let y = 22
 
     doc.setFontSize(18); doc.setFont('helvetica', 'bold')
@@ -770,32 +910,42 @@ export function ReportsPage() {
     }
     y += LINE * 2
 
-    // Revenue
-    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('REVENUE', 20, y); y += LINE
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal')
-    const RX = 185
-    doc.text('Gross Sales:', 25, y);           doc.text(fmtAmt(grossSales), RX, y, { align: 'right' }); y += LINE
-    doc.text('Cash Collected:', 25, y);        doc.text(fmtAmt(cashCollected), RX, y, { align: 'right' }); y += LINE
-    doc.text('Pending Collection:', 25, y);    doc.text(fmtAmt(pendingCollection), RX, y, { align: 'right' }); y += LINE * 1.5
-
-    // Expenses
-    doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-    doc.text('EXPENSES', 20, y); y += LINE
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal')
-    doc.text('Operational Expenses:', 25, y);  doc.text(fmtAmt(opsExpenses), RX, y, { align: 'right' }); y += LINE
-    if (isCeo) {
-      doc.text('Admin Expenses:', 25, y);      doc.text(fmtAmt(adminExpenses), RX, y, { align: 'right' }); y += LINE
+    const row = (label, value, bold = false) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal')
+      doc.text(label, 25, y); doc.text(fmtAmt(value), RX, y, { align: 'right' }); y += LINE
     }
-    doc.setFont('helvetica', 'bold')
-    doc.text('Total Expenses:', 25, y);        doc.text(fmtAmt(totExp), RX, y, { align: 'right' }); y += LINE * 1.5
 
-    // Summary
-    doc.setFontSize(13)
-    doc.text('SUMMARY', 20, y); y += LINE
-    doc.setFontSize(11)
-    doc.text('Net Profit:', 25, y);            doc.text(fmtAmt(netPrft), RX, y, { align: 'right' }); y += LINE
-    doc.text('Profit Margin:', 25, y);         doc.text(`${margin.toFixed(1)}%`, RX, y, { align: 'right' })
+    doc.setFontSize(10)
+    row('Total Sales Revenue', pl.revenue, true)
+    row('(-) Cost of Goods Sold', pl.cogs)
+    row('Gross Profit', pl.grossProfit, true); y += LINE * 0.5
+    row('(-) Order Expenses', pl.orderExpTotal)
+    row('(-) Operating Expenses', pl.opExTotal); y += LINE * 0.5
+    doc.setFontSize(12)
+    row('NET PROFIT', pl.netProfit, true)
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal')
+    doc.text('Gross Margin:', 25, y); doc.text(`${pl.grossMargin.toFixed(1)}%`, RX, y, { align: 'right' }); y += LINE
+    doc.text('Net Margin:', 25, y);   doc.text(`${pl.netMargin.toFixed(1)}%`, RX, y, { align: 'right' }); y += LINE * 1.5
+
+    // Per-business breakdown
+    if (perBusinessPL.length > 0) {
+      doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+      doc.text('BY BUSINESS', 20, y); y += LINE
+      doc.setFontSize(10)
+      perBusinessPL.forEach(({ business, pl: bpl }) => {
+        if (y > 260) { doc.addPage(); y = 22 }
+        doc.setFont('helvetica', 'bold')
+        doc.text(business.name, 22, y); y += LINE
+        doc.setFont('helvetica', 'normal')
+        row('Revenue', bpl.revenue)
+        row('COGS', bpl.cogs)
+        row('Gross Profit', bpl.grossProfit)
+        row('Order Expenses', bpl.orderExpTotal)
+        row('Operating Expenses', bpl.opExTotal)
+        row('Net Profit', bpl.netProfit, true)
+        y += LINE * 0.5
+      })
+    }
 
     doc.save(`pl-report-${dateFrom}-to-${dateTo}.pdf`)
   }
@@ -846,6 +996,7 @@ export function ReportsPage() {
             { label: 'This Week',  key: 'week' },
             { label: 'This Month', key: 'month' },
             { label: 'Last Month', key: 'lastmonth' },
+            { label: 'This Year',  key: 'year' },
           ].map(p => (
             <button key={p.key} onClick={() => applyPreset(p.key)}
               className="shrink-0 px-3 py-1 rounded-full text-xs font-medium bg-blue-50 text-blue-700 active:scale-95 transition-all">
@@ -1246,89 +1397,128 @@ export function ReportsPage() {
           </div>
         )}
 
-        {/* P&L */}
+        {/* P&L — standard accounting flow with drill-downs */}
         {tab === 'profit' && isCeo && (
           <div className="space-y-4">
-            {/* Revenue section */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Revenue</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between py-1.5">
-                  <span className="text-sm text-gray-600">Gross Sales</span>
-                  <span className="text-sm font-bold text-green-600">{formatCurrency(plStats.grossSales)}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-t border-gray-50">
-                  <span className="text-sm text-gray-600">Cash Collected</span>
-                  <span className="text-sm font-semibold text-gray-900">{formatCurrency(plStats.cashCollected)}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-t border-gray-50">
-                  <span className="text-sm text-gray-500">Pending Collection</span>
-                  <span className="text-sm font-medium text-amber-600">{formatCurrency(plStats.pendingCollection)}</span>
-                </div>
+            {/* Main statement (combined or selected business) */}
+            <PLStatementCard
+              title={businessId
+                ? (businesses?.find(b => b.id === businessId)?.name || 'P&L Statement')
+                : 'P&L Statement — All Businesses'}
+              pl={plData}
+              onDrill={(type, pl, title) => setPlDrill({ type, pl, title })}
+            />
+
+            {/* Margins */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                <p className="text-xs text-gray-500 mb-1">Gross Profit Margin</p>
+                <p className={`text-xl font-bold ${plData.grossMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {plData.grossMargin.toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                <p className="text-xs text-gray-500 mb-1">Net Profit Margin</p>
+                <p className={`text-xl font-bold ${plData.netMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {plData.netMargin.toFixed(1)}%
+                </p>
               </div>
             </div>
 
-            {/* Expenses section */}
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-900 mb-3">Expenses</h3>
-              <div className="space-y-2 mb-3">
-                <div className="flex justify-between py-1.5">
-                  <span className="text-sm text-gray-600">Operational</span>
-                  <span className="text-sm font-semibold text-gray-900">{formatCurrency(plStats.opsExpenses)}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-t border-gray-50">
-                  <span className="text-sm text-gray-600">Admin</span>
-                  <span className="text-sm font-semibold text-gray-900">{formatCurrency(plStats.adminExpenses)}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-t border-gray-100 pt-2">
-                  <span className="text-sm font-semibold text-gray-900">Total Expenses</span>
-                  <span className="text-sm font-bold text-red-600">{formatCurrency(plStats.totalExpenses)}</span>
-                </div>
+            {/* Monthly trend */}
+            {trendMonths.some(m => m.revenue !== 0 || m.net !== 0) && (
+              <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                <h3 className="text-sm font-semibold text-gray-900 mb-0.5">Monthly Trend</h3>
+                <p className="text-xs text-gray-400 mb-3">Revenue · Gross Profit · Net Profit — last 6 months</p>
+                {(() => {
+                  const max = Math.max(...trendMonths.flatMap(m => [Math.abs(m.revenue), Math.abs(m.gross), Math.abs(m.net)]), 1)
+                  return (
+                    <div className="space-y-3">
+                      {trendMonths.map(m => (
+                        <div key={m.label}>
+                          <p className="text-xs font-semibold text-gray-700 mb-1">{m.label}</p>
+                          <div className="space-y-1">
+                            {[
+                              { label: 'Rev',   value: m.revenue, cls: 'bg-gray-400' },
+                              { label: 'Gross', value: m.gross,   cls: 'bg-blue-500' },
+                              { label: 'Net',   value: m.net,     cls: 'bg-green-500' },
+                            ].map(({ label, value, cls }) => (
+                              <div key={label} className="flex items-center gap-2">
+                                <span className="text-[10px] text-gray-400 w-9 shrink-0">{label}</span>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden flex-1">
+                                  <div
+                                    className={`h-full rounded-full ${value >= 0 ? cls : 'bg-red-400'}`}
+                                    style={{ width: `${value === 0 ? 0 : Math.min(100, Math.max((Math.abs(value) / max) * 100, 2))}%` }}
+                                  />
+                                </div>
+                                <span className={`text-[11px] font-semibold w-20 text-right shrink-0 ${value < 0 ? 'text-red-600' : 'text-gray-700'}`}>
+                                  {formatCurrency(value)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })()}
               </div>
-              {/* By type breakdown */}
-              {Object.keys(plStats.byType).length > 0 && (
-                <div className="pt-3 border-t border-gray-100">
-                  <p className="text-xs text-gray-500 mb-2 font-medium">Breakdown by type</p>
+            )}
+
+            {/* Per-business breakdown */}
+            {perBusinessPL.length > 0 && (
+              <>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 pt-1">By Business</p>
+                {perBusinessPL.map(({ business, pl }) => (
+                  <PLStatementCard
+                    key={business.id}
+                    title={business.name}
+                    pl={pl}
+                    onDrill={(type, dpl, title) => setPlDrill({ type, pl: dpl, title })}
+                  />
+                ))}
+
+                {/* Combined totals */}
+                <div className="bg-gray-900 rounded-2xl p-4 text-white">
+                  <h3 className="text-sm font-semibold text-gray-300 mb-3">Combined Total</h3>
                   <div className="space-y-1.5">
-                    {Object.entries(plStats.byType).sort(([, a], [, b]) => b - a).map(([type, amt]) => (
-                      <div key={type} className="flex justify-between">
-                        <span className="text-xs text-gray-600 capitalize">{type.replace(/_/g, ' ')}</span>
-                        <span className="text-xs font-medium text-gray-900">{formatCurrency(amt)}</span>
+                    {[
+                      { label: 'Sales Revenue',          value: plData.revenue,       cls: 'text-white font-semibold' },
+                      { label: '(-) Cost of Goods Sold', value: plData.cogs,          cls: 'text-gray-300' },
+                      { label: 'Gross Profit',           value: plData.grossProfit,   cls: 'text-green-400 font-bold' },
+                      { label: '(-) Order Expenses',     value: plData.orderExpTotal, cls: 'text-gray-300' },
+                      { label: '(-) Operating Expenses', value: plData.opExTotal,     cls: 'text-gray-300' },
+                    ].map(({ label, value, cls }) => (
+                      <div key={label} className="flex justify-between gap-2">
+                        <span className="text-sm text-gray-400 truncate">{label}</span>
+                        <span className={`text-sm shrink-0 ${cls}`}>{formatCurrency(value)}</span>
                       </div>
                     ))}
+                    <div className="flex justify-between gap-2 border-t border-gray-700 pt-2 mt-1">
+                      <span className="text-sm font-semibold">Net Profit</span>
+                      <span className={`text-lg font-bold shrink-0 ${plData.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {formatCurrency(plData.netProfit)}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              )}
-            </div>
+              </>
+            )}
 
-            {/* Summary */}
-            <div className="bg-gray-900 rounded-2xl p-4 text-white">
-              <h3 className="text-sm font-semibold text-gray-300 mb-3">P&L Summary</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-300">Gross Sales</span>
-                  <span className="text-sm font-bold text-green-400">{formatCurrency(plStats.grossSales)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-sm text-gray-300">(-) Total Expenses</span>
-                  <span className="text-sm font-bold text-red-400">{formatCurrency(plStats.totalExpenses)}</span>
-                </div>
-                <div className="border-t border-gray-700 pt-2 flex justify-between">
-                  <span className="text-sm font-semibold text-white">Net Profit</span>
-                  <span className={`text-lg font-bold ${plStats.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {formatCurrency(plStats.netProfit)}
-                  </span>
-                </div>
-                {plStats.grossSales > 0 && (
-                  <div className="flex justify-between border-t border-gray-700 pt-2">
-                    <span className="text-xs text-gray-400">Profit Margin</span>
-                    <span className={`text-sm font-bold ${plStats.margin >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {plStats.margin.toFixed(1)}%
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
+            {/* Drill-down modal */}
+            <Modal
+              isOpen={!!plDrill}
+              onClose={() => setPlDrill(null)}
+              title={plDrill ? `${{
+                revenue: 'Sales Revenue — Paid Orders',
+                cogs: 'Cost of Goods Sold',
+                order_expenses: 'Order Expenses',
+                operating_expenses: 'Operating Expenses',
+                net: 'Net Profit Calculation',
+              }[plDrill.type] || ''}` : ''}
+            >
+              {plDrill && <PLDrillContent drill={plDrill} orderNumbersById={new Map(orders.map(o => [o.id, o.order_number]))} />}
+            </Modal>
           </div>
         )}
 
@@ -1787,6 +1977,199 @@ function ExpenseEntry({ e }) {
           View receipt →
         </a>
       )}
+    </div>
+  )
+}
+
+// ─── P&L report pieces ───────────────────────────────────────────────────────
+
+function PLStatementCard({ title, pl, onDrill }) {
+  const [openExp, setOpenExp] = useState(null) // 'order' | 'op'
+
+  const money = v => formatCurrency(Math.abs(v))
+
+  const line = (key, label, value, { bold = false, negative = false, drill = null, expandKey = null } = {}) => {
+    const isOpen = openExp === expandKey
+    const breakdown = expandKey === 'order' ? pl.orderExpByType : expandKey === 'op' ? pl.opExByType : []
+    return (
+      <div key={key}>
+        <div className="flex items-center gap-1 py-2.5">
+          <button
+            onClick={() => drill && onDrill(drill, pl, title)}
+            disabled={!drill}
+            className={`flex-1 min-w-0 flex items-center justify-between gap-2 text-left ${drill ? 'active:opacity-60' : ''}`}
+          >
+            <span className={`text-sm truncate ${bold ? 'font-semibold text-gray-900' : 'text-gray-600'} ${drill ? 'underline decoration-dotted decoration-gray-300 underline-offset-4' : ''}`}>
+              {label}
+            </span>
+            <span className={`shrink-0 text-sm ${bold ? 'font-bold' : 'font-semibold'} ${negative || value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+              {negative ? `− ${money(value)}` : formatCurrency(value)}
+            </span>
+          </button>
+          {expandKey && (
+            <button onClick={() => setOpenExp(isOpen ? null : expandKey)}
+              className="p-1 text-gray-400 shrink-0 active:scale-95" title="Breakdown">
+              {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+          )}
+        </div>
+        {expandKey && isOpen && (
+          <div className="bg-gray-50 rounded-xl p-3 mb-2 space-y-1.5">
+            {breakdown.length === 0 ? (
+              <p className="text-xs text-gray-400">None in this period</p>
+            ) : breakdown.map(({ type, total }) => (
+              <div key={type} className="flex justify-between gap-2">
+                <span className="text-xs text-gray-600 capitalize truncate">{type.replace(/_/g, ' ')}</span>
+                <span className="text-xs font-semibold text-gray-900 shrink-0">{formatCurrency(total)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 p-4">
+      <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+      <p className="text-[11px] text-gray-400 mb-2">Tap any figure to see the transactions behind it</p>
+      <div className="divide-y divide-gray-50">
+        {line('rev',   'Total Sales Revenue', pl.revenue,       { bold: true, drill: 'revenue' })}
+        {line('cogs',  'Cost of Goods Sold',  pl.cogs,          { negative: true, drill: 'cogs' })}
+        {line('gross', 'Gross Profit',        pl.grossProfit,   { bold: true, drill: 'net' })}
+        {line('oexp',  'Order Expenses',      pl.orderExpTotal, { negative: true, drill: 'order_expenses', expandKey: 'order' })}
+        {line('opex',  'Operating Expenses',  pl.opExTotal,     { negative: true, drill: 'operating_expenses', expandKey: 'op' })}
+      </div>
+      <button
+        onClick={() => onDrill('net', pl, title)}
+        className="w-full mt-3 bg-gray-900 rounded-xl px-4 py-3 text-left active:opacity-80"
+      >
+        <p className="text-xs text-gray-400 mb-0.5">Net Profit</p>
+        <p className={`text-2xl font-bold ${pl.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+          {formatCurrency(pl.netProfit)}
+        </p>
+        <p className="text-[11px] text-gray-500 mt-0.5">{pl.netMargin.toFixed(1)}% net margin · tap for calculation</p>
+      </button>
+    </div>
+  )
+}
+
+function PLDrillContent({ drill, orderNumbersById }) {
+  const { type, pl } = drill
+
+  const TotalRow = ({ label, value }) => (
+    <div className="flex items-center justify-between gap-2 border-t border-gray-200 pt-2.5 mt-1">
+      <span className="text-sm font-semibold text-gray-900">{label}</span>
+      <span className={`text-base font-bold shrink-0 ${value < 0 ? 'text-red-600' : 'text-gray-900'}`}>{formatCurrency(value)}</span>
+    </div>
+  )
+
+  if (type === 'revenue') {
+    return (
+      <div className="space-y-2">
+        {pl.paidOrders.length === 0 ? (
+          <p className="text-sm text-gray-400">No paid orders in this period</p>
+        ) : pl.paidOrders.map(o => (
+          <div key={o.id} className="bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-mono text-gray-400 truncate">{o.order_number}</p>
+              <p className="text-sm text-gray-800 truncate">{o.customer_name}</p>
+              <p className="text-[11px] text-gray-400">
+                {formatDate(o.created_at)} · {(o.status || '').replace(/_/g, ' ')}
+              </p>
+            </div>
+            <p className="text-sm font-bold text-gray-900 shrink-0">
+              {formatCurrency(o.status === 'paid' ? o.total_amount : o.amount_paid || 0)}
+            </p>
+          </div>
+        ))}
+        <TotalRow label={`Total · ${pl.paidOrders.length} order${pl.paidOrders.length !== 1 ? 's' : ''}`} value={pl.revenue} />
+      </div>
+    )
+  }
+
+  if (type === 'cogs') {
+    return (
+      <div className="space-y-2">
+        {pl.cogsLines.length === 0 ? (
+          <p className="text-sm text-gray-400">No products sold in this period</p>
+        ) : pl.cogsLines.map(l => (
+          <div key={l.name} className="bg-gray-50 rounded-xl px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-gray-800 truncate flex-1 min-w-0">{l.name}</p>
+              <p className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(l.total)}</p>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {l.qty} unit{l.qty !== 1 ? 's' : ''} × {formatCurrency(l.unitCost)}
+              {!l.hasCost && <span className="ml-1 text-amber-600 font-medium">— no cost price set</span>}
+            </p>
+          </div>
+        ))}
+        <TotalRow label="Total COGS" value={pl.cogs} />
+        {pl.cogsLines.some(l => !l.hasCost) && (
+          <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+            Some products have no cost price, so COGS is understated. Set cost prices in Settings → Products.
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  if (type === 'order_expenses' || type === 'operating_expenses') {
+    const entries = type === 'order_expenses' ? pl.orderExpEntries : pl.opExEntries
+    const total   = type === 'order_expenses' ? pl.orderExpTotal : pl.opExTotal
+    return (
+      <div className="space-y-2">
+        {entries.length === 0 ? (
+          <p className="text-sm text-gray-400">No expenses in this period</p>
+        ) : entries.map(e => (
+          <div key={e.id} className="bg-gray-50 rounded-xl px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm text-gray-800 capitalize truncate flex-1 min-w-0">{(e.expense_type || 'other').replace(/_/g, ' ')}</p>
+              <p className="text-sm font-bold text-gray-900 shrink-0">{formatCurrency(e.amount)}</p>
+            </div>
+            <p className="text-xs text-gray-400 mt-0.5 truncate">
+              {e.date}
+              {e.order_id && orderNumbersById?.get(e.order_id) ? ` · ${orderNumbersById.get(e.order_id)}` : ''}
+              {e.description ? ` · ${e.description}` : ''}
+            </p>
+          </div>
+        ))}
+        <TotalRow label={`Total · ${entries.length} entr${entries.length !== 1 ? 'ies' : 'y'}`} value={total} />
+      </div>
+    )
+  }
+
+  // Net profit calculation breakdown
+  return (
+    <div className="space-y-1">
+      {[
+        { label: 'Total Sales Revenue',    value: pl.revenue,        sign: '' },
+        { label: 'Cost of Goods Sold',     value: -pl.cogs,          sign: '−' },
+        { label: 'Gross Profit',           value: pl.grossProfit,    sign: '=', bold: true },
+        { label: 'Order Expenses',         value: -pl.orderExpTotal, sign: '−' },
+        { label: 'Operating Expenses',     value: -pl.opExTotal,     sign: '−' },
+        { label: 'Net Profit',             value: pl.netProfit,      sign: '=', bold: true },
+      ].map(({ label, value, sign, bold }) => (
+        <div key={label} className={`flex items-center justify-between gap-2 py-2 ${sign === '=' ? 'border-t border-gray-200' : ''}`}>
+          <span className={`text-sm ${bold ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+            {sign && <span className="text-gray-400 mr-1">{sign}</span>}{label}
+          </span>
+          <span className={`text-sm shrink-0 ${bold ? 'font-bold' : 'font-semibold'} ${value < 0 ? 'text-red-600' : 'text-gray-900'}`}>
+            {formatCurrency(Math.abs(value))}
+          </span>
+        </div>
+      ))}
+      <div className="bg-gray-50 rounded-xl p-3 mt-2 space-y-1">
+        <div className="flex justify-between">
+          <span className="text-xs text-gray-500">Gross Profit Margin</span>
+          <span className="text-xs font-bold text-gray-900">{pl.grossMargin.toFixed(1)}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-xs text-gray-500">Net Profit Margin</span>
+          <span className="text-xs font-bold text-gray-900">{pl.netMargin.toFixed(1)}%</span>
+        </div>
+      </div>
     </div>
   )
 }
