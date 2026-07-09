@@ -32,6 +32,7 @@ const MOVEMENT_LABELS = {
   purchase:          { label: 'Stock received',      color: 'text-blue-600' },
   sale:              { label: 'Sold',                color: 'text-green-600' },
   reserve:           { label: 'Reserved',            color: 'text-amber-600' },
+  reserve_out:       { label: 'Moved with order',    color: 'text-purple-600' },
   release:           { label: 'Released',            color: 'text-gray-600' },
   return:            { label: 'Returned to stock',   color: 'text-orange-500' },
   return_inspection: { label: 'Awaiting inspection', color: 'text-amber-600' },

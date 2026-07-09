@@ -75,6 +75,112 @@ export async function reserveStockForOrder(order, staffId) {
   }
 }
 
+// When an order is marked received at the destination warehouse, the goods are
+// physically there — stock (still reserved for the order) moves to a warehouse
+// in the order's state automatically, without a manual transfer. Products not
+// tracked in inventory get a stock record created at the destination.
+export async function receiveOrderStockAtWarehouse(order, staff) {
+  try {
+    if (!order.state) return
+    const { data: destRows } = await supabase
+      .from('warehouses')
+      .select('*')
+      .eq('state', order.state)
+      .eq('is_active', true)
+    const dest = (destRows || [])[0]
+    if (!dest) return
+
+    const { data: moves } = await supabase
+      .from('inventory_movements')
+      .select('*')
+      .eq('reference_id', order.id)
+      .eq('reference_type', 'order')
+    const all = moves || []
+
+    // Where is each product's outstanding reservation right now?
+    const key = m => `${m.product_id}|${m.warehouse_id}`
+    const net = {}
+    all.filter(m => m.movement_type === 'reserve')
+      .forEach(m => { net[key(m)] = (net[key(m)] || 0) + Math.abs(m.quantity) })
+    all.filter(m => ['sale', 'release', 'return', 'damage', 'missing', 'return_inspection', 'reserve_out'].includes(m.movement_type))
+      .forEach(m => { net[key(m)] = (net[key(m)] || 0) - Math.abs(m.quantity) })
+    const reservedAt = {}
+    Object.entries(net).forEach(([k, qty]) => {
+      if (qty <= 0) return
+      const [product_id, warehouse_id] = k.split('|')
+      reservedAt[product_id] = { warehouse_id, qty }
+    })
+
+    const items = await getOrderItems(order)
+    for (const item of items) {
+      if (!item.product_id) continue
+      const existing = reservedAt[item.product_id]
+
+      // Already reserved at the destination — nothing to move
+      if (existing && existing.warehouse_id === dest.id) continue
+
+      const qty = existing ? Math.min(existing.qty, item.quantity) : item.quantity
+
+      // Take the reserved goods out of the source warehouse
+      if (existing) {
+        const { data: src } = await supabase
+          .from('inventory')
+          .select('*')
+          .eq('product_id', item.product_id)
+          .eq('warehouse_id', existing.warehouse_id)
+          .single()
+        if (src) {
+          await supabase.from('inventory').update({
+            quantity_reserved: Math.max(0, (src.quantity_reserved || 0) - qty),
+            quantity_physical: Math.max(0, (src.quantity_physical || 0) - qty),
+          }).eq('id', src.id)
+          await supabase.from('inventory_movements').insert({
+            product_id: item.product_id, warehouse_id: src.warehouse_id, business_id: src.business_id,
+            movement_type: 'reserve_out',
+            quantity: -qty,
+            reference_id: order.id, reference_type: 'order',
+            notes: `Moved to ${dest.name} with ${order.order_number}`,
+            staff_id: staff?.id || null,
+          })
+        }
+      }
+
+      // Put the goods (still reserved for this order) into the destination
+      const { data: destRow } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('product_id', item.product_id)
+        .eq('warehouse_id', dest.id)
+        .single()
+      if (destRow) {
+        await supabase.from('inventory').update({
+          quantity_physical: (destRow.quantity_physical || 0) + qty,
+          quantity_reserved: (destRow.quantity_reserved || 0) + qty,
+        }).eq('id', destRow.id)
+      } else {
+        await supabase.from('inventory').insert({
+          product_id: item.product_id,
+          warehouse_id: dest.id,
+          business_id: order.business_id || null,
+          quantity_physical: qty,
+          quantity_reserved: qty,
+          quantity_available: 0,
+        })
+      }
+      await supabase.from('inventory_movements').insert({
+        product_id: item.product_id, warehouse_id: dest.id, business_id: order.business_id || null,
+        movement_type: 'reserve',
+        quantity: qty,
+        reference_id: order.id, reference_type: 'order',
+        notes: `Received at ${dest.name} — held for ${order.order_number}`,
+        staff_id: staff?.id || null,
+      })
+    }
+  } catch (e) {
+    console.warn('Receive-at-warehouse stock update failed:', e)
+  }
+}
+
 // Resolve an order's outstanding reservation when it reaches a terminal state.
 // outcome: 'sold' (paid) | 'release' (cancelled) | 'returned' | 'damaged' | 'missing'
 // Uses the order's own 'reserve' movements to know exactly which warehouse rows
@@ -89,7 +195,7 @@ export async function resolveOrderStock(order, outcome, staffId) {
     const all = moves || []
     const reserves = all.filter(m => m.movement_type === 'reserve')
     if (reserves.length === 0) return
-    const resolved = all.filter(m => ['sale', 'release', 'return', 'damage', 'missing'].includes(m.movement_type))
+    const resolved = all.filter(m => ['sale', 'release', 'return', 'damage', 'missing', 'reserve_out'].includes(m.movement_type))
 
     // Net outstanding reservation per product+warehouse
     const key = m => `${m.product_id}|${m.warehouse_id}`
@@ -181,7 +287,7 @@ export async function startReturnProcess(order, staff) {
       .eq('reference_type', 'order')
     const all = moves || []
     const reserves = all.filter(m => m.movement_type === 'reserve')
-    const resolved = all.filter(m => ['sale', 'release', 'return', 'damage', 'missing', 'return_inspection'].includes(m.movement_type))
+    const resolved = all.filter(m => ['sale', 'release', 'return', 'damage', 'missing', 'return_inspection', 'reserve_out'].includes(m.movement_type))
     const key = m => `${m.product_id}|${m.warehouse_id}`
     const net = {}
     reserves.forEach(m => { net[key(m)] = (net[key(m)] || 0) + Math.abs(m.quantity) })

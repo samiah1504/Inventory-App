@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
+import { receiveOrderStockAtWarehouse } from '../lib/stockOps'
 
 export function useWaybillBatch(id) {
   return useQuery({
@@ -251,9 +252,9 @@ export function useAdvanceBatchStatus() {
         }
       } else if (newStatus === 'received') {
         for (const orderId of orderIds) {
-          await supabase.from('orders').update({
+          const { data: fullOrder } = await supabase.from('orders').update({
             status: 'received_at_warehouse', updated_at: new Date().toISOString(),
-          }).eq('id', orderId)
+          }).eq('id', orderId).select().single()
           await supabase.from('order_timeline').insert({
             order_id: orderId,
             action: 'received_at_warehouse',
@@ -261,6 +262,8 @@ export function useAdvanceBatchStatus() {
             staff_id: user?.id,
             staff_name: user?.name,
           })
+          // Destination warehouse automatically holds this order's stock
+          if (fullOrder) await receiveOrderStockAtWarehouse(fullOrder, user)
         }
       }
 
@@ -281,6 +284,8 @@ export function useAdvanceBatchStatus() {
       queryClient.invalidateQueries({ queryKey: ['waybill_batch', batchId] })
       queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
     },
   })
 }

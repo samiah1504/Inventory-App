@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { queueAction, isOnline } from '../lib/offline'
-import { reserveStockForOrder, resolveOrderStock, startReturnProcess } from '../lib/stockOps'
+import { reserveStockForOrder, resolveOrderStock, startReturnProcess, receiveOrderStockAtWarehouse } from '../lib/stockOps'
 
 export function useOrders(filters = {}) {
   const { user } = useAuthStore()
@@ -213,6 +213,7 @@ export function useUpdateOrderStatus() {
       else if (status === 'cancelled') await resolveOrderStock(data, 'release', user?.id)
       else if (status === 'returned') await startReturnProcess(data, user)
       else if (status === 'failed_delivery' && stockOutcome) await resolveOrderStock(data, stockOutcome, user?.id)
+      else if (status === 'received_at_warehouse') await receiveOrderStockAtWarehouse(data, user)
 
       return data
     },
