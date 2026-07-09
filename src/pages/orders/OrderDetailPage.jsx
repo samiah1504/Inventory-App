@@ -580,13 +580,10 @@ export function OrderDetailPage() {
         onClose={() => setShowExpenseModal(false)}
         title="Add Fulfillment Expenses"
         footer={
-          <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => setShowExpenseModal(false)} className="flex-1">Skip</Button>
-            <Button onClick={handleExpenseSubmit} className="flex-1">Save Expenses</Button>
-          </div>
+          <Button onClick={handleExpenseSubmit} className="w-full">Save Expenses</Button>
         }
       >
-        <p className="text-xs text-gray-500 mb-4">Enter any fulfillment expenses for this order (leave blank to skip)</p>
+        <p className="text-xs text-gray-500 mb-4">Enter any fulfillment expenses for this order (leave blank if none)</p>
         <div className="space-y-3">
           <Input label="Delivery Fee (₦)" type="number" inputMode="decimal" placeholder="0"
             value={expense.delivery_fee} onChange={e => setExpense({ ...expense, delivery_fee: e.target.value })} />
