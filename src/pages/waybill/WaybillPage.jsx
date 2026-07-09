@@ -20,6 +20,7 @@ import { NIGERIAN_STATES, formatDate } from '../../utils/format'
 
 const TABS = [
   { key: 'awaiting', label: 'Awaiting Waybill' },
+  { key: 'sent_to_park', label: 'Sent Back to Park' },
   { key: 'batches', label: 'Batches' },
   { key: 'waybilled', label: 'In Transit' },
   { key: 'transfers', label: 'Transfers' },
@@ -134,7 +135,11 @@ export function WaybillPage() {
   }
 
   function toggleSelectAll() {
-    const selectableIds = (awaitingOrders.data || []).filter(o => ['awaiting_waybill', 'sent_to_park'].includes(o.status)).map(o => o.id)
+    const all = awaitingOrders.data || []
+    const pool = tab === 'sent_to_park'
+      ? all.filter(o => o.status === 'sent_to_park')
+      : all.filter(o => o.status === 'awaiting_waybill')
+    const selectableIds = pool.map(o => o.id)
     if (selectedOrders.length === selectableIds.length) {
       setSelectedOrders([])
     } else {
@@ -148,7 +153,7 @@ export function WaybillPage() {
         title="Waybill"
         back={false}
         actions={
-          tab === 'awaiting' && (
+          (tab === 'awaiting' || tab === 'sent_to_park') && (
             <Button size="sm" onClick={() => setShowBatchModal(true)} disabled={selectedOrders.length === 0}>
               Create Batch ({selectedOrders.length})
             </Button>
@@ -170,12 +175,22 @@ export function WaybillPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
-        {tab === 'awaiting' && (() => {
-          const orders = awaitingOrders.data || []
+        {(tab === 'awaiting' || tab === 'sent_to_park') && (() => {
+          const all = awaitingOrders.data || []
+          // "Sent Back to Park" = returned orders re-routed to another state,
+          // awaiting a fresh waybill; the Awaiting tab keeps normal new orders
+          const orders = tab === 'sent_to_park'
+            ? all.filter(o => o.status === 'sent_to_park')
+            : all.filter(o => o.status !== 'sent_to_park')
           const selectableOrders = orders.filter(o => ['awaiting_waybill', 'sent_to_park'].includes(o.status))
           const inBatchCount = orders.filter(o => o.status === 'batch_processing').length
           return (
             <div className="space-y-3">
+              {tab === 'sent_to_park' && (
+                <p className="text-xs text-cyan-800 bg-cyan-50 rounded-xl px-3 py-2">
+                  Returned products sent back to a State Park for transfer to another state — select and create a new waybill to ship them.
+                </p>
+              )}
               {orders.length > 0 && (
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-gray-500">
@@ -190,7 +205,13 @@ export function WaybillPage() {
                 </div>
               )}
               {awaitingOrders.isLoading ? <SkeletonList count={4} /> :
-               orders.length === 0 ? <EmptyState title="No orders awaiting waybill" icon={<Truck size={28} />} /> :
+               orders.length === 0 ? (
+                 <EmptyState
+                   title={tab === 'sent_to_park' ? 'Nothing sent back to park' : 'No orders awaiting waybill'}
+                   description={tab === 'sent_to_park' ? 'Returned orders re-routed to another state will appear here' : undefined}
+                   icon={<Truck size={28} />}
+                 />
+               ) :
                orders.map(order => {
                 const inBatch = order.status === 'batch_processing'
                 return (
