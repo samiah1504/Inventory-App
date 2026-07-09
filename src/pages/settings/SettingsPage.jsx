@@ -66,6 +66,9 @@ export function SettingsPage() {
           >
             <LogOut size={16} /> Sign Out
           </button>
+          <p className="text-[11px] text-gray-400 text-center mt-3">
+            App version: {new Date(__BUILD_TIME__).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </p>
         </div>
       </div>
     </div>
@@ -97,6 +100,9 @@ function NonAdminSettings({ user, logout }) {
           >
             <LogOut size={16} /> Sign Out
           </button>
+          <p className="text-[11px] text-gray-400 text-center mt-3">
+            App version: {new Date(__BUILD_TIME__).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+          </p>
         </div>
 
         {/* Leave self-service for all staff */}
