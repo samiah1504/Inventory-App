@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Package, DollarSign, Clock, ChevronRight, CheckCircle } from 'lucide-react'
-import { useWaybillBatch, useSaveBatchExpenses, useTogglePackingItem, useAdvanceBatchStatus } from '../../hooks/useWaybillBatches'
+import { Package, DollarSign, Clock, ChevronRight, CheckCircle, MapPin, Copy } from 'lucide-react'
+import { useWaybillBatch, useSaveBatchExpenses, useTogglePackingItem, useAdvanceBatchStatus, useMarkStateArrival } from '../../hooks/useWaybillBatches'
 import { TopBar } from '../../components/layout/TopBar'
 import { Button } from '../../components/ui/Button'
 import { Input, Textarea } from '../../components/ui/Input'
+import { Modal } from '../../components/ui/Modal'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { generatePackingList, generateWaybillSummary, savePdf } from '../../lib/pdf'
@@ -41,9 +42,22 @@ const STATUS_COLOR = {
 const TABS = [
   { key: 'orders', label: 'Orders', icon: ChevronRight },
   { key: 'pack', label: 'Pack', icon: Package },
+  { key: 'transit', label: 'Arrival', icon: MapPin },
   { key: 'expenses', label: 'Expenses', icon: DollarSign },
   { key: 'timeline', label: 'Timeline', icon: Clock },
 ]
+
+// Units shipped to a state in this batch (items_data first, order qty fallback)
+function stateUnits(stateOrders) {
+  return stateOrders.reduce((s, bo) => {
+    const o = bo.order
+    if (!o) return s
+    if (Array.isArray(o.items_data) && o.items_data.length > 0) {
+      return s + o.items_data.reduce((x, i) => x + (Number(i.quantity) || 1), 0)
+    }
+    return s + (Number(o.quantity) || 1)
+  }, 0)
+}
 
 export function WaybillBatchDetailPage() {
   const { id } = useParams()
@@ -60,6 +74,9 @@ export function WaybillBatchDetailPage() {
   const saveBatchExpenses = useSaveBatchExpenses()
   const togglePackingItem = useTogglePackingItem()
   const advanceBatchStatus = useAdvanceBatchStatus()
+  const markArrival = useMarkStateArrival()
+  const [arrivalState, setArrivalState] = useState(null)
+  const [arrivalForm, setArrivalForm] = useState({ driver_name: '', driver_phone: '', park_address: '', notes: '' })
 
   // Initialise expense form state for each destination state as data arrives
   useEffect(() => {
@@ -108,7 +125,7 @@ export function WaybillBatchDetailPage() {
     </div>
   )
 
-  const { batch, orders, packingItems, orderItems, timeline } = data
+  const { batch, orders, packingItems, orderItems, timeline, stateArrivals } = data
   const orderIds = orders.map(bo => bo.order?.id).filter(Boolean)
   const status = batch.status
   const isTransit = status === 'waybilled' || status === 'in_transit'
@@ -145,6 +162,57 @@ export function WaybillBatchDetailPage() {
 
   function updateStateExpense(state, field, value) {
     setStateExpenses(prev => ({ ...prev, [state]: { ...prev[state], [field]: value } }))
+  }
+
+  // ── Per-state arrival ─────────────────────────────────────────────────────
+
+  const destStates = [...new Set(orders.map(bo => bo.order?.state).filter(Boolean))].sort()
+  const arrivalByState = Object.fromEntries((stateArrivals || []).map(a => [a.state, a]))
+
+  function copyArrivalNotification(state, arrival) {
+    const stateOrders = orders.filter(bo => bo.order?.state === state)
+    const msg = [
+      '*Incoming Stock Notification*',
+      '',
+      `Batch No: ${batch.batch_number}`,
+      `State: ${state}`,
+      `Orders: ${stateOrders.length}`,
+      `Products: ${stateUnits(stateOrders)}`,
+      '',
+      `Driver: ${arrival.driver_name}`,
+      `Phone: ${arrival.driver_phone}`,
+      ...(arrival.park_address ? [`State Park: ${arrival.park_address}`] : []),
+      '',
+      'The shipment has arrived at the state park. Please contact the driver, collect the goods, confirm receipt in the app, and proceed with customer deliveries.',
+    ].join('\n')
+    navigator.clipboard.writeText(msg).then(() =>
+      showToast('Notification copied — paste it into the state WhatsApp group', 'success'))
+  }
+
+  async function handleArrivalSubmit() {
+    if (!arrivalForm.driver_name.trim() || !arrivalForm.driver_phone.trim()) {
+      showToast("Driver's name and phone number are required", 'error')
+      return
+    }
+    const state = arrivalState
+    const stateOrders = orders.filter(bo => bo.order?.state === state)
+    try {
+      await markArrival.mutateAsync({
+        batch,
+        state,
+        stateOrders,
+        form: arrivalForm,
+        allStates: destStates,
+        arrivedStates: (stateArrivals || []).map(a => a.state),
+      })
+      setArrivalState(null)
+      const savedForm = { ...arrivalForm }
+      setArrivalForm({ driver_name: '', driver_phone: '', park_address: '', notes: '' })
+      showToast(`${state} received at State Park`, 'success')
+      copyArrivalNotification(state, savedForm)
+    } catch (e) {
+      showToast(e.message, 'error')
+    }
   }
 
   async function handleTogglePack(item) {
@@ -468,6 +536,78 @@ export function WaybillBatchDetailPage() {
         )}
 
         {/* Timeline Tab */}
+        {/* ── ARRIVAL — per-state transit tracking ── */}
+        {tab === 'transit' && (
+          <div className="space-y-3">
+            {stateArrivals === null && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-sm text-amber-800">
+                Run the latest migration (per-state transit tracking) in Supabase to record arrivals.
+              </div>
+            )}
+            {!isTransit && !isDone && (
+              <p className="text-xs text-gray-500 bg-gray-50 rounded-xl px-3 py-2.5">
+                Arrivals are confirmed after dispatch — pack and dispatch the batch first.
+              </p>
+            )}
+            {destStates.length === 0 ? (
+              <p className="text-sm text-gray-400 text-center py-8">No destination states in this batch</p>
+            ) : destStates.map(state => {
+              const stateOrders = orders.filter(bo => bo.order?.state === state)
+              const arrival = arrivalByState[state]
+              return (
+                <div key={state} className="bg-white rounded-2xl border border-gray-100 p-4">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <p className="text-sm font-semibold text-gray-900">{state}</p>
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                      arrival ? 'bg-cyan-50 text-cyan-700' : 'bg-amber-50 text-amber-700'
+                    }`}>
+                      {arrival ? 'RECEIVED AT STATE PARK' : 'IN TRANSIT'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    {stateOrders.length} order{stateOrders.length !== 1 ? 's' : ''} · {stateUnits(stateOrders)} product{stateUnits(stateOrders) !== 1 ? 's' : ''}
+                  </p>
+
+                  {arrival ? (
+                    <>
+                      <div className="bg-gray-50 rounded-xl p-3 mt-2 space-y-0.5">
+                        <p className="text-xs text-gray-700">
+                          <span className="text-gray-400">Driver: </span>{arrival.driver_name} · {arrival.driver_phone}
+                        </p>
+                        {arrival.park_address && (
+                          <p className="text-xs text-gray-700"><span className="text-gray-400">Park: </span>{arrival.park_address}</p>
+                        )}
+                        {arrival.notes && (
+                          <p className="text-xs text-gray-700"><span className="text-gray-400">Notes: </span>{arrival.notes}</p>
+                        )}
+                        <p className="text-[11px] text-gray-400 pt-1">
+                          Confirmed by {arrival.confirmed_by_name || '—'} · {new Date(arrival.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <Button
+                        variant="secondary" size="sm" className="w-full mt-2"
+                        onClick={() => copyArrivalNotification(state, arrival)}
+                      >
+                        <Copy size={14} className="mr-1.5" /> Copy WhatsApp Notification
+                      </Button>
+                    </>
+                  ) : (isTransit || isDone) && stateArrivals !== null && (
+                    <Button
+                      size="sm" className="w-full mt-3"
+                      onClick={() => {
+                        setArrivalForm({ driver_name: '', driver_phone: '', park_address: '', notes: '' })
+                        setArrivalState(state)
+                      }}
+                    >
+                      Mark as Received at State Park
+                    </Button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+
         {tab === 'timeline' && (
           <div className="space-y-0">
             {timeline.length === 0 && (
@@ -491,6 +631,48 @@ export function WaybillBatchDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Arrival confirmation modal */}
+      <Modal
+        isOpen={!!arrivalState}
+        onClose={() => setArrivalState(null)}
+        title={arrivalState ? `Received at ${arrivalState} State Park` : ''}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setArrivalState(null)} className="flex-1">Cancel</Button>
+            <Button
+              onClick={handleArrivalSubmit}
+              loading={markArrival.isPending}
+              className="flex-1"
+              disabled={!arrivalForm.driver_name.trim() || !arrivalForm.driver_phone.trim()}
+            >
+              Confirm Arrival
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            Only {arrivalState} is confirmed — other states in this batch stay in transit.
+            The date, time and your name are recorded automatically.
+          </p>
+          <Input label="Driver's Name" required placeholder="e.g. Ibrahim Musa"
+            value={arrivalForm.driver_name}
+            onChange={e => setArrivalForm({ ...arrivalForm, driver_name: e.target.value })} />
+          <Input label="Driver's Phone Number" type="tel" inputMode="tel" required placeholder="08012345678"
+            value={arrivalForm.driver_phone}
+            onChange={e => setArrivalForm({ ...arrivalForm, driver_phone: e.target.value })} />
+          <Input label="State Park Address (optional)" placeholder="e.g. GUO Transport Park, Jibowu"
+            value={arrivalForm.park_address}
+            onChange={e => setArrivalForm({ ...arrivalForm, park_address: e.target.value })} />
+          <Textarea label="Additional Notes (optional)" rows={2}
+            value={arrivalForm.notes}
+            onChange={e => setArrivalForm({ ...arrivalForm, notes: e.target.value })} />
+          <p className="text-[11px] text-gray-400">
+            After saving, the WhatsApp notification is copied automatically — paste it into the {arrivalState} WhatsApp group.
+          </p>
+        </div>
+      </Modal>
     </div>
   )
 }

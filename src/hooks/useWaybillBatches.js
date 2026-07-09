@@ -41,6 +41,15 @@ export function useWaybillBatch(id) {
         stateExpenses = data || []
       } catch { stateExpenses = [] }
 
+      // Per-state arrivals — null means the migration hasn't been run yet
+      let stateArrivals = null
+      try {
+        const { data, error } = await supabase.from('waybill_batch_state_arrivals')
+          .select('*').eq('batch_id', id).order('created_at')
+        if (error) throw error
+        stateArrivals = data || []
+      } catch { stateArrivals = null }
+
       return {
         batch: batchR.data,
         orders: batchOrdersR.data || [],
@@ -48,6 +57,7 @@ export function useWaybillBatch(id) {
         orderItems,
         timeline: timelineR.data || [],
         stateExpenses,
+        stateArrivals,
       }
     },
     staleTime: 15000,
@@ -285,6 +295,82 @@ export function useAdvanceBatchStatus() {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+    },
+  })
+}
+
+// Mark ONE state of a dispatched batch as arrived at its State Park, without
+// touching the other states. Records driver details, moves only that state's
+// orders to arrived_at_park, and completes the batch when every state is in.
+export function useMarkStateArrival() {
+  const queryClient = useQueryClient()
+  const { user } = useAuthStore()
+  return useMutation({
+    mutationFn: async ({ batch, state, stateOrders, form, allStates, arrivedStates }) => {
+      const { error } = await supabase.from('waybill_batch_state_arrivals').insert({
+        batch_id: batch.id,
+        state,
+        driver_name: form.driver_name.trim(),
+        driver_phone: form.driver_phone.trim(),
+        park_address: form.park_address?.trim() || null,
+        notes: form.notes?.trim() || null,
+        confirmed_by: user?.id || null,
+        confirmed_by_name: user?.name || null,
+      })
+      if (error) {
+        if (/does not exist|relation/i.test(error.message || '')) {
+          throw new Error('Run the latest migration to enable per-state arrivals')
+        }
+        throw error
+      }
+
+      // Only this state's in-transit orders move to the State Park
+      for (const bo of stateOrders) {
+        const oid = bo.order?.id || bo.order_id
+        if (!oid) continue
+        if (bo.order && !['waybilled', 'awaiting_waybill', 'batch_processing'].includes(bo.order.status)) continue
+        await supabase.from('orders').update({
+          status: 'arrived_at_park', updated_at: new Date().toISOString(),
+        }).eq('id', oid)
+        await supabase.from('order_timeline').insert({
+          order_id: oid,
+          action: 'arrived_at_park',
+          description: `Arrived at ${state} State Park (batch ${batch.batch_number}) — driver ${form.driver_name.trim()} ${form.driver_phone.trim()}`,
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
+      }
+
+      await supabase.from('waybill_batch_timeline').insert({
+        batch_id: batch.id,
+        event: `${state} — Received at State Park`,
+        notes: [`Driver: ${form.driver_name.trim()} (${form.driver_phone.trim()})`,
+          form.park_address?.trim(), form.notes?.trim()].filter(Boolean).join(' · '),
+        staff_id: user?.id,
+        staff_name: user?.name,
+      })
+
+      // All destination states in → the whole batch is received
+      const done = new Set([...arrivedStates, state])
+      if (allStates.length > 0 && allStates.every(s => done.has(s))) {
+        await supabase.from('waybill_batches').update({
+          status: 'received',
+          received_at: new Date().toISOString(),
+          received_by: user?.id,
+          updated_at: new Date().toISOString(),
+        }).eq('id', batch.id)
+        await supabase.from('waybill_batch_timeline').insert({
+          batch_id: batch.id,
+          event: 'All states received — batch complete',
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
+      }
+    },
+    onSuccess: (_, { batch }) => {
+      queryClient.invalidateQueries({ queryKey: ['waybill_batch', batch.id] })
+      queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
     },
   })
 }

@@ -297,3 +297,21 @@ ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS warehouse_received_qty INT,
   ADD COLUMN IF NOT EXISTS warehouse_received_time TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS warehouse_received_condition TEXT;
+
+-- ===================================================
+-- Per-state transit tracking for waybill batches
+-- ===================================================
+CREATE TABLE IF NOT EXISTS waybill_batch_state_arrivals (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  batch_id UUID REFERENCES waybill_batches(id) ON DELETE CASCADE,
+  state TEXT NOT NULL,
+  driver_name TEXT NOT NULL,
+  driver_phone TEXT NOT NULL,
+  park_address TEXT,
+  notes TEXT,
+  confirmed_by UUID REFERENCES staff_users(id),
+  confirmed_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(batch_id, state)
+);
+CREATE INDEX IF NOT EXISTS idx_wbsa_batch ON waybill_batch_state_arrivals(batch_id);
