@@ -53,13 +53,22 @@ export function useStaffMember(id) {
     queryKey: ['staff_member', id],
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase
+      // business relation only exists after the HR migration adds business_id —
+      // fall back to a plain select so profiles always open
+      const withBiz = await supabase
         .from('staff_users')
         .select('*, business:businesses(name)')
         .eq('id', id)
         .single()
-      if (error) throw error
-      return data
+      if (!withBiz.error) return withBiz.data
+
+      const plain = await supabase
+        .from('staff_users')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (plain.error) throw plain.error
+      return plain.data
     },
   })
 }
