@@ -53,6 +53,7 @@ const NAV_CONFIG = {
   ],
   fulfillment: [
     { to: '/', icon: Home, label: 'Home' },
+    { to: '/fulfillment', icon: Truck, label: 'Fulfillment' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
