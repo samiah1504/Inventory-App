@@ -278,6 +278,16 @@ async function addReturnTimeline(returnId, action, description, staff) {
 // product line, moves any outstanding reservation into the inspection bucket.
 // Falls back to the legacy direct-restock if the returns table doesn't exist.
 export async function startReturnProcess(order, staff) {
+  // Probe the returns table first — if the migration hasn't run, use the
+  // legacy direct restock. Checked up-front so a mid-loop failure later can
+  // never trigger a second, duplicate stock update.
+  const { error: probeErr } = await supabase.from('returns').select('id').limit(1)
+  if (probeErr) {
+    console.warn('Returns table unavailable, falling back to direct restock:', probeErr)
+    await resolveOrderStock(order, 'returned', staff?.id)
+    return false
+  }
+
   try {
     // Outstanding reservations per product+warehouse (same netting as resolveOrderStock)
     const { data: moves } = await supabase
@@ -355,9 +365,7 @@ export async function startReturnProcess(order, staff) {
     }
     return created > 0
   } catch (e) {
-    // returns table probably missing — fall back to the legacy direct restock
-    console.warn('Return process unavailable, falling back to direct restock:', e)
-    await resolveOrderStock(order, 'returned', staff?.id)
+    console.warn('Return process failed:', e)
     return false
   }
 }
@@ -385,28 +393,41 @@ export async function applyReturnOutcome(ret, outcome, staff) {
     }
 
     const qty = Number(ret.quantity) || 1
+
+    // Did the goods enter the inspection bucket when the return started?
+    // ret.warehouse_id is only set when an outstanding reservation was moved
+    // into inspection — in that case the units are still inside
+    // quantity_physical. Otherwise (order already paid/sold, or product was
+    // never reserved) the units are coming back from OUTSIDE inventory, so
+    // outcomes must add them back rather than deduct a second time.
+    const inInspection = !!ret.warehouse_id
     const hasInspection = 'quantity_inspection' in row
     const upd = { quantity_returned: (row.quantity_returned || 0) + qty }
-    if (hasInspection) upd.quantity_inspection = Math.max(0, (row.quantity_inspection || 0) - qty)
+    if (inInspection && hasInspection) {
+      upd.quantity_inspection = Math.max(0, (row.quantity_inspection || 0) - qty)
+    }
 
     let type = 'return_other', moveQty = 0, desc = 'Return closed'
     if (outcome === 'restocked') {
       upd.quantity_available = (row.quantity_available || 0) + qty
+      if (!inInspection) upd.quantity_physical = (row.quantity_physical || 0) + qty
       type = 'return'; moveQty = qty; desc = 'Returned to available stock'
     } else if (outcome === 'repair') {
       if ('quantity_repair' in row) upd.quantity_repair = (row.quantity_repair || 0) + qty
+      if (!inInspection) upd.quantity_physical = (row.quantity_physical || 0) + qty
       type = 'repair'; moveQty = qty; desc = 'Sent for repair'
     } else if (outcome === 'damaged') {
-      upd.quantity_damaged  = (row.quantity_damaged || 0) + qty
-      upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
+      upd.quantity_damaged = (row.quantity_damaged || 0) + qty
+      if (inInspection) upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
       type = 'damage'; moveQty = -qty; desc = 'Marked damaged'
     } else if (outcome === 'written_off') {
-      upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
+      if (inInspection) upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
       type = 'write_off'; moveQty = -qty; desc = 'Written off'
     } else if (outcome === 'supplier_return') {
-      upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
+      if (inInspection) upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
       type = 'supplier_return'; moveQty = -qty; desc = 'Returned to supplier'
     } else if (outcome === 'display_item') {
+      if (inInspection) upd.quantity_physical = Math.max(0, (row.quantity_physical || 0) - qty)
       type = 'display_item'; moveQty = 0; desc = 'Kept as display item'
     }
 
