@@ -160,8 +160,42 @@ export function OrderDetailPage() {
         notes: expense.notes,
       })
     }
+    // Delivery fee recorded — clear the pending flag automatically
+    if (Number(expense.delivery_fee) > 0 && order.delivery_fee_pending) {
+      try {
+        await supabase.from('orders').update({ delivery_fee_pending: false }).eq('id', order.id)
+        await supabase.from('order_timeline').insert({
+          order_id: order.id,
+          action: 'delivery_fee_recorded',
+          description: `Delivery fee ₦${Number(expense.delivery_fee).toLocaleString()} recorded by ${user?.name}`,
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
+      } catch { /* flag column missing — ignore */ }
+    }
     setShowExpenseModal(false)
     showToast('Expenses saved', 'success')
+    refetch()
+  }
+
+  async function handleFeePending() {
+    const { error } = await supabase
+      .from('orders')
+      .update({ delivery_fee_pending: true, updated_at: new Date().toISOString() })
+      .eq('id', order.id)
+    if (error) {
+      showToast('Could not mark pending — run the latest migration', 'error')
+      return
+    }
+    await supabase.from('order_timeline').insert({
+      order_id: order.id,
+      action: 'delivery_fee_pending',
+      description: `Delivery fee pending — awaiting warehouse (${user?.name})`,
+      staff_id: user?.id,
+      staff_name: user?.name,
+    })
+    setShowExpenseModal(false)
+    showToast('Marked as Delivery Fee Pending', 'success')
     refetch()
   }
 
@@ -252,6 +286,17 @@ export function OrderDetailPage() {
                   Paid: {formatCurrency(order.amount_paid)} · Balance: <strong>{formatCurrency(order.balance_amount)}</strong>
                   {order.balance_due_date && ` · Due: ${formatDate(order.balance_due_date)}`}
                 </p>
+              </div>
+            )}
+            {order.delivery_fee_pending && (
+              <div className="mt-2 p-3 bg-orange-50 rounded-xl flex items-center justify-between gap-2">
+                <p className="text-xs text-orange-700 font-medium flex-1 min-w-0">Delivery Fee Pending — awaiting warehouse</p>
+                <button
+                  onClick={() => setShowExpenseModal(true)}
+                  className="text-xs font-semibold text-orange-800 underline shrink-0 active:opacity-70"
+                >
+                  Enter fee
+                </button>
               </div>
             )}
             {order.cancellation_reason && (
@@ -545,6 +590,15 @@ export function OrderDetailPage() {
         <div className="space-y-3">
           <Input label="Delivery Fee (₦)" type="number" inputMode="decimal" placeholder="0"
             value={expense.delivery_fee} onChange={e => setExpense({ ...expense, delivery_fee: e.target.value })} />
+          {!order.delivery_fee_pending && !Number(expense.delivery_fee) && (
+            <button
+              type="button"
+              onClick={handleFeePending}
+              className="w-full py-2.5 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-xl active:scale-[0.98] transition-all"
+            >
+              Delivery Fee Pending — warehouse hasn't sent it yet
+            </button>
+          )}
           <Input label="Installation Fee (₦)" type="number" inputMode="decimal" placeholder="0"
             value={expense.installation_fee} onChange={e => setExpense({ ...expense, installation_fee: e.target.value })} />
           <Input label="Offloading Fee (₦)" type="number" inputMode="decimal" placeholder="0"

@@ -22,6 +22,7 @@ const ALL_STATUS_TABS = [
   { key: 'processing', label: 'Processing' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
+  { key: 'fee_pending', label: 'Fee Pending' },
   { key: 'partially_paid', label: 'Partial' },
   { key: 'failed_delivery', label: 'Failed' },
   { key: 'cancelled', label: 'Cancelled' },
@@ -44,6 +45,7 @@ const FULFILLMENT_STATUS_TABS = [
   { key: 'processing', label: 'Processing' },
   { key: 'delivered', label: 'Delivered' },
   { key: 'paid', label: 'Paid' },
+  { key: 'fee_pending', label: 'Fee Pending' },
   { key: 'failed_delivery', label: 'Failed' },
 ]
 
@@ -76,7 +78,8 @@ export function OrdersPage() {
 
   const filters = {
     search: search || undefined,
-    status: activeTab !== 'all' ? activeTab : undefined,
+    status: activeTab === 'fee_pending' ? 'paid' : activeTab !== 'all' ? activeTab : undefined,
+    delivery_fee_pending: activeTab === 'fee_pending' ? true : undefined,
     business_id: businessFilter || undefined,
     state: stateFilter || undefined,
     date_from: dateFrom ? `${dateFrom}T00:00:00` : undefined,

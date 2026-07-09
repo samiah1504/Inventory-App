@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, DollarSign, Package, AlertTriangle, Users, Plus,
-  BarChart3, TrendingUp, ChevronRight, Star, Briefcase, LineChart,
+  BarChart3, TrendingUp, ChevronRight, Star, Briefcase, LineChart, Truck,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
@@ -141,6 +141,22 @@ export function CeoDashboard() {
         if (error) throw error
         return data || []
       } catch { return [] }
+    },
+    staleTime: 60000,
+  })
+
+  const feePendingQ = useQuery({
+    queryKey: ['ceo_fee_pending'],
+    queryFn: async () => {
+      try {
+        const { count, error } = await supabase
+          .from('orders')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'paid')
+          .eq('delivery_fee_pending', true)
+        if (error) throw error
+        return count || 0
+      } catch { return 0 }
     },
     staleTime: 60000,
   })
@@ -307,6 +323,14 @@ export function CeoDashboard() {
             color={stockAlerts > 0 ? 'red' : 'green'}
             sub={`${outOfStock} out · ${lowStock} low`}
             onClick={() => navigate('/inventory')}
+          />
+          <StatCard
+            label="Delivery Fee Pending"
+            value={feePendingQ.isLoading ? '...' : (feePendingQ.data || 0)}
+            icon={<Truck size={20} />}
+            color={(feePendingQ.data || 0) > 0 ? 'amber' : 'green'}
+            sub="paid orders, fee not recorded"
+            onClick={() => navigate('/orders?status=fee_pending')}
           />
         </div>
 

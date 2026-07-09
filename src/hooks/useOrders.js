@@ -24,6 +24,7 @@ export function useOrders(filters = {}) {
         query = query.eq('created_by', user.id)
       }
       if (filters.status) query = query.eq('status', filters.status)
+      if (filters.delivery_fee_pending) query = query.eq('delivery_fee_pending', true)
       if (filters.statuses) query = query.in('status', filters.statuses)
       if (filters.state) query = query.eq('state', filters.state)
       if (filters.business_id) query = query.eq('business_id', filters.business_id)

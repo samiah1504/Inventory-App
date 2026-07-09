@@ -201,3 +201,8 @@ CREATE TABLE IF NOT EXISTS return_timeline (
 );
 
 CREATE INDEX IF NOT EXISTS idx_return_timeline_return ON return_timeline(return_id);
+
+-- ===================================================
+-- Delivery Fee Pending workflow
+-- ===================================================
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_fee_pending BOOLEAN DEFAULT false;

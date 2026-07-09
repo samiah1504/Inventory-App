@@ -34,9 +34,14 @@ export function OrderCard({ order, onClick, showActions = true }) {
       <div className="px-4 pt-3 pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-xs font-mono text-gray-400">{order.order_number}</span>
               <StatusBadge status={order.status} />
+              {order.delivery_fee_pending && order.status === 'paid' && (
+                <span className="text-[10px] font-semibold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
+                  FEE PENDING
+                </span>
+              )}
               {order.business?.short_code && (
                 <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">
                   {order.business.short_code}
