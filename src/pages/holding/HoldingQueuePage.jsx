@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { PackageOpen, ChevronDown, ChevronUp, Phone } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { PackageOpen, ChevronDown, ChevronUp, Phone, Truck } from 'lucide-react'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
 import { Modal } from '../../components/ui/Modal'
@@ -20,10 +21,13 @@ const ageDays = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 8640000
 
 export function HoldingQueuePage() {
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const { data: warehouses } = useWarehouses()
 
   const [search, setSearch] = useState('')
   const [stateFilter, setStateFilter] = useState('')
+  const [cityFilter, setCityFilter] = useState('')
+  const [parkFilter, setParkFilter] = useState('')
   const [showClosed, setShowClosed] = useState(false)
   const [expanded, setExpanded] = useState(null)
   const [editItem, setEditItem] = useState(null)
@@ -38,6 +42,7 @@ export function HoldingQueuePage() {
   const markDamaged = useHoldingDamaged()
 
   const isFulfillment = user?.role === 'fulfillment'
+  const isWaybill = user?.role === 'waybill'
   const isManager = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
   const canAct = isFulfillment || isManager
 
@@ -52,12 +57,24 @@ export function HoldingQueuePage() {
         (i.contact_name || '').toLowerCase().includes(q))
     }
     if (stateFilter) l = l.filter(i => i.state === stateFilter)
+    if (cityFilter) l = l.filter(i => i.city === cityFilter)
+    if (parkFilter) l = l.filter(i => (i.park_name || 'No park recorded') === parkFilter)
     return l
-  }, [items, search, stateFilter])
+  }, [items, search, stateFilter, cityFilter, parkFilter])
 
   const availableStates = useMemo(() =>
     [...new Set((items || []).map(i => i.state).filter(Boolean))].sort()
   , [items])
+  const availableCities = useMemo(() =>
+    [...new Set((items || [])
+      .filter(i => !stateFilter || i.state === stateFilter)
+      .map(i => i.city).filter(Boolean))].sort()
+  , [items, stateFilter])
+  const availableParks = useMemo(() =>
+    [...new Set((items || [])
+      .filter(i => !stateFilter || i.state === stateFilter)
+      .map(i => i.park_name || 'No park recorded'))].sort()
+  , [items, stateFilter])
 
   if (items === null && !isLoading) {
     return (
@@ -81,7 +98,7 @@ export function HoldingQueuePage() {
         <SearchBar value={search} onChange={setSearch} placeholder="Search product, order #, park, contact..." />
         <div className="flex gap-2">
           <div className="flex-1 min-w-0">
-            <Select value={stateFilter} onChange={e => setStateFilter(e.target.value)}>
+            <Select value={stateFilter} onChange={e => { setStateFilter(e.target.value); setCityFilter(''); setParkFilter('') }}>
               <option value="">All States</option>
               {availableStates.map(s => <option key={s} value={s}>{s}</option>)}
             </Select>
@@ -91,6 +108,20 @@ export function HoldingQueuePage() {
             className={`shrink-0 px-3 rounded-xl text-xs font-medium border ${showClosed ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200'}`}>
             {showClosed ? 'All records' : 'Active only'}
           </button>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex-1 min-w-0">
+            <Select value={cityFilter} onChange={e => setCityFilter(e.target.value)}>
+              <option value="">All Cities</option>
+              {availableCities.map(c => <option key={c} value={c}>{c}</option>)}
+            </Select>
+          </div>
+          <div className="flex-1 min-w-0">
+            <Select value={parkFilter} onChange={e => setParkFilter(e.target.value)}>
+              <option value="">All Locations</option>
+              {availableParks.map(p => <option key={p} value={p}>{p}</option>)}
+            </Select>
+          </div>
         </div>
       </div>
 
@@ -198,9 +229,22 @@ export function HoldingQueuePage() {
                       </Button>
                     </div>
                   )}
-                  {active && !isFulfillment && (
+                  {active && (isWaybill || isManager) && (
+                    <div className="space-y-1.5">
+                      <Button size="sm" variant="secondary" className="w-full"
+                        onClick={() => navigate(`/waybill?tab=awaiting&holding=${item.id}`)}>
+                        <span className="flex items-center justify-center gap-1.5">
+                          <Truck size={14} /> Use as Waybill Source
+                        </span>
+                      </Button>
+                      <p className="text-[11px] text-gray-400">
+                        Interstate transfer — select the orders to ship, and this product becomes the batch source.
+                      </p>
+                    </div>
+                  )}
+                  {active && isFulfillment && (
                     <p className="text-[11px] text-gray-400">
-                      To ship this product to another state, the Waybill Officer selects it as the source when creating a waybill batch.
+                      Interstate transfers are handled by the Waybill Officer — contact them if this product needs to move to another state.
                     </p>
                   )}
                 </div>

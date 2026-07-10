@@ -77,6 +77,7 @@ export function useCollectHolding() {
         status: 'collected',
         custodian_id: user?.id || null,
         custodian_name: user?.name || null,
+        notes: [item.notes, `Collected from park by ${user?.name || 'staff'}`].filter(Boolean).join(' · '),
         updated_at: new Date().toISOString(),
       })
       .eq('id', item.id)

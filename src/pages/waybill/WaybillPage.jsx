@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Plus, Truck, ChevronRight } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -79,8 +79,12 @@ export function WaybillPage() {
     date_shipped: new Date().toISOString().split('T')[0],
     source_warehouse_id: '', notes: '',
   })
-  // Leaving From: 'warehouse' (default) or a Product Holding Queue record
-  const [sourceType, setSourceType] = useState('warehouse')
+  // Leaving From: 'warehouse' (default) or a Product Holding Queue record.
+  // Interstate shipping from the queue is the Waybill Officer's job —
+  // fulfillment officers never get the holding source option.
+  const canUseHolding = ['waybill', 'ceo', 'super_admin', 'operations_manager'].includes(user?.role)
+  const [sourceType, setSourceType] = useState(
+    canUseHolding && searchParams.get('holding') ? 'holding' : 'warehouse')
   const [showHoldingPicker, setShowHoldingPicker] = useState(false)
   const [holdingSearch, setHoldingSearch] = useState('')
   const [sourceHolding, setSourceHolding] = useState(null)  // selected holding record
@@ -103,6 +107,15 @@ export function WaybillPage() {
     },
     staleTime: 30000,
   })
+
+  // Arriving via "Use as Waybill Source" on the Holding Queue page
+  // (?holding=<id>) — preselect that record once the queue loads
+  const holdingParam = searchParams.get('holding')
+  useEffect(() => {
+    if (!holdingParam || !canUseHolding || sourceHolding) return
+    const rec = (holdingQ.data || []).find(h => h.id === holdingParam)
+    if (rec) setSourceHolding(rec)
+  }, [holdingParam, canUseHolding, sourceHolding, holdingQ.data])
 
   const createWaybillBatch = useCreateWaybillBatch()
 
@@ -133,13 +146,22 @@ export function WaybillPage() {
             sourceHolding.contact_name ? `${sourceHolding.contact_name} (${sourceHolding.contact_phone || 'no phone'})` : null,
           ].filter(Boolean).join(' · '),
         }).eq('id', batch.id) // best-effort: columns may not exist pre-migration
+        // The Waybill Officer becomes the custodian once the product
+        // starts moving between states
+        const handover = {
+          custodian_id: user?.id || null,
+          custodian_name: user?.name || null,
+          updated_at: new Date().toISOString(),
+        }
         await supabase.from('holding_queue').update(
           remaining > 0
-            ? { quantity: remaining, updated_at: new Date().toISOString() }
+            ? {
+                ...handover, quantity: remaining,
+                notes: [sourceHolding.notes, `${useQty} used in ${batchNumber} by ${user?.name}`].filter(Boolean).join(' · '),
+              }
             : {
-                quantity: 0, status: 'transferred',
-                notes: [sourceHolding.notes, `Used in ${batchNumber}`].filter(Boolean).join(' · '),
-                updated_at: new Date().toISOString(),
+                ...handover, quantity: 0, status: 'transferred',
+                notes: [sourceHolding.notes, `Used in ${batchNumber} by ${user?.name}`].filter(Boolean).join(' · '),
               }
         ).eq('id', sourceHolding.id)
         await supabase.from('waybill_batch_timeline').insert({
@@ -431,22 +453,24 @@ export function WaybillPage() {
           {/* Leaving From — warehouse or a product already in the Holding Queue */}
           <div>
             <p className="text-sm font-medium text-gray-700 mb-1.5">Leaving From</p>
-            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-2">
-              {[
-                { key: 'warehouse', label: 'Warehouse' },
-                { key: 'holding',   label: 'Holding Queue' },
-              ].map(v => (
-                <button key={v.key} type="button"
-                  onClick={() => { setSourceType(v.key); if (v.key === 'warehouse') setSourceHolding(null) }}
-                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
-                    sourceType === v.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
-                  }`}>
-                  {v.label}
-                </button>
-              ))}
-            </div>
+            {canUseHolding && (
+              <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-2">
+                {[
+                  { key: 'warehouse', label: 'Warehouse' },
+                  { key: 'holding',   label: 'Holding Queue' },
+                ].map(v => (
+                  <button key={v.key} type="button"
+                    onClick={() => { setSourceType(v.key); if (v.key === 'warehouse') setSourceHolding(null) }}
+                    className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                      sourceType === v.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+                    }`}>
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
-            {sourceType === 'warehouse' ? (
+            {sourceType === 'warehouse' || !canUseHolding ? (
               <Select value={batchForm.source_warehouse_id}
                 onChange={e => setBatchForm({ ...batchForm, source_warehouse_id: e.target.value })}>
                 <option value="">Select warehouse...</option>
