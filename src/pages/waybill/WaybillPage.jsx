@@ -171,6 +171,13 @@ export function WaybillPage() {
           staff_id: user?.id,
           staff_name: user?.name,
         })
+        await supabase.from('holding_history').insert({
+          holding_id: sourceHolding.id,
+          action: 'used_in_batch',
+          details: `${useQty} unit(s) used as source of waybill batch ${batchNumber} by ${user?.name}`,
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
         queryClient.invalidateQueries({ queryKey: ['holding_queue'] })
       }
 

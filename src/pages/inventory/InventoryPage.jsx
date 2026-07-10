@@ -34,6 +34,8 @@ const MOVEMENT_LABELS = {
   reserve:           { label: 'Reserved',            color: 'text-amber-600' },
   reserve_out:       { label: 'Moved with order',    color: 'text-purple-600' },
   left_at_park:      { label: 'Left at State Park',  color: 'text-cyan-700' },
+  holding_waybilled: { label: 'Waybilled from holding', color: 'text-purple-700' },
+  park_transfer:     { label: 'Transferred from park', color: 'text-indigo-700' },
   at_state_park:     { label: 'At State Park',       color: 'text-cyan-700' },
   release:           { label: 'Released',            color: 'text-gray-600' },
   return:            { label: 'Returned to stock',   color: 'text-orange-500' },

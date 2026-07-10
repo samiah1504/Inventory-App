@@ -597,3 +597,22 @@ CREATE TABLE IF NOT EXISTS staff_profile_audit (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_staff_profile_audit_staff ON staff_profile_audit(staff_id);
+
+-- ===================================================
+-- Holding Queue movement workflow: colour/size from the
+-- original order item, plus a per-record history trail
+-- ===================================================
+ALTER TABLE holding_queue
+  ADD COLUMN IF NOT EXISTS color TEXT,
+  ADD COLUMN IF NOT EXISTS size TEXT;
+
+CREATE TABLE IF NOT EXISTS holding_history (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  holding_id UUID REFERENCES holding_queue(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  details TEXT,
+  staff_id UUID,
+  staff_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_holding_history ON holding_history(holding_id);

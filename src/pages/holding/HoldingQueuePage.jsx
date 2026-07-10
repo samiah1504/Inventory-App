@@ -14,10 +14,33 @@ import { formatDate, NIGERIAN_STATES } from '../../utils/format'
 import { openDialer } from '../../utils/whatsapp'
 import {
   useHoldingQueue, useUpdateHolding, useCollectHolding, useHoldingToWarehouse, useHoldingDamaged,
+  useHoldingWaybilled, useHoldingParkTransfer, useHoldingHistory,
   CONTACT_ROLES, HOLDING_STATUSES, ACTIVE_HOLDING,
 } from '../../hooks/useHolding'
 
 const ageDays = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
+
+function HistoryTrail({ holdingId }) {
+  const historyQ = useHoldingHistory(holdingId)
+  const rows = historyQ.data || []
+  if (rows.length === 0) return null
+  return (
+    <div className="bg-gray-50 rounded-xl p-3">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">Movement History</p>
+      <div className="space-y-1.5">
+        {rows.map(h => (
+          <div key={h.id}>
+            <p className="text-xs text-gray-700 capitalize font-medium">{(h.action || '').replace(/_/g, ' ')}</p>
+            {h.details && <p className="text-[11px] text-gray-500">{h.details}</p>}
+            <p className="text-[10px] text-gray-400">
+              {[h.staff_name, new Date(h.created_at).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })].filter(Boolean).join(' · ')}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export function HoldingQueuePage() {
   const { user } = useAuthStore()
@@ -34,12 +57,19 @@ export function HoldingQueuePage() {
   const [editForm, setEditForm] = useState({})
   const [whItem, setWhItem] = useState(null)
   const [whId, setWhId] = useState('')
+  const [whForm, setWhForm] = useState({})
+  const [wbItem, setWbItem] = useState(null)
+  const [wbForm, setWbForm] = useState({})
+  const [ptItem, setPtItem] = useState(null)
+  const [ptForm, setPtForm] = useState({})
 
   const { data: items, isLoading } = useHoldingQueue(showClosed)
   const updateHolding = useUpdateHolding()
   const collectHolding = useCollectHolding()
   const toWarehouse = useHoldingToWarehouse()
   const markDamaged = useHoldingDamaged()
+  const waybillHolding = useHoldingWaybilled()
+  const parkTransfer = useHoldingParkTransfer()
 
   const isFulfillment = user?.role === 'fulfillment'
   const isWaybill = user?.role === 'waybill'
@@ -158,6 +188,9 @@ export function HoldingQueuePage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-gray-900 leading-tight">
                       {item.quantity} × {item.product_name}
+                      {(item.color || item.size) && (
+                        <span className="text-gray-500 font-normal"> ({[item.color, item.size].filter(Boolean).join(', ')})</span>
+                      )}
                     </p>
                     <p className="text-xs text-gray-500 mt-0.5 truncate">
                       {[item.state, item.city, item.park_name].filter(Boolean).join(' · ')}
@@ -216,10 +249,29 @@ export function HoldingQueuePage() {
                         </Button>
                       )}
                       <Button size="sm"
-                        onClick={() => { setWhId(''); setWhItem(item) }}>
+                        onClick={() => {
+                          setWhId('')
+                          setWhForm({
+                            date: new Date().toISOString().split('T')[0],
+                            time: new Date().toTimeString().slice(0, 5),
+                            received_by: user?.name || '', condition: 'good', notes: '',
+                          })
+                          setWhItem(item)
+                        }}>
                         Move to Warehouse
                       </Button>
-                      <Button size="sm" variant="danger"
+                      <Button size="sm" variant="secondary"
+                        onClick={() => {
+                          setPtForm({
+                            date: new Date().toISOString().split('T')[0],
+                            time: new Date().toTimeString().slice(0, 5),
+                            transferred_by: user?.name || '', destination: '', notes: '',
+                          })
+                          setPtItem(item)
+                        }}>
+                        Transferred from Park
+                      </Button>
+                      <Button size="sm" variant="danger" className="col-span-2"
                         loading={markDamaged.isPending}
                         onClick={() => {
                           const reason = window.prompt('Damage details (optional)') ?? null
@@ -229,6 +281,24 @@ export function HoldingQueuePage() {
                       </Button>
                     </div>
                   )}
+                  {active && (isWaybill || isManager) && (
+                    <Button size="sm" className="w-full"
+                      onClick={() => {
+                        setWbForm({
+                          dest_state: '', dest_city: '', dest_location: '', courier: '',
+                          waybill_number: '', date_shipped: new Date().toISOString().split('T')[0],
+                          expense: '', dest_contact: '', dest_contact_phone: '', notes: '',
+                        })
+                        setWbItem(item)
+                      }}>
+                      <span className="flex items-center justify-center gap-1.5">
+                        <Truck size={14} /> Waybilled to Another Location
+                      </span>
+                    </Button>
+                  )}
+
+                  {/* Full movement history */}
+                  <HistoryTrail holdingId={item.id} />
                   {active && (isWaybill || isManager) && (
                     <div className="space-y-1.5">
                       <Button size="sm" variant="secondary" className="w-full"
@@ -290,10 +360,14 @@ export function HoldingQueuePage() {
         footer={
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setWhItem(null)} className="flex-1">Cancel</Button>
-            <Button className="flex-1" disabled={!whId} loading={toWarehouse.isPending}
+            <Button className="flex-1" disabled={!whId || !whForm.received_by} loading={toWarehouse.isPending}
               onClick={async () => {
                 const warehouse = (warehouses || []).find(w => w.id === whId)
-                await toWarehouse.mutateAsync({ item: whItem, warehouse })
+                await toWarehouse.mutateAsync({
+                  item: whItem, warehouse,
+                  dateReceived: whForm.date, timeReceived: whForm.time,
+                  receivedBy: whForm.received_by, condition: whForm.condition, notes: whForm.notes,
+                })
                 setWhItem(null)
               }}>
               Confirm
@@ -303,7 +377,8 @@ export function HoldingQueuePage() {
         <div className="space-y-4">
           {whItem && (
             <p className="text-xs text-gray-500">
-              {whItem.quantity} × {whItem.product_name} becomes available stock in the selected warehouse.
+              {whItem.quantity} × {whItem.product_name} becomes available stock in the selected warehouse
+              and leaves the active Holding Queue.
             </p>
           )}
           <Select label="Warehouse" required value={whId} onChange={e => setWhId(e.target.value)}>
@@ -312,6 +387,122 @@ export function HoldingQueuePage() {
               .filter(w => !whItem?.state || w.state === whItem.state || isManager)
               .map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
           </Select>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Date Received" type="date" value={whForm.date || ''}
+              onChange={e => setWhForm({ ...whForm, date: e.target.value })} />
+            <Input label="Time Received" type="time" value={whForm.time || ''}
+              onChange={e => setWhForm({ ...whForm, time: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Received By" required value={whForm.received_by || ''}
+              onChange={e => setWhForm({ ...whForm, received_by: e.target.value })} />
+            <Select label="Condition" value={whForm.condition || 'good'}
+              onChange={e => setWhForm({ ...whForm, condition: e.target.value })}>
+              <option value="good">Good condition</option>
+              <option value="minor_damage">Minor damage</option>
+              <option value="damaged">Damaged</option>
+              <option value="incomplete">Incomplete / missing parts</option>
+            </Select>
+          </div>
+          <Textarea label="Notes (optional)" rows={2} value={whForm.notes || ''}
+            onChange={e => setWhForm({ ...whForm, notes: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Waybilled to another location */}
+      <Modal isOpen={!!wbItem} onClose={() => setWbItem(null)} title="Waybilled to Another Location"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setWbItem(null)} className="flex-1">Cancel</Button>
+            <Button className="flex-1" loading={waybillHolding.isPending}
+              disabled={!wbForm.dest_state || !wbForm.courier || !wbForm.date_shipped}
+              onClick={async () => {
+                await waybillHolding.mutateAsync({ item: wbItem, form: wbForm })
+                setWbItem(null)
+              }}>
+              Confirm Waybill
+            </Button>
+          </div>
+        }>
+        <div className="space-y-4">
+          {wbItem && (
+            <p className="text-xs text-gray-500">
+              {wbItem.quantity} × {wbItem.product_name} leaves {wbItem.park_name || `${wbItem.state} State Park`} and
+              moves in transit to the destination. The record leaves the active queue.
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Select label="Destination State" required value={wbForm.dest_state || ''}
+              onChange={e => setWbForm({ ...wbForm, dest_state: e.target.value })}>
+              <option value="">Select...</option>
+              {NIGERIAN_STATES.map(s => <option key={s} value={s}>{s}</option>)}
+            </Select>
+            <Input label="Destination City" value={wbForm.dest_city || ''}
+              onChange={e => setWbForm({ ...wbForm, dest_city: e.target.value })} />
+          </div>
+          <Input label="Destination Warehouse / State Park" value={wbForm.dest_location || ''}
+            onChange={e => setWbForm({ ...wbForm, dest_location: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Courier / Transport" required value={wbForm.courier || ''}
+              onChange={e => setWbForm({ ...wbForm, courier: e.target.value })} />
+            <Input label="Waybill Number" value={wbForm.waybill_number || ''}
+              onChange={e => setWbForm({ ...wbForm, waybill_number: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Date Shipped" type="date" required value={wbForm.date_shipped || ''}
+              onChange={e => setWbForm({ ...wbForm, date_shipped: e.target.value })} />
+            <Input label="Waybill Expense (₦)" type="number" inputMode="decimal" value={wbForm.expense || ''}
+              onChange={e => setWbForm({ ...wbForm, expense: e.target.value })} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Contact at Destination" value={wbForm.dest_contact || ''}
+              onChange={e => setWbForm({ ...wbForm, dest_contact: e.target.value })} />
+            <Input label="Contact Phone" type="tel" value={wbForm.dest_contact_phone || ''}
+              onChange={e => setWbForm({ ...wbForm, dest_contact_phone: e.target.value })} />
+          </div>
+          <Textarea label="Notes (optional)" rows={2} value={wbForm.notes || ''}
+            onChange={e => setWbForm({ ...wbForm, notes: e.target.value })} />
+          <p className="text-[11px] text-gray-400">
+            The waybill expense is recorded automatically in Expenses. The original failed-order link is preserved.
+          </p>
+        </div>
+      </Modal>
+
+      {/* Transferred from park */}
+      <Modal isOpen={!!ptItem} onClose={() => setPtItem(null)} title="Transferred from Park"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setPtItem(null)} className="flex-1">Cancel</Button>
+            <Button className="flex-1" loading={parkTransfer.isPending}
+              disabled={!ptForm.date || !ptForm.transferred_by || !ptForm.destination}
+              onClick={async () => {
+                await parkTransfer.mutateAsync({ item: ptItem, form: ptForm })
+                setPtItem(null)
+              }}>
+              Confirm
+            </Button>
+          </div>
+        }>
+        <div className="space-y-4">
+          {ptItem && (
+            <p className="text-xs text-gray-500">
+              Records that {ptItem.quantity} × {ptItem.product_name} has physically left
+              {' '}{ptItem.park_name || 'the park'}. The record leaves the active queue.
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Date Transferred" type="date" required value={ptForm.date || ''}
+              onChange={e => setPtForm({ ...ptForm, date: e.target.value })} />
+            <Input label="Time Transferred" type="time" value={ptForm.time || ''}
+              onChange={e => setPtForm({ ...ptForm, time: e.target.value })} />
+          </div>
+          <Input label="Transferred By" required value={ptForm.transferred_by || ''}
+            onChange={e => setPtForm({ ...ptForm, transferred_by: e.target.value })} />
+          <Input label="Destination" required placeholder="Where did the product go?"
+            value={ptForm.destination || ''}
+            onChange={e => setPtForm({ ...ptForm, destination: e.target.value })} />
+          <Textarea label="Notes (optional)" rows={2} value={ptForm.notes || ''}
+            onChange={e => setPtForm({ ...ptForm, notes: e.target.value })} />
         </div>
       </Modal>
     </div>

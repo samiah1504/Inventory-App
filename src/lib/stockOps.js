@@ -515,9 +515,18 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
     //    Holding Queue and is tracked there until its next move ──
     if (disposition === 'left_at_park') {
       const items = await getOrderItems(order)
+      // Colour/size come from the original order line items
+      const variantByProduct = {}
+      for (const li of (Array.isArray(order.items_data) ? order.items_data : [])) {
+        if (li.product_id) variantByProduct[li.product_id] = { color: li.color || null, size: li.size || null }
+      }
+      const fallbackVariant = { color: order.color || null, size: order.size || null }
       const targets = items.length > 0
-        ? items.map(i => ({ product_id: i.product_id, product_name: i.product_name, qty: i.quantity }))
-        : [{ product_id: null, product_name: order.product_name || 'Unknown', qty: Number(order.quantity) || 1 }]
+        ? items.map(i => ({
+            product_id: i.product_id, product_name: i.product_name, qty: i.quantity,
+            ...(variantByProduct[i.product_id] || (items.length === 1 ? fallbackVariant : { color: null, size: null })),
+          }))
+        : [{ product_id: null, product_name: order.product_name || 'Unknown', qty: Number(order.quantity) || 1, ...fallbackVariant }]
 
       for (const t of targets) {
         // Release the reservation — the product no longer belongs to this order
@@ -545,7 +554,7 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
           notes: `Left at ${order.state} State Park after failed delivery — ${order.order_number}`,
         })
         // Holding queue record (table may not exist yet — best-effort)
-        await supabase.from('holding_queue').insert({
+        const { data: holdRow } = await supabase.from('holding_queue').insert({
           product_id: t.product_id,
           product_name: t.product_name,
           quantity: t.qty,
@@ -562,7 +571,19 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
           source_order_number: order.order_number,
           business_id: order.business_id || null,
           status: 'holding',
-        })
+        }).select('id').single()
+        if (holdRow?.id) {
+          // Colour/size columns + history are newer — best-effort
+          await supabase.from('holding_queue')
+            .update({ color: t.color || null, size: t.size || null }).eq('id', holdRow.id)
+          await supabase.from('holding_history').insert({
+            holding_id: holdRow.id,
+            action: 'entered_queue',
+            details: `Left at ${outcome.parkName || `${order.state} State Park`} after failed delivery of ${order.order_number}`,
+            staff_id: staff?.id || null,
+            staff_name: staff?.name || null,
+          })
+        }
       }
       return
     }
