@@ -364,3 +364,18 @@ ALTER TABLE waybill_batches
   ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'warehouse',
   ADD COLUMN IF NOT EXISTS source_holding_id UUID REFERENCES holding_queue(id),
   ADD COLUMN IF NOT EXISTS source_details TEXT;
+
+-- ===================================================
+-- Business Expenses — paid-to, receipts, edit audit
+-- and void-instead-of-delete
+-- ===================================================
+ALTER TABLE expenses
+  ADD COLUMN IF NOT EXISTS paid_to TEXT,
+  ADD COLUMN IF NOT EXISTS receipt_url TEXT,
+  ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active',  -- active / voided
+  ADD COLUMN IF NOT EXISTS void_reason TEXT,
+  ADD COLUMN IF NOT EXISTS voided_by TEXT,
+  ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS created_by_name TEXT,
+  ADD COLUMN IF NOT EXISTS last_edited_by TEXT,
+  ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;

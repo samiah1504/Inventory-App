@@ -91,10 +91,10 @@ export function CeoDashboard() {
       try {
         const { data, error } = await supabase
           .from('expenses')
-          .select('amount, business_id')
+          .select('*')
           .eq('date', today)
         if (error) throw error
-        return data || []
+        return (data || []).filter(e => e.status !== 'voided')
       } catch { return [] }
     },
     staleTime: 60000,
@@ -106,11 +106,11 @@ export function CeoDashboard() {
       try {
         const { data, error } = await supabase
           .from('expenses')
-          .select('amount, business_id, expense_type')
+          .select('*')
           .gte('date', monthStart)
           .lte('date', today)
         if (error) throw error
-        return data || []
+        return (data || []).filter(e => e.status !== 'voided')
       } catch { return [] }
     },
     staleTime: 60000,

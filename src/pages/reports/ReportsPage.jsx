@@ -358,7 +358,8 @@ export function ReportsPage() {
         if (businessId) q = q.eq('business_id', businessId)
         const { data, error } = await q
         if (error) throw error
-        return data || []
+        // Voided expenses stay on record for audit but never count
+        return (data || []).filter(e => e.status !== 'voided')
       } catch { return [] }
     },
     staleTime: 60000,
@@ -773,12 +774,12 @@ export function ReportsPage() {
           .in('status', ['paid', 'partially_paid'])
         if (businessId) oq = oq.eq('business_id', businessId)
         let eq = supabase.from('expenses')
-          .select('id, amount, date, order_id, business_id, expense_type')
+          .select('*')
           .gte('date', startISO)
         if (businessId) eq = eq.eq('business_id', businessId)
         const [oR, eR] = await Promise.all([oq, eq])
         if (oR.error || eR.error) throw oR.error || eR.error
-        return { orders: oR.data || [], expenses: eR.data || [] }
+        return { orders: oR.data || [], expenses: (eR.data || []).filter(e => e.status !== 'voided') }
       } catch { return { orders: [], expenses: [] } }
     },
     staleTime: 60000,

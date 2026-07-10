@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { Plus, DollarSign, ChevronDown, ChevronUp, TrendingUp } from 'lucide-react'
+import { Navigate } from 'react-router-dom'
+import { Plus, DollarSign, ChevronDown, ChevronUp, TrendingUp, Trash2 } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
@@ -112,9 +113,25 @@ export function AccountingPage() {
     onError: (err) => showToast(err.message, 'error'),
   })
 
+  // ── Permanent delete — CEO / super admin only ─────────────────────────────
+
+  const deleteExpense = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase.from('expenses').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['expenses'] })
+      showToast('Expense permanently removed', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+
   // ── Derived values ────────────────────────────────────────────────────────
 
-  const expList      = expenses || []
+  // Voided expenses stay listed for audit but never count in totals
+  const expListAll   = expenses || []
+  const expList      = expListAll.filter(e => e.status !== 'voided')
   const orderList    = ordersForPL.data || []
 
   const totalExpenses  = expList.reduce((s, e) => s + Number(e.amount), 0)
@@ -153,6 +170,10 @@ export function AccountingPage() {
   }, [businesses, orderList, expList])
 
   // ── Render ────────────────────────────────────────────────────────────────
+
+  // The Waybill Officer records and manages only her own business
+  // expenses — she never sees the full accounting module
+  if (user?.role === 'waybill') return <Navigate to="/my-expenses" replace />
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
@@ -322,7 +343,7 @@ export function AccountingPage() {
 
         {/* ── Expense list ── */}
         {isLoading ? <SkeletonList count={5} /> :
-         expList.length === 0 ? (
+         expListAll.length === 0 ? (
            <EmptyState
              title="No expenses recorded"
              icon={<DollarSign size={28} />}
@@ -332,25 +353,54 @@ export function AccountingPage() {
          ) : (
            <div className="space-y-3">
              <p className="text-xs text-gray-500">{expList.length} expense{expList.length !== 1 ? 's' : ''}</p>
-             {expList.map(exp => (
-               <div key={exp.id} className="bg-white rounded-2xl p-4 border border-gray-100">
+             {expListAll.map(exp => {
+               const voided = exp.status === 'voided'
+               return (
+               <div key={exp.id} className={`bg-white rounded-2xl p-4 border border-gray-100 ${voided ? 'opacity-60' : ''}`}>
                  <div className="flex items-start justify-between gap-2">
                    <div className="flex-1 min-w-0">
-                     <div className="flex items-center gap-2 mb-0.5">
-                       <p className="text-sm font-semibold text-gray-900 capitalize">
+                     <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                       <p className={`text-sm font-semibold text-gray-900 capitalize ${voided ? 'line-through' : ''}`}>
                          {exp.expense_type.replace(/_/g, ' ')}
                        </p>
                        {exp.is_admin_only && (
                          <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">Admin</span>
                        )}
+                       {voided && (
+                         <span className="text-[10px] font-semibold bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">VOIDED</span>
+                       )}
                      </div>
                      <p className="text-xs text-gray-500">{exp.business?.name} · {formatDate(exp.date)}</p>
+                     {exp.paid_to && <p className="text-xs text-gray-500">Paid to: {exp.paid_to}</p>}
                      {exp.description && <p className="text-xs text-gray-400 mt-0.5">{exp.description}</p>}
+                     {voided && (exp.void_reason || exp.voided_by) && (
+                       <p className="text-xs text-gray-400 mt-0.5">
+                         Voided{exp.voided_by ? ` by ${exp.voided_by}` : ''}{exp.void_reason ? `: ${exp.void_reason}` : ''}
+                       </p>
+                     )}
+                     {exp.last_edited_by && !voided && (
+                       <p className="text-[11px] text-gray-400 mt-0.5">
+                         Edited by {exp.last_edited_by}{exp.last_edited_at ? ` · ${formatDate(exp.last_edited_at)}` : ''}
+                       </p>
+                     )}
                    </div>
-                   <p className="text-base font-bold text-red-600 shrink-0">{formatCurrency(exp.amount)}</p>
+                   <div className="flex flex-col items-end gap-2 shrink-0">
+                     <p className={`text-base font-bold ${voided ? 'text-gray-400 line-through' : 'text-red-600'}`}>{formatCurrency(exp.amount)}</p>
+                     {isCeo && (
+                       <button
+                         onClick={() => {
+                           if (window.confirm('Permanently remove this expense? This cannot be undone.')) {
+                             deleteExpense.mutate(exp.id)
+                           }
+                         }}
+                         className="p-1.5 text-gray-300 active:text-red-500">
+                         <Trash2 size={15} />
+                       </button>
+                     )}
+                   </div>
                  </div>
                </div>
-             ))}
+             )})}
            </div>
          )
         }

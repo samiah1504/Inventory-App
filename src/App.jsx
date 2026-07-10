@@ -23,6 +23,7 @@ import { BusinessesPage } from './pages/settings/BusinessesPage'
 import { WarehousesPage } from './pages/settings/WarehousesPage'
 import { ProductsPage } from './pages/settings/ProductsPage'
 import { AccountingPage } from './pages/accounting/AccountingPage'
+import { MyBusinessExpensesPage } from './pages/accounting/MyBusinessExpensesPage'
 import { SalesAnalyticsPage } from './pages/analytics/SalesAnalyticsPage'
 import { DocumentsPage } from './pages/documents/DocumentsPage'
 import { EditOrderPage } from './pages/orders/EditOrderPage'
@@ -118,6 +119,7 @@ export default function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/documents" element={<DocumentsPage />} />
             <Route path="/accounting" element={<AccountingPage />} />
+            <Route path="/my-expenses" element={<MyBusinessExpensesPage />} />
             <Route path="/analytics" element={<SalesAnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/staff" element={<StaffPage />} />
