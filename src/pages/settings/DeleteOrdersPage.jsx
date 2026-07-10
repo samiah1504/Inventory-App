@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Trash2, AlertTriangle, Check } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -97,6 +97,13 @@ export function DeleteOrdersPage() {
     }
     return l
   }, [ordersQ.data, search])
+
+  // Ghost-selection guard: when the list refreshes (e.g. after a
+  // successful delete), drop selected ids that no longer exist
+  useEffect(() => {
+    if (!ordersQ.data) return
+    setSelected(prev => prev.filter(id => ordersQ.data.some(o => o.id === id)))
+  }, [ordersQ.data])
 
   if (!isCeo) return <Navigate to="/settings" replace />
 
