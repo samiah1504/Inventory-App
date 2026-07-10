@@ -54,6 +54,7 @@ const NAV_CONFIG = {
   fulfillment: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
+    { to: '/my-stock', icon: Package, label: 'My Stock' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   waybill: [
