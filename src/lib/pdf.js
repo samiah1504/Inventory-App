@@ -476,49 +476,87 @@ export function generatePackingList(batch, packingItems, batchOrders, orderItems
     packedLookup[`${pi.state}||${pi.product_name}`] = pi.is_packed
   }
 
+  const pageBreak = (needed = 12) => {
+    if (y + needed > 275) { doc.addPage(); y = 20 }
+  }
+
+  // One block per ORDER, grouped by destination state, with the
+  // destination (state, city, full address) impossible to miss —
+  // warehouse staff sort products by destination before the park.
   for (const state of states) {
     const stateOrders = batchOrders.filter(bo => bo.order?.state === state)
 
-    // Aggregate items for this state
-    const grouped = {}
-    for (const bo of stateOrders) {
-      // Priority: items_data JSONB > order_items table > order summary
-      const fromJson = Array.isArray(bo.order?.items_data) && bo.order.items_data.length > 0
-        ? bo.order.items_data : null
-      const fromTable = itemsByOrderId[bo.order?.id]?.length > 0
-        ? itemsByOrderId[bo.order.id] : null
-      const lineItems = fromJson || fromTable
-        || [{ product_name: bo.order?.product_name, quantity: bo.order?.quantity || 1, color: bo.order?.color, size: bo.order?.size }]
-
-      for (const li of lineItems) {
-        const label = [li.product_name, li.color, li.size].filter(Boolean).join(' — ')
-        if (!grouped[label]) grouped[label] = { label, quantity: 0, isPacked: packedLookup[`${state}||${li.product_name}`] || false }
-        grouped[label].quantity += Number(li.quantity) || 1
-      }
-    }
-
-    doc.setFillColor(243, 244, 246)
-    doc.rect(14, y, 182, 8, 'F')
+    pageBreak(20)
+    doc.setFillColor(17, 24, 39)
+    doc.rect(14, y, 182, 8.5, 'F')
+    doc.setTextColor(255, 255, 255)
     doc.setFont('helvetica', 'bold')
-    doc.setFontSize(10)
-    doc.text(state, 16, y + 5.5)
-    y += 12
+    doc.setFontSize(10.5)
+    doc.text(state.toUpperCase(), 16, y + 6)
+    doc.setFontSize(8.5)
+    doc.text(`${stateOrders.length} order${stateOrders.length !== 1 ? 's' : ''}`, 194, y + 6, { align: 'right' })
+    doc.setTextColor(0, 0, 0)
+    y += 13
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(9)
-    for (const { label, quantity, isPacked } of Object.values(grouped)) {
-      const check = isPacked ? '[X]' : '[ ]'
-      doc.text(check, 16, y)
-      const nameLines = doc.splitTextToSize(label, 130)
-      nameLines.forEach((line, i) => doc.text(line, 28, y + i * 5))
-      doc.text(`Qty: ${quantity}`, 196, y, { align: 'right' })
-      y += Math.max(nameLines.length * 5, 7) + 2
-      if (y > 270) { doc.addPage(); y = 20 }
+    for (const bo of stateOrders) {
+      const o = bo.order || {}
+      // Priority: items_data JSONB > order_items table > order summary
+      const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
+      const fromTable = itemsByOrderId[o.id]?.length > 0 ? itemsByOrderId[o.id] : null
+      const lineItems = fromJson || fromTable
+        || [{ product_name: o.product_name, quantity: o.quantity || 1, color: o.color, size: o.size }]
+
+      const addressLines = doc.splitTextToSize(o.address || 'No address on order', 140)
+      const blockH = 14 + addressLines.length * 4.5 + lineItems.length * 6 + 6
+      pageBreak(Math.min(blockH, 60))
+
+      // Order header: number · customer · phone
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text(o.order_number || '', 16, y)
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9.5)
+      doc.text([o.customer_name, o.customer_phone].filter(Boolean).join('  ·  '), 62, y)
+      y += 6
+
+      // Destination — the loud part
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10.5)
+      doc.text(`DELIVER TO: ${[o.city, state].filter(Boolean).join(', ')}`, 16, y)
+      y += 5
+      doc.setFontSize(9.5)
+      for (const line of addressLines) {
+        pageBreak()
+        doc.text(line, 16, y)
+        y += 4.5
+      }
+      y += 2
+
+      // Products with pack checkboxes
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9.5)
+      for (const li of lineItems) {
+        pageBreak(8)
+        const isPacked = packedLookup[`${state}||${li.product_name}`] || false
+        doc.text(isPacked ? '[X]' : '[ ]', 18, y)
+        const variant = [li.color, li.size].filter(Boolean).join(', ')
+        const label = `${Number(li.quantity) || 1} ×  ${li.product_name || ''}${variant ? `  (${variant})` : ''}`
+        const nameLines = doc.splitTextToSize(label, 150)
+        nameLines.forEach((line, i) => doc.text(line, 28, y + i * 4.5))
+        y += Math.max(nameLines.length * 4.5, 5.5) + 1.5
+      }
+
+      y += 2.5
+      doc.setDrawColor(229, 231, 235)
+      doc.setLineWidth(0.2)
+      doc.line(14, y, 196, y)
+      y += 6
     }
-    y += 4
+    y += 2
   }
 
-  y += 10
+  y += 8
+  if (y > 270) { doc.addPage(); y = 25 }
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
   doc.text('Packed by: ______________________________', 14, y)
