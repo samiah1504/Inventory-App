@@ -49,6 +49,19 @@ export function DeleteOrdersPage() {
   // Hard gate: CEO / Super Admin only — and never inside a role preview
   const isCeo = ['ceo', 'super_admin'].includes(user?.role) && !user?._preview && !realUser
 
+  // Audit table check — deletion works without it, but leaves no trail
+  const auditCheckQ = useQuery({
+    queryKey: ['order_delete_audit_check'],
+    enabled: isCeo,
+    retry: false,
+    queryFn: async () => {
+      const { error } = await supabase.from('deleted_order_audit').select('id').limit(1)
+      return !error
+    },
+    staleTime: 30000,
+  })
+  const auditReady = auditCheckQ.data !== false
+
   const ordersQ = useQuery({
     queryKey: ['delete_orders_list', bizFilter, statusFilter, stateFilter, dateFrom, dateTo],
     enabled: isCeo,
@@ -164,6 +177,16 @@ export function DeleteOrdersPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3 pb-24">
+        {!auditReady && (
+          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3">
+            <p className="text-xs font-semibold text-amber-900 mb-1">⚠ Audit table missing</p>
+            <p className="text-xs text-amber-800">
+              Deletions will work but leave no audit trail until you run
+              <span className="font-mono"> supabase/migrations.sql</span> in the Supabase SQL editor
+              (safe to run the whole file).
+            </p>
+          </div>
+        )}
         <div className="bg-red-50 border border-red-200 rounded-2xl p-3 flex items-start gap-2">
           <AlertTriangle size={15} className="text-red-600 shrink-0 mt-0.5" />
           <p className="text-xs text-red-800">

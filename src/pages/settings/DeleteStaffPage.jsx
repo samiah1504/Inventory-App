@@ -43,6 +43,19 @@ export function DeleteStaffPage() {
 
   const isCeo = ['ceo', 'super_admin'].includes(user?.role) && !user?._preview && !realUser
 
+  // Without the is_deleted column, deletion can only deactivate accounts
+  const migrationQ = useQuery({
+    queryKey: ['staff_delete_migration_check'],
+    enabled: isCeo,
+    retry: false,
+    queryFn: async () => {
+      const { error } = await supabase.from('staff_users').select('is_deleted').limit(1)
+      return !error
+    },
+    staleTime: 30000,
+  })
+  const migrated = migrationQ.data !== false
+
   const staffQ = useQuery({
     queryKey: ['delete_staff_list'],
     enabled: isCeo,
@@ -137,6 +150,17 @@ export function DeleteStaffPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3 pb-24">
+        {!migrated && (
+          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3">
+            <p className="text-xs font-semibold text-amber-900 mb-1">⚠ Migration required before deleting</p>
+            <p className="text-xs text-amber-800">
+              The staff-deletion columns don't exist in your database yet, so deletions here can
+              only deactivate accounts — they will stay visible in Staff Management. Run
+              <span className="font-mono"> supabase/migrations.sql</span> in the Supabase SQL editor
+              (it's safe to run the whole file), then delete again.
+            </p>
+          </div>
+        )}
         <div className="bg-red-50 border border-red-200 rounded-2xl p-3 flex items-start gap-2">
           <AlertTriangle size={15} className="text-red-600 shrink-0 mt-0.5" />
           <p className="text-xs text-red-800">
