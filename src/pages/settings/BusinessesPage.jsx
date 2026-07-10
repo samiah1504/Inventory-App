@@ -12,19 +12,29 @@ import { useAppStore } from '../../stores/appStore'
 export function BusinessesPage() {
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', short_code: '', invoice_prefix: '', address: '', phone: '' })
+  const EMPTY = { name: '', short_code: '', invoice_prefix: '', address: '', phone: '',
+    email: '', website: '', logo_url: '', bank_name: '', bank_account_name: '', bank_account_number: '' }
+  const [form, setForm] = useState(EMPTY)
   const { data: businesses, isLoading } = useBusinesses()
   const { showToast } = useAppStore()
   const queryClient = useQueryClient()
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      // Branding/bank columns come from a newer migration — save the
+      // core fields first, then the extras best-effort
+      const { email, website, logo_url, bank_name, bank_account_name, bank_account_number, ...core } = data
+      const extras = { email: email || null, website: website || null, logo_url: logo_url || null,
+        bank_name: bank_name || null, bank_account_name: bank_account_name || null,
+        bank_account_number: bank_account_number || null }
       if (editing) {
-        const { error } = await supabase.from('businesses').update(data).eq('id', editing.id)
+        const { error } = await supabase.from('businesses').update(core).eq('id', editing.id)
         if (error) throw error
+        await supabase.from('businesses').update(extras).eq('id', editing.id)
       } else {
-        const { error } = await supabase.from('businesses').insert(data)
+        const { data: created, error } = await supabase.from('businesses').insert(core).select('id').single()
         if (error) throw error
+        if (created) await supabase.from('businesses').update(extras).eq('id', created.id)
       }
     },
     onSuccess: () => {
@@ -32,7 +42,7 @@ export function BusinessesPage() {
       showToast(editing ? 'Business updated' : 'Business added', 'success')
       setShowModal(false)
       setEditing(null)
-      setForm({ name: '', short_code: '', invoice_prefix: '', address: '', phone: '' })
+      setForm(EMPTY)
     },
     onError: (err) => showToast(err.message, 'error'),
   })
@@ -47,7 +57,11 @@ export function BusinessesPage() {
 
   function openEdit(b) {
     setEditing(b)
-    setForm({ name: b.name, short_code: b.short_code, invoice_prefix: b.invoice_prefix, address: b.address || '', phone: b.phone || '' })
+    setForm({ name: b.name, short_code: b.short_code, invoice_prefix: b.invoice_prefix,
+      address: b.address || '', phone: b.phone || '',
+      email: b.email || '', website: b.website || '', logo_url: b.logo_url || '',
+      bank_name: b.bank_name || '', bank_account_name: b.bank_account_name || '',
+      bank_account_number: b.bank_account_number || '' })
     setShowModal(true)
   }
 
@@ -56,7 +70,7 @@ export function BusinessesPage() {
       <TopBar
         title="Businesses"
         actions={
-          <button onClick={() => { setEditing(null); setForm({ name: '', short_code: '', invoice_prefix: '', address: '', phone: '' }); setShowModal(true) }}
+          <button onClick={() => { setEditing(null); setForm(EMPTY); setShowModal(true) }}
             className="p-2 bg-blue-600 text-black rounded-xl active:scale-95">
             <Plus size={20} />
           </button>
@@ -70,6 +84,14 @@ export function BusinessesPage() {
                 <p className="text-sm font-bold text-gray-900">{b.name}</p>
                 <p className="text-xs text-gray-500">Code: {b.short_code} · Prefix: {b.invoice_prefix}</p>
                 {b.address && <p className="text-xs text-gray-400">{b.address}</p>}
+                {(b.email || b.website) && (
+                  <p className="text-xs text-gray-400">{[b.email, b.website].filter(Boolean).join(' · ')}</p>
+                )}
+                {b.bank_name && (
+                  <p className="text-xs text-gray-400">
+                    {b.bank_name} · {b.bank_account_name} · {b.bank_account_number}
+                  </p>
+                )}
               </div>
               <div className="flex gap-2">
                 <button onClick={() => openEdit(b)} className="p-2 bg-gray-100 rounded-xl active:scale-95">
@@ -106,6 +128,18 @@ export function BusinessesPage() {
           </div>
           <Input label="Address" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} />
           <Input label="Phone" type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />
+            <Input label="Website" placeholder="www.example.com" value={form.website} onChange={e => setForm({ ...form, website: e.target.value })} />
+          </div>
+          <Input label="Logo Link" type="url" placeholder="https:// — PNG or JPG of your logo"
+            value={form.logo_url} onChange={e => setForm({ ...form, logo_url: e.target.value })} />
+          <p className="text-[11px] text-gray-400 -mt-2">Shown on invoices. If empty, a monogram of the business initial is used.</p>
+          <Input label="Bank Name" value={form.bank_name} onChange={e => setForm({ ...form, bank_name: e.target.value })} />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Account Name" value={form.bank_account_name} onChange={e => setForm({ ...form, bank_account_name: e.target.value })} />
+            <Input label="Account Number" inputMode="numeric" value={form.bank_account_number} onChange={e => setForm({ ...form, bank_account_number: e.target.value })} />
+          </div>
         </div>
       </Modal>
     </div>

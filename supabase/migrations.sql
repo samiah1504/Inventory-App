@@ -411,3 +411,14 @@ CREATE TABLE IF NOT EXISTS product_audit (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_product_audit_product ON product_audit(product_id);
+
+-- ===================================================
+-- Business branding & bank details for invoices
+-- ===================================================
+ALTER TABLE businesses
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS website TEXT,
+  ADD COLUMN IF NOT EXISTS logo_url TEXT,
+  ADD COLUMN IF NOT EXISTS bank_name TEXT,
+  ADD COLUMN IF NOT EXISTS bank_account_name TEXT,
+  ADD COLUMN IF NOT EXISTS bank_account_number TEXT;

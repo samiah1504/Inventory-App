@@ -21,10 +21,10 @@ export function DocumentsPage() {
     limit: 100,
   })
 
-  function handleDoc(type, order) {
+  async function handleDoc(type, order) {
     const business = order.business
     let doc
-    if (type === 'invoice') doc = generateInvoice(order, business)
+    if (type === 'invoice') doc = await generateInvoice(order, business)
     else if (type === 'receipt') doc = generateReceipt(order, business)
     else doc = generateDeliveryNote(order, business)
     savePdf(doc, `${type}-${order.order_number}.pdf`)
