@@ -22,19 +22,20 @@ export function WaybillDashboard() {
     queryKey: ['waybill_dashboard'],
     queryFn: async () => {
       const count = (builder) => builder.then(r => r.count || 0)
-      const [toPack, toDispatch, inTransit, completed, sentToPark, awaiting, recentR] = await Promise.all([
+      const [toPack, toDispatch, inTransit, completed, sentToPark, awaiting, holding, recentR] = await Promise.all([
         count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'created')),
         count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'packed')),
         count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).in('status', ['waybilled', 'in_transit'])),
         count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'received')),
         count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'sent_to_park')),
         count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill')),
+        count(supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected'])).catch(() => 0),
         supabase.from('waybill_batches')
           .select('id, batch_number, status, courier_company, destination_state, created_at')
           .order('created_at', { ascending: false })
           .limit(5),
       ])
-      return { toPack, toDispatch, inTransit, completed, sentToPark, awaiting, recent: recentR.data || [] }
+      return { toPack, toDispatch, inTransit, completed, sentToPark, awaiting, holding, recent: recentR.data || [] }
     },
     staleTime: 30000,
   })
@@ -100,6 +101,14 @@ export function WaybillDashboard() {
             color={c?.sentToPark > 0 ? 'amber' : 'gray'}
             sub="returns to re-ship"
             onClick={() => navigate('/waybill?tab=sent_to_park')}
+          />
+          <StatCard
+            label="Holding Queue"
+            value={loading ? '...' : c.holding}
+            icon={<Package size={20} />}
+            color={c?.holding > 0 ? 'blue' : 'gray'}
+            sub="products usable as source"
+            onClick={() => navigate('/holding')}
           />
         </div>
 

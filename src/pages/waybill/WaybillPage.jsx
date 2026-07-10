@@ -79,20 +79,85 @@ export function WaybillPage() {
     date_shipped: new Date().toISOString().split('T')[0],
     source_warehouse_id: '', notes: '',
   })
+  // Leaving From: 'warehouse' (default) or a Product Holding Queue record
+  const [sourceType, setSourceType] = useState('warehouse')
+  const [showHoldingPicker, setShowHoldingPicker] = useState(false)
+  const [holdingSearch, setHoldingSearch] = useState('')
+  const [sourceHolding, setSourceHolding] = useState(null)  // selected holding record
+  const [holdingQty, setHoldingQty] = useState('')
+
+  const holdingQ = useQuery({
+    queryKey: ['holding_queue', 'picker'],
+    enabled: showHoldingPicker || sourceType === 'holding',
+    retry: false,
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase
+          .from('holding_queue')
+          .select('*')
+          .in('status', ['holding', 'collected'])
+          .order('created_at', { ascending: false })
+        if (error) throw error
+        return data || []
+      } catch { return null }
+    },
+    staleTime: 30000,
+  })
 
   const createWaybillBatch = useCreateWaybillBatch()
 
   async function createBatch() {
     if (selectedOrders.length === 0) { showToast('Select at least one order', 'error'); return }
+    if (sourceType === 'holding' && !sourceHolding) {
+      showToast('Select the product from the Holding Queue', 'error'); return
+    }
     try {
       const { batch, batchNumber } = await createWaybillBatch.mutateAsync({
-        form: batchForm,
+        form: sourceType === 'holding' ? { ...batchForm, source_warehouse_id: '' } : batchForm,
         selectedOrders,
         awaitingOrders: awaitingOrders.data,
       })
+
+      // Shipment originates from a Holding Queue product: link it, record the
+      // origin details, and deduct the used quantity from the queue
+      if (sourceType === 'holding' && sourceHolding) {
+        const useQty = Math.min(Math.max(1, Number(holdingQty) || sourceHolding.quantity), sourceHolding.quantity)
+        const remaining = sourceHolding.quantity - useQty
+        await supabase.from('waybill_batches').update({
+          source_type: 'holding',
+          source_holding_id: sourceHolding.id,
+          source_state: sourceHolding.state,
+          source_details: [
+            [sourceHolding.state, sourceHolding.city].filter(Boolean).join(', '),
+            sourceHolding.park_name,
+            sourceHolding.contact_name ? `${sourceHolding.contact_name} (${sourceHolding.contact_phone || 'no phone'})` : null,
+          ].filter(Boolean).join(' · '),
+        }).eq('id', batch.id) // best-effort: columns may not exist pre-migration
+        await supabase.from('holding_queue').update(
+          remaining > 0
+            ? { quantity: remaining, updated_at: new Date().toISOString() }
+            : {
+                quantity: 0, status: 'transferred',
+                notes: [sourceHolding.notes, `Used in ${batchNumber}`].filter(Boolean).join(' · '),
+                updated_at: new Date().toISOString(),
+              }
+        ).eq('id', sourceHolding.id)
+        await supabase.from('waybill_batch_timeline').insert({
+          batch_id: batch.id,
+          event: 'Source: Product Holding Queue',
+          notes: `${useQty} × ${sourceHolding.product_name} from ${sourceHolding.state}${sourceHolding.park_name ? ` (${sourceHolding.park_name})` : ''}${sourceHolding.source_order_number ? ` — originally ${sourceHolding.source_order_number}` : ''}`,
+          staff_id: user?.id,
+          staff_name: user?.name,
+        })
+        queryClient.invalidateQueries({ queryKey: ['holding_queue'] })
+      }
+
       showToast(`Batch ${batchNumber} created`, 'success')
       setShowBatchModal(false)
       setSelectedOrders([])
+      setSourceType('warehouse')
+      setSourceHolding(null)
+      setHoldingQty('')
       navigate(`/waybill/batches/${batch.id}`)
     } catch (err) {
       showToast(err.message, 'error')
@@ -363,11 +428,56 @@ export function WaybillPage() {
             ) : null
           })()}
 
-          <Select label="Source Warehouse (Leaving From)" value={batchForm.source_warehouse_id}
-            onChange={e => setBatchForm({ ...batchForm, source_warehouse_id: e.target.value })}>
-            <option value="">Select warehouse...</option>
-            {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} — {w.state}</option>)}
-          </Select>
+          {/* Leaving From — warehouse or a product already in the Holding Queue */}
+          <div>
+            <p className="text-sm font-medium text-gray-700 mb-1.5">Leaving From</p>
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-2">
+              {[
+                { key: 'warehouse', label: 'Warehouse' },
+                { key: 'holding',   label: 'Holding Queue' },
+              ].map(v => (
+                <button key={v.key} type="button"
+                  onClick={() => { setSourceType(v.key); if (v.key === 'warehouse') setSourceHolding(null) }}
+                  className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all ${
+                    sourceType === v.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+                  }`}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+
+            {sourceType === 'warehouse' ? (
+              <Select value={batchForm.source_warehouse_id}
+                onChange={e => setBatchForm({ ...batchForm, source_warehouse_id: e.target.value })}>
+                <option value="">Select warehouse...</option>
+                {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} — {w.state}</option>)}
+              </Select>
+            ) : sourceHolding ? (
+              <div className="bg-cyan-50 rounded-xl p-3 space-y-1">
+                <p className="text-sm font-semibold text-gray-900">{sourceHolding.quantity} × {sourceHolding.product_name}</p>
+                <p className="text-xs text-gray-600">
+                  {[sourceHolding.state, sourceHolding.city, sourceHolding.park_name].filter(Boolean).join(' · ')}
+                </p>
+                {sourceHolding.contact_name && (
+                  <p className="text-xs text-gray-600">Contact: {sourceHolding.contact_name} · {sourceHolding.contact_phone}</p>
+                )}
+                {sourceHolding.source_order_number && (
+                  <p className="text-[11px] font-mono text-gray-400">from {sourceHolding.source_order_number}</p>
+                )}
+                <div className="flex items-end gap-2 pt-1">
+                  <div className="flex-1">
+                    <Input label="Quantity to use" type="number" inputMode="numeric" min="1" max={sourceHolding.quantity}
+                      value={holdingQty} onChange={e => setHoldingQty(e.target.value)} />
+                  </div>
+                  <Button size="sm" variant="secondary" onClick={() => setShowHoldingPicker(true)}>Change</Button>
+                </div>
+              </div>
+            ) : (
+              <Button variant="secondary" className="w-full" onClick={() => setShowHoldingPicker(true)}>
+                Select Product from Holding Queue
+              </Button>
+            )}
+          </div>
           <Select label="Waybill Type" value={batchForm.waybill_type}
             onChange={e => setBatchForm({ ...batchForm, waybill_type: e.target.value })}>
             <option value="external">External Courier</option>
@@ -418,6 +528,56 @@ export function WaybillPage() {
           <Textarea label="Notes" rows={2}
             value={transferForm.notes}
             onChange={e => setTransferForm({ ...transferForm, notes: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Holding Queue picker — use an undelivered product as the shipment source */}
+      <Modal
+        isOpen={showHoldingPicker}
+        onClose={() => setShowHoldingPicker(false)}
+        title="Select from Holding Queue"
+      >
+        <div className="space-y-3">
+          <SearchBar value={holdingSearch} onChange={setHoldingSearch} placeholder="Search product, state, order #..." />
+          {holdingQ.data === null ? (
+            <p className="text-sm text-amber-700 bg-amber-50 rounded-xl p-3">
+              Run the Product Holding Queue migration first.
+            </p>
+          ) : (holdingQ.data || []).filter(h => {
+            const q = holdingSearch.toLowerCase()
+            return !q || (h.product_name || '').toLowerCase().includes(q) ||
+              (h.state || '').toLowerCase().includes(q) ||
+              (h.source_order_number || '').toLowerCase().includes(q)
+          }).length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No products in the holding queue</p>
+          ) : (holdingQ.data || []).filter(h => {
+            const q = holdingSearch.toLowerCase()
+            return !q || (h.product_name || '').toLowerCase().includes(q) ||
+              (h.state || '').toLowerCase().includes(q) ||
+              (h.source_order_number || '').toLowerCase().includes(q)
+          }).map(h => (
+            <button key={h.id} type="button"
+              onClick={() => {
+                setSourceHolding(h)
+                setHoldingQty(String(h.quantity))
+                setShowHoldingPicker(false)
+              }}
+              className="w-full text-left bg-white border border-gray-200 rounded-xl p-3 active:scale-[0.99] transition-all">
+              <p className="text-sm font-semibold text-gray-900">{h.quantity} × {h.product_name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {[h.state, h.city, h.park_name].filter(Boolean).join(' · ')}
+              </p>
+              {h.contact_name && (
+                <p className="text-xs text-gray-500">Contact: {h.contact_name}{h.contact_phone ? ` · ${h.contact_phone}` : ''}</p>
+              )}
+              {h.source_order_number && (
+                <p className="text-[11px] font-mono text-gray-400 mt-0.5">from {h.source_order_number}</p>
+              )}
+            </button>
+          ))}
+          <p className="text-[11px] text-gray-400">
+            Approval for using a holding product happens in the WhatsApp operations group — the app records the final choice.
+          </p>
         </div>
       </Modal>
     </div>

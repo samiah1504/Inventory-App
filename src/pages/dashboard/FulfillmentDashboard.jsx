@@ -85,6 +85,24 @@ export function FulfillmentDashboard() {
   const transferAtPark = useTransferAtPark()
   const incoming = incomingQ.data || []
 
+  // Products held at parks in this officer's state(s)
+  const holdingQ = useQuery({
+    queryKey: ['holding_count', myStates],
+    queryFn: async () => {
+      try {
+        let q = supabase.from('holding_queue')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['holding', 'collected'])
+        if (myStates) q = q.in('state', myStates)
+        const { count, error } = await q
+        if (error) throw error
+        return count || 0
+      } catch { return 0 }
+    },
+    staleTime: 30000,
+  })
+  const holdingCount = holdingQ.data || 0
+
   const c = counts.data
   const loading = counts.isLoading
 
@@ -171,6 +189,8 @@ export function FulfillmentDashboard() {
             onClick={() => navigate('/orders?status=paid')} />
           <StatCard label="Failed / Returned" value={loading ? '...' : c.failed + c.returned} icon={<AlertTriangle size={20} />} color={c && (c.failed + c.returned) > 0 ? 'red' : 'gray'}
             onClick={() => navigate('/orders?status=failed_delivery')} />
+          <StatCard label="Holding Queue" value={holdingQ.isLoading ? '...' : holdingCount} icon={<Inbox size={20} />} color={holdingCount > 0 ? 'amber' : 'gray'}
+            onClick={() => navigate('/holding')} />
         </div>
 
         {/* Scheduled Today + Overdue */}

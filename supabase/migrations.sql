@@ -329,3 +329,38 @@ ALTER TABLE orders
   ADD COLUMN IF NOT EXISTS park_sent_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS park_sent_by TEXT,
   ADD COLUMN IF NOT EXISTS park_origin_state TEXT;
+
+-- ===================================================
+-- Product Holding Queue — products detached from failed
+-- orders, awaiting their next logistics decision
+-- ===================================================
+CREATE TABLE IF NOT EXISTS holding_queue (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id UUID REFERENCES products(id),
+  product_name TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 1,
+  state TEXT NOT NULL,
+  city TEXT,
+  park_name TEXT,
+  park_location TEXT,
+  contact_name TEXT,
+  contact_phone TEXT,
+  contact_role TEXT,     -- driver / park_manager / stockkeeper / other
+  custodian_id UUID REFERENCES staff_users(id),
+  custodian_name TEXT,
+  source_order_id UUID REFERENCES orders(id),
+  source_order_number TEXT,
+  status TEXT NOT NULL DEFAULT 'holding',  -- holding / collected / warehouse / transferred / damaged
+  business_id UUID REFERENCES businesses(id),
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_holding_state ON holding_queue(state);
+CREATE INDEX IF NOT EXISTS idx_holding_status ON holding_queue(status);
+
+-- Waybill batches can now leave from a holding-queue product
+ALTER TABLE waybill_batches
+  ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT 'warehouse',
+  ADD COLUMN IF NOT EXISTS source_holding_id UUID REFERENCES holding_queue(id),
+  ADD COLUMN IF NOT EXISTS source_details TEXT;

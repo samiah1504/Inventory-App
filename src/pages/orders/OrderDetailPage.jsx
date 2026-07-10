@@ -76,6 +76,7 @@ export function OrderDetailPage() {
   const [showFailedModal, setShowFailedModal] = useState(false)
   const [failedForm, setFailedForm] = useState({
     reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated',
+    parkName: '', parkLocation: '', contactName: '', contactPhone: '', contactRole: 'driver',
   })
   const [cancelReason, setCancelReason] = useState('')
   const [returnReason, setReturnReason] = useState('')
@@ -150,7 +151,10 @@ export function OrderDetailPage() {
 
   async function handleStatusChange(newStatus) {
     if (newStatus === 'failed_delivery') {
-      setFailedForm({ reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated' })
+      setFailedForm({
+        reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated',
+        parkName: '', parkLocation: '', contactName: '', contactPhone: '', contactRole: 'driver',
+      })
       setShowFailedModal(true)
       setShowStatusModal(false)
       return
@@ -451,7 +455,9 @@ export function OrderDetailPage() {
   const failedValid = failedForm.reason &&
     (failedForm.reason !== 'other' || failedForm.custom.trim()) &&
     failedForm.disposition &&
-    (failedForm.disposition !== 'transferred_state' || failedForm.destinationState)
+    (failedForm.disposition !== 'transferred_state' || failedForm.destinationState) &&
+    (failedForm.disposition !== 'left_at_park' ||
+      (failedForm.parkName.trim() && failedForm.contactName.trim() && failedForm.contactPhone.trim()))
 
   async function handleFailedSubmit() {
     if (!failedValid) return
@@ -472,6 +478,11 @@ export function OrderDetailPage() {
         disposition: failedForm.disposition,
         destinationState: failedForm.destinationState || undefined,
         transferReason: failedForm.transferReason || undefined,
+        parkName: failedForm.parkName.trim() || undefined,
+        parkLocation: failedForm.parkLocation.trim() || undefined,
+        contactName: failedForm.contactName.trim() || undefined,
+        contactPhone: failedForm.contactPhone.trim() || undefined,
+        contactRole: failedForm.contactRole || undefined,
       },
       timelineDesc: `Failed Delivery: ${reasonText} — stock: ${stockText} — by ${user?.name}`,
     })
@@ -1189,6 +1200,32 @@ export function OrderDetailPage() {
               ))}
             </div>
           </div>
+
+          {failedForm.disposition === 'left_at_park' && (
+            <div className="bg-cyan-50 rounded-xl p-3 space-y-3">
+              <p className="text-xs font-semibold text-cyan-800 uppercase tracking-wide">Holding Details</p>
+              <p className="text-[11px] text-cyan-900">
+                The order closes as Failed Delivery; the product enters the Holding Queue and stays traceable until its next move.
+              </p>
+              <Input label="State Park Name" required placeholder="e.g. Uselu Motor Park, Benin"
+                value={failedForm.parkName} onChange={e => setFailedForm({ ...failedForm, parkName: e.target.value })} />
+              <Input label="Exact Park Location (optional)" placeholder="Shed 4, beside loading bay"
+                value={failedForm.parkLocation} onChange={e => setFailedForm({ ...failedForm, parkLocation: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Contact Name" required
+                  value={failedForm.contactName} onChange={e => setFailedForm({ ...failedForm, contactName: e.target.value })} />
+                <Input label="Contact Phone" type="tel" inputMode="tel" required
+                  value={failedForm.contactPhone} onChange={e => setFailedForm({ ...failedForm, contactPhone: e.target.value })} />
+              </div>
+              <Select label="Contact Role" value={failedForm.contactRole}
+                onChange={e => setFailedForm({ ...failedForm, contactRole: e.target.value })}>
+                <option value="driver">Driver</option>
+                <option value="park_manager">Park Manager</option>
+                <option value="stockkeeper">Stockkeeper</option>
+                <option value="other">Other</option>
+              </Select>
+            </div>
+          )}
 
           {failedForm.disposition === 'transferred_state' && (
             <div className="bg-blue-50 rounded-xl p-3 space-y-3">

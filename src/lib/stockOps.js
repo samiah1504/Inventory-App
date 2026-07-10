@@ -511,18 +511,57 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
       ...fields,
     })
 
-    // ── Left at State Park: goods wait at the park, still held for review ──
+    // ── Left at State Park: the order closes; the product enters the
+    //    Holding Queue and is tracked there until its next move ──
     if (disposition === 'left_at_park') {
-      const targets = reservations.length > 0
-        ? reservations
-        : (order.product_id ? [{ product_id: order.product_id, warehouse_id: null, qty: Number(order.quantity) || 1 }] : [])
-      for (const r of targets) {
+      const items = await getOrderItems(order)
+      const targets = items.length > 0
+        ? items.map(i => ({ product_id: i.product_id, product_name: i.product_name, qty: i.quantity }))
+        : [{ product_id: null, product_name: order.product_name || 'Unknown', qty: Number(order.quantity) || 1 }]
+
+      for (const t of targets) {
+        // Release the reservation — the product no longer belongs to this order
+        const res = reservations.find(r => r.product_id === t.product_id)
+        if (res) {
+          const { data: src } = await supabase.from('inventory').select('*')
+            .eq('product_id', res.product_id).eq('warehouse_id', res.warehouse_id).single()
+          if (src) {
+            await supabase.from('inventory').update({
+              quantity_reserved: Math.max(0, (src.quantity_reserved || 0) - res.qty),
+              quantity_physical: Math.max(0, (src.quantity_physical || 0) - res.qty),
+            }).eq('id', src.id)
+            await movement({
+              product_id: res.product_id, warehouse_id: res.warehouse_id,
+              movement_type: 'reserve_out', quantity: -res.qty,
+              notes: `Left at ${order.state} State Park (holding queue) — ${order.order_number}`,
+            })
+          }
+        }
         await movement({
-          product_id: r.product_id,
-          warehouse_id: r.warehouse_id,
+          product_id: t.product_id,
+          warehouse_id: res?.warehouse_id || null,
           movement_type: 'left_at_park',
           quantity: 0,
           notes: `Left at ${order.state} State Park after failed delivery — ${order.order_number}`,
+        })
+        // Holding queue record (table may not exist yet — best-effort)
+        await supabase.from('holding_queue').insert({
+          product_id: t.product_id,
+          product_name: t.product_name,
+          quantity: t.qty,
+          state: order.state,
+          city: order.city || null,
+          park_name: outcome.parkName || null,
+          park_location: outcome.parkLocation || null,
+          contact_name: outcome.contactName || null,
+          contact_phone: outcome.contactPhone || null,
+          contact_role: outcome.contactRole || null,
+          custodian_id: staff?.id || null,
+          custodian_name: staff?.name || null,
+          source_order_id: order.id,
+          source_order_number: order.order_number,
+          business_id: order.business_id || null,
+          status: 'holding',
         })
       }
       return
