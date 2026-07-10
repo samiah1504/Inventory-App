@@ -84,7 +84,10 @@ export function DeleteStaffPage() {
 
   if (!isCeo) return <Navigate to="/settings" replace />
 
-  const selectedStaff = list.filter(s => selected.includes(s.id))
+  // Deletion targets come from the RAW staff data, never the
+  // search-filtered list — browser autofill once wrote "admin" into
+  // the search box and silently emptied the selection
+  const selectedStaff = (staffQ.data || []).filter(s => selected.includes(s.id))
   const requiredPhrase = selected.length === 1 ? 'DELETE STAFF' : `DELETE ${selected.length} STAFF`
   const canDelete = reason && phrase.trim() === requiredPhrase && password && !running
 
@@ -99,9 +102,28 @@ export function DeleteStaffPage() {
         setRunning(false)
         return
       }
+      // Verify the selected IDs against the database first — the DB
+      // rows are the deletion targets, not client state
+      console.log('[delete-debug] selected staff ids:', selected)
+      const { data: dbStaff, error: verifyErr } = await supabase
+        .from('staff_users').select('*').in('id', selected)
+      console.log('[delete-debug] identifier: staff_users.id (UUID) · db matches:',
+        dbStaff?.length ?? 0, '· verify error:', verifyErr?.message || null)
+
+      if (verifyErr || !dbStaff || dbStaff.length === 0) {
+        setResult({
+          deleted: 0,
+          errors: [verifyErr
+            ? `Could not verify the selection: ${verifyErr.message}`
+            : 'Deletion failed. No selected staff records were found.'],
+        })
+        setRunning(false)
+        return
+      }
+
       const errors = []
       let deleted = 0
-      for (const s of selectedStaff) {
+      for (const s of dbStaff) {
         // Access is destroyed and the profile leaves daily operations,
         // but the row (name) survives so history keeps resolving
         const { error } = await supabase.from('staff_users').update({
@@ -143,11 +165,17 @@ export function DeleteStaffPage() {
         } else {
           errors.push(`${s.name}: the database silently blocked the update — Row Level Security on staff_users is denying writes for the app. Run the RLS fix in supabase/migrations.sql.`)
         }
+        console.log('[delete-debug] staff', s.name, '→', errors[errors.length - 1] || 'deleted')
       }
+      console.log('[delete-debug] staff deleted count:', deleted, 'of', dbStaff.length)
       queryClient.invalidateQueries()
       setSelected([])
       setResult({ deleted, errors })
-      if (deleted > 0) showToast(`${deleted} staff account${deleted !== 1 ? 's' : ''} deleted`, 'success')
+      showToast(
+        deleted > 0
+          ? `${deleted} staff account${deleted !== 1 ? 's' : ''} deleted successfully`
+          : 'Deletion failed — no staff accounts were deleted',
+        deleted > 0 ? 'success' : 'error')
     } finally {
       setRunning(false)
     }
@@ -226,7 +254,7 @@ export function DeleteStaffPage() {
       )}
 
       <Modal isOpen={showConfirm} onClose={() => !running && setShowConfirm(false)}
-        title={result ? 'Deletion Complete' : 'Confirm Staff Deletion'}
+        title={result ? (result.deleted > 0 ? 'Deletion Complete' : 'Deletion Failed') : 'Confirm Staff Deletion'}
         footer={result ? (
           <Button className="w-full" onClick={() => { setShowConfirm(false); setResult(null) }}>Done</Button>
         ) : (
@@ -239,10 +267,16 @@ export function DeleteStaffPage() {
         )}>
         {result ? (
           <div className="space-y-3">
-            <p className="text-sm text-gray-800">
-              <span className="font-bold">{result.deleted}</span> staff account{result.deleted !== 1 ? 's' : ''} deleted.
-              Their history remains under their name, marked (Former Staff).
-            </p>
+            {result.deleted > 0 ? (
+              <p className="text-sm text-gray-800">
+                <span className="font-bold">{result.deleted}</span> staff account{result.deleted !== 1 ? 's' : ''} deleted successfully.
+                Their history remains under their name, marked (Former Staff).
+              </p>
+            ) : (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <p className="text-sm text-red-800">No staff accounts were deleted.</p>
+              </div>
+            )}
             {result.errors.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
                 {result.errors.map((e, i) => <p key={i} className="text-xs text-amber-800">• {e}</p>)}
@@ -253,8 +287,18 @@ export function DeleteStaffPage() {
         <div className="space-y-4">
           <div className="bg-gray-50 rounded-xl p-3">
             <p className="text-xs font-semibold text-gray-700 mb-1.5">
-              Deleting: {selectedStaff.map(s => s.name).join(', ')}
+              Deleting {selectedStaff.length} staff account{selectedStaff.length !== 1 ? 's' : ''}:
             </p>
+            <div className="space-y-1.5 mb-2">
+              {selectedStaff.map(s => (
+                <div key={s.id} className="bg-white rounded-lg px-2.5 py-1.5">
+                  <p className="text-xs font-semibold text-gray-900">{s.name}</p>
+                  <p className="text-[11px] text-gray-500">
+                    {[roleLabel(s.role), s.email, s.staff_code].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+              ))}
+            </div>
             <ul className="text-xs text-gray-600 space-y-1">
               <li>• The account{selectedStaff.length !== 1 ? 's' : ''} will be permanently removed and can no longer log in.</li>
               <li>• They disappear from Staff Management, permissions, assignments and all dropdowns.</li>
@@ -268,7 +312,7 @@ export function DeleteStaffPage() {
             {STAFF_DELETE_REASONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
           </Select>
           <Textarea label="Notes (optional)" rows={2} value={notes} onChange={e => setNotes(e.target.value)} />
-          <Input label="Your Password" type="password" required autoComplete="current-password"
+          <Input label="Your Password" type="password" required autoComplete="new-password"
             value={password} onChange={e => setPassword(e.target.value)}
             placeholder="Re-enter your password to authorise" />
           <Input label={`Type ${requiredPhrase} to confirm`} required

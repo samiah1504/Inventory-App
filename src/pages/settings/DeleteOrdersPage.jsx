@@ -107,7 +107,10 @@ export function DeleteOrdersPage() {
 
   if (!isCeo) return <Navigate to="/settings" replace />
 
-  const selectedOrders = list.filter(o => selected.includes(o.id))
+  // Deletion targets come from the RAW data, never the search-filtered
+  // list — browser autofill once wrote "admin" into the search box,
+  // emptied the filtered list and made every delete a silent no-op
+  const selectedOrders = (ordersQ.data || []).filter(o => selected.includes(o.id))
   const totalValue = selectedOrders.reduce((s, o) => s + Number(o.total_amount || 0), 0)
   const uniqueCustomers = [...new Set(selectedOrders.map(o => o.customer_phone || o.customer_name).filter(Boolean))]
   const requiredPhrase = selected.length === 1 ? 'DELETE ORDER' : `DELETE ${selected.length} ORDERS`
@@ -133,26 +136,51 @@ export function DeleteOrdersPage() {
         setRunning(false)
         return
       }
+      // Verify the selected UUIDs against the database before anything
+      // else — the DB rows are the deletion targets, not client state
+      console.log('[delete-debug] selected ids:', selected)
+      const { data: dbOrders, error: verifyErr } = await supabase
+        .from('orders')
+        .select('*, business:businesses(id, name)')
+        .in('id', selected)
+      console.log('[delete-debug] identifier: orders.id (UUID) · db matches:',
+        dbOrders?.length ?? 0, '· verify error:', verifyErr?.message || null)
+
+      if (verifyErr || !dbOrders || dbOrders.length === 0) {
+        setResult({
+          deleted: 0, warnings: [], outcomes: [],
+          failMessage: verifyErr
+            ? `Could not verify the selection: ${verifyErr.message}`
+            : 'No matching orders were deleted. The selected order identifiers did not match the database records.',
+        })
+        setRunning(false)
+        return
+      }
+
       const warnings = []
       const outcomes = []
       let deleted = 0
-      if (selectedOrders.length === 0) {
-        warnings.push('No orders were selected by the time the delete ran — reselect and try again.')
-      }
-      for (const order of selectedOrders) {
+      for (const order of dbOrders) {
         try {
           const r = await purgeOrder(order, { reason, notes, deleteCustomer }, user)
           warnings.push(...r.warnings)
           outcomes.push({ order: order.order_number, ok: true })
           deleted++
+          console.log('[delete-debug] deleted', order.order_number, order.id)
         } catch (err) {
           outcomes.push({ order: order.order_number, ok: false, message: err?.message || String(err) })
+          console.log('[delete-debug] FAILED', order.order_number, err?.message)
         }
       }
+      console.log('[delete-debug] deleted count:', deleted, 'of', dbOrders.length)
       queryClient.invalidateQueries()
       setSelected([])
       setResult({ deleted, warnings, outcomes })
-      showToast(`${deleted} order${deleted !== 1 ? 's' : ''} permanently deleted`, deleted > 0 ? 'success' : 'error')
+      showToast(
+        deleted > 0
+          ? `${deleted} order${deleted !== 1 ? 's' : ''} deleted successfully`
+          : 'Deletion failed — no orders were deleted',
+        deleted > 0 ? 'success' : 'error')
     } finally {
       setRunning(false)
     }
@@ -323,7 +351,7 @@ export function DeleteOrdersPage() {
 
       {/* Review + confirmation modal */}
       <Modal isOpen={showReview} onClose={() => !running && setShowReview(false)}
-        title={result ? 'Deletion Complete' : 'Review Permanent Deletion'}
+        title={result ? (result.deleted > 0 ? 'Deletion Complete' : 'Deletion Failed') : 'Review Permanent Deletion'}
         footer={result ? (
           <Button className="w-full" onClick={() => { setShowReview(false); setResult(null) }}>Done</Button>
         ) : (
@@ -336,9 +364,15 @@ export function DeleteOrdersPage() {
         )}>
         {result ? (
           <div className="space-y-3">
-            <p className="text-sm text-gray-800">
-              <span className="font-bold">{result.deleted}</span> order{result.deleted !== 1 ? 's' : ''} permanently deleted.
-            </p>
+            {result.failMessage ? (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+                <p className="text-sm text-red-800">{result.failMessage}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-800">
+                <span className="font-bold">{result.deleted}</span> order{result.deleted !== 1 ? 's' : ''} deleted successfully.
+              </p>
+            )}
             {(result.outcomes || []).length > 0 && (
               <div className="bg-gray-50 rounded-xl p-3 space-y-1">
                 {result.outcomes.map((o, i) => (
@@ -407,7 +441,7 @@ export function DeleteOrdersPage() {
             </span>
           </label>
 
-          <Input label="Your Password" type="password" required autoComplete="current-password"
+          <Input label="Your Password" type="password" required autoComplete="new-password"
             value={password} onChange={e => setPassword(e.target.value)}
             placeholder="Re-enter your password to authorise" />
           <Input label={`Type ${requiredPhrase} to confirm`} required

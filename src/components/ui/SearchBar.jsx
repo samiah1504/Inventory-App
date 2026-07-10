@@ -6,6 +6,12 @@ export function SearchBar({ value, onChange, placeholder = 'Search...', classNam
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
       <input
         type="search"
+        // Never a login field: without these, browsers autofill the saved
+        // username into search boxes on pages that also show a password
+        // input (this silently emptied filtered lists during deletions)
+        name="app-search"
+        autoComplete="off"
+        autoCorrect="off"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
