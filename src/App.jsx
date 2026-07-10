@@ -29,6 +29,8 @@ import { SalesAnalyticsPage } from './pages/analytics/SalesAnalyticsPage'
 import { DocumentsPage } from './pages/documents/DocumentsPage'
 import { EditOrderPage } from './pages/orders/EditOrderPage'
 import { AlertsPage } from './pages/settings/AlertsPage'
+import { DeleteOrdersPage } from './pages/settings/DeleteOrdersPage'
+import { DeletedOrderAuditPage } from './pages/settings/DeletedOrderAuditPage'
 import { useAuthStore } from './stores/authStore'
 import { useAppStore } from './stores/appStore'
 import { getQueuedActions, removeQueuedAction } from './lib/offline'
@@ -131,6 +133,8 @@ export default function App() {
             <Route path="/settings/warehouses" element={<WarehousesPage />} />
             <Route path="/settings/products" element={<ProductsPage />} />
             <Route path="/settings/alerts" element={<AlertsPage />} />
+            <Route path="/settings/delete-orders" element={<DeleteOrdersPage />} />
+            <Route path="/settings/deleted-audit" element={<DeletedOrderAuditPage />} />
             <Route path="/orders/:id/edit" element={<EditOrderPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

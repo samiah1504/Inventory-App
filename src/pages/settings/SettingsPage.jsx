@@ -58,6 +58,30 @@ export function SettingsPage() {
           </button>
         ))}
 
+        {/* Advanced — CEO-only destructive administration */}
+        <div className="bg-white rounded-2xl p-4 border border-red-100">
+          <p className="text-xs font-semibold text-red-500 uppercase tracking-wide mb-2">Advanced</p>
+          <p className="text-[11px] text-gray-400 mb-3">
+            Exceptional administrative functions. For real transactions keep using Cancelled, Failed Delivery or Returned.
+          </p>
+          <div className="space-y-2">
+            <button
+              onClick={() => navigate('/settings/delete-orders')}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-red-50 rounded-xl active:scale-[0.99] transition-all"
+            >
+              <span className="text-sm font-semibold text-red-700">Delete Orders</span>
+              <ChevronRight size={16} className="text-red-300" />
+            </button>
+            <button
+              onClick={() => navigate('/settings/deleted-audit')}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-gray-50 rounded-xl active:scale-[0.99] transition-all"
+            >
+              <span className="text-sm font-semibold text-gray-700">Deleted Order Audit</span>
+              <ChevronRight size={16} className="text-gray-300" />
+            </button>
+          </div>
+        </div>
+
         {/* Role preview — see the app exactly as each role does */}
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
           <div className="flex items-center gap-2 mb-1">

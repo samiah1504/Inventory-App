@@ -422,3 +422,22 @@ ALTER TABLE businesses
   ADD COLUMN IF NOT EXISTS bank_name TEXT,
   ADD COLUMN IF NOT EXISTS bank_account_name TEXT,
   ADD COLUMN IF NOT EXISTS bank_account_number TEXT;
+
+-- ===================================================
+-- CEO-only permanent order deletion audit
+-- ===================================================
+CREATE TABLE IF NOT EXISTS deleted_order_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  order_number TEXT,
+  customer_name TEXT,
+  customer_phone TEXT,
+  business_name TEXT,
+  total_amount DECIMAL(15,2),
+  previous_status TEXT,
+  reason TEXT,
+  notes TEXT,
+  customer_deleted BOOLEAN DEFAULT false,
+  deleted_by_id UUID,
+  deleted_by_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
