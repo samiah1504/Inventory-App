@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { Plus, DollarSign, ChevronDown, ChevronUp, Trash2, Pencil, ChevronRight } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -87,12 +87,22 @@ async function fetchExpensesWithOrders({ from, to, isCeo, businessId }) {
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AccountingPage() {
-  const [tab, setTab] = useState('overview')
-  const [showModal, setShowModal]   = useState(false)
+  // Dashboard drill-downs: ?add=1 opens the create form,
+  // ?today=1 opens the list pre-filtered to today
+  const [searchParams] = useSearchParams()
+  const [tab, setTab] = useState(searchParams.get('today') ? 'list' : 'overview')
+  const [showModal, setShowModal]   = useState(searchParams.get('add') === '1')
   const [editingExp, setEditingExp] = useState(null)
   const [expanded, setExpanded]     = useState(null)
   const [openGroup, setOpenGroup]   = useState('business')
-  const [f, setFilters]             = useState(DEFAULT_FILTERS)
+  const [f, setFilters]             = useState(() => {
+    const base = DEFAULT_FILTERS()
+    if (searchParams.get('today')) {
+      const t = iso(new Date())
+      return { ...base, dateFrom: t, dateTo: t }
+    }
+    return base
+  })
   const [form, setForm]             = useState(EMPTY_FORM)
 
   const { user }             = useAuthStore()
