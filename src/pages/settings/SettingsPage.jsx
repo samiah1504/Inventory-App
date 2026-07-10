@@ -20,10 +20,47 @@ const PREVIEW_ROLES = [
   { role: 'inventory',          label: 'Inventory / Warehouse' },
 ]
 
+function maskEmail(email) {
+  if (!email || !email.includes('@')) return null
+  const [local, domain] = email.split('@')
+  return `${local[0]}${'•'.repeat(Math.max(2, local.length - 1))}@${domain}`
+}
+
 export function SettingsPage() {
-  const { user, logout, startPreview } = useAuthStore()
+  const { user, logout, startPreview, updateUser } = useAuthStore()
   const navigate = useNavigate()
+  const { showToast } = useAppStore()
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
+
+  const [recoveryInput, setRecoveryInput] = useState('')
+  const [savingRecovery, setSavingRecovery] = useState(false)
+
+  async function saveRecoveryEmail() {
+    const email = recoveryInput.trim().toLowerCase()
+    if (!/^\S+@\S+\.\S+$/.test(email)) { showToast('Enter a valid email address', 'error'); return }
+    setSavingRecovery(true)
+    try {
+      const { error } = await supabase.from('staff_users')
+        .update({ recovery_email: email }).eq('id', user.id)
+      if (error) throw new Error('Run the password security migration first')
+      // Register the address with Supabase Auth so reset emails can be sent.
+      // "Already registered" is fine — recovery still works.
+      try {
+        await supabase.auth.signUp({
+          email,
+          password: crypto.randomUUID() + 'Xk1!',
+          options: { emailRedirectTo: `${window.location.origin}/login` },
+        })
+      } catch { /* likely already registered */ }
+      updateUser({ recovery_email: email })
+      setRecoveryInput('')
+      showToast('Recovery email saved — confirm it from the inbox if asked', 'success')
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      setSavingRecovery(false)
+    }
+  }
 
   if (!isCeo) return <NonAdminSettings user={user} logout={logout} />
 
@@ -57,6 +94,29 @@ export function SettingsPage() {
             <ChevronRight size={18} className="text-gray-400 shrink-0" />
           </button>
         ))}
+
+        {/* CEO password recovery — private email, never a login identity */}
+        <div className="bg-white rounded-2xl p-4 border border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Password Recovery</p>
+          <p className="text-[11px] text-gray-400 mb-3">
+            A private recovery email for your account only — used by "Forgot password?" on the
+            login page. It is never shown publicly and is not a login identity.
+          </p>
+          {user?.recovery_email && (
+            <p className="text-xs text-gray-600 mb-2">
+              Current: <span className="font-semibold">{maskEmail(user.recovery_email)}</span>
+            </p>
+          )}
+          <div className="flex gap-2">
+            <div className="flex-1 min-w-0">
+              <Input type="email" placeholder={user?.recovery_email ? 'Change recovery email' : 'Set recovery email'}
+                value={recoveryInput} onChange={e => setRecoveryInput(e.target.value)} />
+            </div>
+            <Button size="sm" loading={savingRecovery} disabled={!recoveryInput.trim()} onClick={saveRecoveryEmail}>
+              Save
+            </Button>
+          </div>
+        </div>
 
         {/* Advanced — CEO-only destructive administration */}
         <div className="bg-white rounded-2xl p-4 border border-red-100">

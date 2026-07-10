@@ -58,19 +58,27 @@ export function StaffFormModal({ isOpen, onClose, staff }) {
       if (!payload.role) payload.role = 'customer_support'
 
       const run = async (p) => staff
-        ? supabase.from('staff_users').update(p).eq('id', staff.id)
-        : supabase.from('staff_users').insert(p)
+        ? supabase.from('staff_users').update(p).eq('id', staff.id).select('id').single()
+        : supabase.from('staff_users').insert(p).select('id').single()
 
-      let { error } = await run(payload)
+      let { data: saved, error } = await run(payload)
       if (error && /column/i.test(error.message || '')) {
         // HR migration not run yet — save the legacy fields so nothing is lost
         const legacy = {}
         LEGACY_FIELDS.forEach(k => { if (payload[k] !== undefined) legacy[k] = payload[k] })
         const retry = await run(legacy)
+        saved = retry.data
         error = retry.error
         if (!error) showToast('Saved basic fields — run the latest migration for HR fields', 'info')
       }
       if (error) throw error
+
+      // Replace the plain-text password with a salted hash (no-op
+      // until the password migration adds the hash columns)
+      if (payload.password && saved?.id) {
+        const { tryUpgradeToHash } = await import('../../lib/passwords')
+        await tryUpgradeToHash(saved.id, payload.password)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['staff'] })

@@ -552,10 +552,19 @@ export function StaffDetailPage() {
             </Button>
           </div>
         }>
-        <Input label="New Password" type="text" autoCapitalize="none" required
-          placeholder="Enter new password"
-          value={newPassword} onChange={e => setNewPassword(e.target.value)}
-          hint="Share the new password with the staff member directly — no email needed" />
+        <div className="space-y-3">
+          <Input label="Temporary Password" type="text" autoCapitalize="none" required
+            placeholder="Enter or generate a temporary password"
+            value={newPassword} onChange={e => setNewPassword(e.target.value)}
+            hint="Share it with the staff member directly (WhatsApp/in person) — they must change it at their next login" />
+          <Button variant="secondary" size="sm" className="w-full"
+            onClick={async () => {
+              const { generateTempPassword } = await import('../../lib/passwords')
+              setNewPassword(generateTempPassword())
+            }}>
+            Generate Temporary Password
+          </Button>
+        </div>
       </Modal>
 
       <Modal isOpen={showLeaveForm} onClose={() => setShowLeaveForm(false)} title={`Leave Request — ${staff.name}`}

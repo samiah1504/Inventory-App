@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { supabase } from '../lib/supabase'
+import { verifyStaffPassword, tryUpgradeToHash } from '../lib/passwords'
 
 export const useAuthStore = create(
   persist(
@@ -13,27 +14,39 @@ export const useAuthStore = create(
       login: async (username, password) => {
         set({ loading: true, error: null })
         try {
-          const { data, error } = await supabase
+          const { data: rows, error } = await supabase
             .from('staff_users')
             .select('*')
             .eq('username', username)
-            .eq('password', password)
             .eq('is_active', true)
-            .single()
+            .limit(1)
 
-          if (error || !data) throw new Error('Invalid username or password')
+          const row = rows?.[0]
+          const ok = !error && row && await verifyStaffPassword(row, password)
+          if (!ok) throw new Error('Invalid username or password')
+
+          // Legacy plain-text rows get upgraded to a salted hash here
+          if (!row.password_hash && row.password) await tryUpgradeToHash(row.id, password)
 
           await supabase
             .from('staff_users')
             .update({ last_login: new Date().toISOString() })
-            .eq('id', data.id)
+            .eq('id', row.id)
 
-          set({ user: data, profile: data, loading: false, error: null })
+          // Never keep password material in the persisted session
+          const { password: _p, password_hash: _h, password_salt: _s, ...safeUser } = row
+          set({ user: safeUser, profile: safeUser, loading: false, error: null })
           return { success: true }
         } catch (err) {
           set({ loading: false, error: err.message })
           return { success: false, error: err.message }
         }
+      },
+
+      // Patch the in-memory user (e.g. after a forced password change)
+      updateUser: (patch) => {
+        const { user, profile } = get()
+        if (user) set({ user: { ...user, ...patch }, profile: profile ? { ...profile, ...patch } : profile })
       },
 
       logout: () => {

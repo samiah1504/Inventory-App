@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import { AppShell } from './components/layout/AppShell'
 import { LoginPage } from './pages/auth/LoginPage'
+import { ResetPasswordPage } from './pages/auth/ResetPasswordPage'
+import { ChangePasswordPage } from './pages/auth/ChangePasswordPage'
 import { DashboardPage } from './pages/dashboard/DashboardPage'
 import { OrdersPage } from './pages/orders/OrdersPage'
 import { NewOrderPage } from './pages/orders/NewOrderPage'
@@ -50,6 +52,8 @@ const queryClient = new QueryClient({
 function ProtectedRoute({ children }) {
   const { user } = useAuthStore()
   if (!user) return <Navigate to="/login" replace />
+  // Temporary-password logins must set a real password first
+  if (user.must_change_password) return <Navigate to="/change-password" replace />
   return children
 }
 
@@ -107,6 +111,8 @@ export default function App() {
         <AppInit />
         <Routes>
           <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/change-password" element={user ? <ChangePasswordPage /> : <Navigate to="/login" replace />} />
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/orders" element={<OrdersPage />} />

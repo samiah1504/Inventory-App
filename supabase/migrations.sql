@@ -441,3 +441,13 @@ CREATE TABLE IF NOT EXISTS deleted_order_audit (
   deleted_by_name TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ===================================================
+-- Password security: hashed passwords, forced change,
+-- CEO recovery email
+-- ===================================================
+ALTER TABLE staff_users
+  ADD COLUMN IF NOT EXISTS password_hash TEXT,
+  ADD COLUMN IF NOT EXISTS password_salt TEXT,
+  ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS recovery_email TEXT;

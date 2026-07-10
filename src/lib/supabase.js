@@ -7,6 +7,9 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: false
+    // CEO password-recovery links land on /reset-password with the
+    // session in the URL hash; implicit flow works across devices
+    detectSessionInUrl: true,
+    flowType: 'implicit'
   }
 })

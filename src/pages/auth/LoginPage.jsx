@@ -2,17 +2,42 @@ import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
+import { supabase } from '../../lib/supabase'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
+import { Modal } from '../../components/ui/Modal'
 
 export function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [errors, setErrors] = useState({})
+  const [showForgot, setShowForgot] = useState(false)
+  const [forgotUsername, setForgotUsername] = useState('')
+  const [forgotState, setForgotState] = useState('idle') // idle | sending | sent
   const { login, loading, error } = useAuthStore()
   const navigate = useNavigate()
   const passwordRef = useRef(null)
+
+  // Recovery is CEO-only via a private recovery email. Whatever the
+  // username, the response is identical — existence is never revealed.
+  async function handleForgot() {
+    setForgotState('sending')
+    try {
+      const { data } = await supabase.from('staff_users')
+        .select('recovery_email, role')
+        .eq('username', forgotUsername.trim().toLowerCase())
+        .eq('is_active', true)
+        .limit(1)
+      const row = data?.[0]
+      if (row?.recovery_email && ['ceo', 'super_admin'].includes(row.role)) {
+        await supabase.auth.resetPasswordForEmail(row.recovery_email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        })
+      }
+    } catch { /* neutral response regardless */ }
+    setForgotState('sent')
+  }
 
   useEffect(() => {
     // Demo: prefill for easy testing
@@ -95,11 +120,51 @@ export function LoginPage() {
           </Button>
         </form>
 
-        <div className="mt-6 p-4 bg-blue-50 rounded-xl">
+        <button
+          type="button"
+          onClick={() => { setForgotUsername(''); setForgotState('idle'); setShowForgot(true) }}
+          className="w-full text-center text-xs text-gray-400 mt-4 py-1"
+        >
+          Forgot password?
+        </button>
+
+        <div className="mt-4 p-4 bg-blue-50 rounded-xl">
           <p className="text-xs text-blue-700 font-medium">Demo credentials:</p>
           <p className="text-xs text-blue-600">Username: admin · Password: admin123</p>
         </div>
       </div>
+
+      {/* Forgot password — neutral response, recovery email never shown */}
+      <Modal isOpen={showForgot} onClose={() => setShowForgot(false)} title="Forgot Password"
+        footer={forgotState === 'sent' ? (
+          <Button className="w-full" onClick={() => setShowForgot(false)}>Close</Button>
+        ) : (
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowForgot(false)}>Cancel</Button>
+            <Button className="flex-1" loading={forgotState === 'sending'}
+              disabled={!forgotUsername.trim()} onClick={handleForgot}>
+              Send Reset Link
+            </Button>
+          </div>
+        )}>
+        {forgotState === 'sent' ? (
+          <p className="text-sm text-gray-700">
+            If this username has a recovery method configured, reset instructions have been sent.
+            Check the recovery inbox — the link expires after a short time.
+          </p>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-500">
+              Enter your username. If a recovery method is configured for the account,
+              reset instructions will be sent to it. Staff without recovery should ask
+              the CEO to reset their password from Staff Management.
+            </p>
+            <Input label="Username" autoCapitalize="none" autoCorrect="off"
+              value={forgotUsername} onChange={e => setForgotUsername(e.target.value)}
+              placeholder="Enter your username" />
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

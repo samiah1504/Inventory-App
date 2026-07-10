@@ -185,11 +185,22 @@ function useHrMutation(fn, invalidate, successMsg) {
 
 export function useResetPassword() {
   return useHrMutation(async ({ staff_id, password }) => {
-    const { error } = await supabase.from('staff_users')
-      .update({ password, updated_at: new Date().toISOString() })
-      .eq('id', staff_id)
+    // Store as a salted hash and force a change at next login; falls
+    // back to a plain write until the password migration is run
+    const { passwordUpdatePayload } = await import('../lib/passwords')
+    const payload = await passwordUpdatePayload(password, {
+      must_change_password: true,
+      updated_at: new Date().toISOString(),
+    })
+    let { error } = await supabase.from('staff_users').update(payload).eq('id', staff_id)
+    if (error && /column/i.test(error.message || '')) {
+      const retry = await supabase.from('staff_users')
+        .update({ password, updated_at: new Date().toISOString() })
+        .eq('id', staff_id)
+      error = retry.error
+    }
     if (error) throw error
-  }, ['staff', 'staff_member'], 'Password reset')
+  }, ['staff', 'staff_member'], 'Temporary password set — staff must change it at next login')
 }
 
 export function useSetStaffStatus() {

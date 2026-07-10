@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { resolveOrderStock } from './stockOps'
+import { verifyStaffPassword } from './passwords'
 
 // ═══════════════════════════════════════════════════════════════════
 // CEO-only permanent order deletion.
@@ -16,14 +17,14 @@ export const DELETE_REASONS = [
   { value: 'other',        label: 'Other' },
 ]
 
-// Re-authentication against the staff record (custom auth scheme)
+// Re-authentication against the staff record (hashed or legacy plain)
 export async function verifyPassword(user, password) {
   if (!user?.id || !password) return false
   try {
     const { data, error } = await supabase.from('staff_users')
-      .select('id').eq('id', user.id).eq('password', password).eq('is_active', true).limit(1)
-    if (error) return false
-    return (data || []).length > 0
+      .select('*').eq('id', user.id).eq('is_active', true).limit(1)
+    if (error || !data?.[0]) return false
+    return await verifyStaffPassword(data[0], password)
   } catch { return false }
 }
 
