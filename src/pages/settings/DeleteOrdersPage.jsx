@@ -45,6 +45,8 @@ export function DeleteOrdersPage() {
   const [phrase, setPhrase] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState(null)
+  const [selfTest, setSelfTest] = useState(null)
+  const [testing, setTesting] = useState(false)
 
   // Hard gate: CEO / Super Admin only — and never inside a role preview
   const isCeo = ['ceo', 'super_admin'].includes(user?.role) && !user?._preview && !realUser
@@ -125,23 +127,70 @@ export function DeleteOrdersPage() {
         return
       }
       const warnings = []
+      const outcomes = []
       let deleted = 0
+      if (selectedOrders.length === 0) {
+        warnings.push('No orders were selected by the time the delete ran — reselect and try again.')
+      }
       for (const order of selectedOrders) {
         try {
           const r = await purgeOrder(order, { reason, notes, deleteCustomer }, user)
           warnings.push(...r.warnings)
+          outcomes.push({ order: order.order_number, ok: true })
           deleted++
         } catch (err) {
-          warnings.push(err.message)
+          outcomes.push({ order: order.order_number, ok: false, message: err?.message || String(err) })
         }
       }
       queryClient.invalidateQueries()
       setSelected([])
-      setResult({ deleted, warnings })
+      setResult({ deleted, warnings, outcomes })
       showToast(`${deleted} order${deleted !== 1 ? 's' : ''} permanently deleted`, deleted > 0 ? 'success' : 'error')
     } finally {
       setRunning(false)
     }
+  }
+
+  // One-tap diagnosis: run the full deletion cycle on a throwaway
+  // test order and report every raw result
+  async function runSelfTest() {
+    setTesting(true)
+    const report = []
+    const add = (step, ok, detail) => report.push({ step, ok, detail: detail || null })
+    try {
+      const a = await supabase.from('deleted_order_audit').select('id').limit(1)
+      add('Audit table exists', !a.error, a.error?.message)
+      const b = await supabase.from('staff_users').select('is_deleted').limit(1)
+      add('Staff deletion columns exist', !b.error, b.error?.message)
+
+      const num = `TEST-DEL-${Date.now()}`
+      const ins = await supabase.from('orders').insert({
+        order_number: num, customer_name: 'Deletion Self-Test', customer_phone: '0000000000',
+        state: 'Lagos', product_name: 'Self Test Product', quantity: 1,
+        unit_price: 0, total_amount: 0, status: 'cancelled',
+      }).select('id').single()
+      add('Create test order', !ins.error, ins.error?.message || num)
+
+      if (ins.data?.id) {
+        const del = await supabase.from('orders').delete().eq('id', ins.data.id)
+        add('Database accepted the delete command', !del.error, del.error?.message)
+        const chk = await supabase.from('orders').select('id').eq('id', ins.data.id)
+        const gone = !chk.error && (chk.data || []).length === 0
+        add('Test order is really gone', gone,
+          gone ? null : 'The row still exists — something in the database is still blocking deletes on orders')
+      }
+
+      const su = await supabase.from('staff_users')
+        .update({ updated_at: new Date().toISOString() }).eq('id', (realUser || user).id).select('id')
+      const suOk = !su.error && (su.data || []).length > 0
+      add('Staff table accepts updates', suOk,
+        su.error?.message || (suOk ? null : '0 rows updated — the database is blocking staff updates'))
+    } catch (err) {
+      add('Unexpected failure', false, err?.message || String(err))
+    }
+    queryClient.invalidateQueries({ queryKey: ['delete_orders_list'] })
+    setSelfTest(report)
+    setTesting(false)
   }
 
   return (
@@ -193,6 +242,34 @@ export function DeleteOrdersPage() {
             Permanent deletion is for test, duplicate, mistaken or corrupted records only.
             For real transactions use Cancelled, Failed Delivery or Returned. Deletion cannot be undone.
           </p>
+        </div>
+
+        {/* Deletion self-test — creates and deletes a throwaway order */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold text-gray-700">Deletion Self-Test</p>
+              <p className="text-[11px] text-gray-400">
+                Checks the database end to end · App build {new Date(__BUILD_TIME__).toLocaleString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+            <Button size="sm" variant="secondary" loading={testing} onClick={runSelfTest}>Run Test</Button>
+          </div>
+          {selfTest && (
+            <div className="mt-3 space-y-1.5 border-t border-gray-50 pt-2">
+              {selfTest.map((r, i) => (
+                <div key={i}>
+                  <p className={`text-xs font-medium ${r.ok ? 'text-green-700' : 'text-red-700'}`}>
+                    {r.ok ? '✓' : '✗'} {r.step}
+                  </p>
+                  {r.detail && <p className="text-[11px] text-gray-500 ml-4 break-words">{r.detail}</p>}
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-400 pt-1">
+                If anything shows ✗, screenshot this panel — it names the exact blocker.
+              </p>
+            </div>
+          )}
         </div>
 
         {ordersQ.isLoading ? <SkeletonList count={6} /> :
@@ -254,8 +331,19 @@ export function DeleteOrdersPage() {
           <div className="space-y-3">
             <p className="text-sm text-gray-800">
               <span className="font-bold">{result.deleted}</span> order{result.deleted !== 1 ? 's' : ''} permanently deleted.
-              Inventory, reports and totals now exclude {result.deleted !== 1 ? 'them' : 'it'}.
             </p>
+            {(result.outcomes || []).length > 0 && (
+              <div className="bg-gray-50 rounded-xl p-3 space-y-1">
+                {result.outcomes.map((o, i) => (
+                  <div key={i}>
+                    <p className={`text-xs font-medium ${o.ok ? 'text-green-700' : 'text-red-700'}`}>
+                      {o.ok ? '✓' : '✗'} {o.order}{o.ok ? ' — deleted' : ' — failed'}
+                    </p>
+                    {o.message && <p className="text-[11px] text-gray-500 ml-4 break-words">{o.message}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
             {result.warnings.length > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
                 <p className="text-xs font-semibold text-amber-800">Needs your attention:</p>
