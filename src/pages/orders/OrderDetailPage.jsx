@@ -846,6 +846,11 @@ export function OrderDetailPage() {
             <p className="mt-1 text-[11px] opacity-80">
               Processing = stock already at destination · Awaiting Waybill = ship from Lagos
             </p>
+            <button
+              onClick={() => navigate('/my-stock')}
+              className="mt-2 w-full py-2 bg-white/70 rounded-lg text-[11px] font-semibold text-gray-700 active:scale-95 transition-all">
+              Open My Warehouse Stock
+            </button>
           </div>
         )}
         {order.status === 'arrived_at_park' && (

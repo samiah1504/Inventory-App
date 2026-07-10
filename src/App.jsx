@@ -11,6 +11,7 @@ import { FulfillmentPage } from './pages/orders/FulfillmentPage'
 import { WaybillPage } from './pages/waybill/WaybillPage'
 import { WaybillBatchDetailPage } from './pages/waybill/WaybillBatchDetailPage'
 import { InventoryPage } from './pages/inventory/InventoryPage'
+import { MyWarehouseStockPage } from './pages/inventory/MyWarehouseStockPage'
 import { HoldingQueuePage } from './pages/holding/HoldingQueuePage'
 import { CustomersPage } from './pages/customers/CustomersPage'
 import { CustomerDetailPage } from './pages/customers/CustomerDetailPage'
@@ -113,6 +114,7 @@ export default function App() {
             <Route path="/waybill" element={<WaybillPage />} />
             <Route path="/waybill/batches/:id" element={<WaybillBatchDetailPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/my-stock" element={<MyWarehouseStockPage />} />
             <Route path="/holding" element={<HoldingQueuePage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/customers/:id" element={<CustomerDetailPage />} />

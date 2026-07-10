@@ -264,6 +264,13 @@ export function FulfillmentDashboard() {
         </div>
 
         <button
+          onClick={() => navigate('/my-stock')}
+          className="w-full py-3.5 bg-white border border-gray-200 text-gray-800 rounded-2xl font-semibold text-sm active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          <Package size={16} /> My Warehouse Stock
+        </button>
+
+        <button
           onClick={() => navigate('/orders')}
           className="w-full py-3.5 bg-blue-600 text-black rounded-2xl font-semibold text-sm active:scale-95 transition-all"
         >
