@@ -79,6 +79,7 @@ export function OrderDetailPage() {
     parkName: '', parkLocation: '', contactName: '', contactPhone: '', contactRole: 'driver',
   })
   const [cancelReason, setCancelReason] = useState('')
+  const [cancelNotes, setCancelNotes] = useState('')
   const [returnReason, setReturnReason] = useState('')
   const [returnExtra, setReturnExtra] = useState({ condition: 'good', photos: '' })
   const [showDecisionModal, setShowDecisionModal] = useState(false)
@@ -114,6 +115,24 @@ export function OrderDetailPage() {
         return { hasWarehouse: true, available }
       } catch { return null }
     },
+  })
+
+  // Fulfillment officer(s) responsible for this order's state — shown
+  // read-only so support can tell the customer who is handling delivery
+  const orderOfficersQ = useQuery({
+    queryKey: ['order_officers', order?.state],
+    enabled: !!order?.state,
+    queryFn: async () => {
+      try {
+        const { data, error } = await supabase.from('staff_users')
+          .select('id, name, assigned_states')
+          .eq('role', 'fulfillment').eq('is_active', true)
+        if (error) throw error
+        return (data || []).filter(o =>
+          Array.isArray(o.assigned_states) && o.assigned_states.includes(order.state))
+      } catch { return [] }
+    },
+    staleTime: 60000,
   })
 
   if (isLoading) return (
@@ -346,6 +365,7 @@ export function OrderDetailPage() {
       reason = returnReason
       extra = { return_reason: reason }
     }
+    const cancelNote = pendingStatus === 'cancelled' && cancelNotes.trim() ? ` · ${cancelNotes.trim()}` : ''
     await updateStatus.mutateAsync({
       id: order.id,
       status: pendingStatus,
@@ -354,7 +374,7 @@ export function OrderDetailPage() {
         return_condition: returnExtra.condition,
         return_photos: returnExtra.photos.trim() || null,
       } : undefined,
-      timelineDesc: `${statusLabel(pendingStatus)}: ${reason}${pendingStatus === 'returned' ? ` · condition: ${returnExtra.condition.replace(/_/g, ' ')}` : ''} — by ${user?.name} (${user?.role})`,
+      timelineDesc: `${statusLabel(pendingStatus)}: ${reason}${cancelNote}${pendingStatus === 'returned' ? ` · condition: ${returnExtra.condition.replace(/_/g, ' ')}` : ''} — by ${user?.name} (${user?.role})`,
     })
     setShowReasonModal(false)
     setCancelReason('')
@@ -528,9 +548,20 @@ export function OrderDetailPage() {
               </button>
             )}
             {canChangeStatus && (
-              <Button size="sm" onClick={() => setShowStatusModal(true)}>
-                Status
-              </Button>
+              user?.role === 'customer_support' ? (
+                // Support's only operational action: cancel with a reason.
+                // Every other status change belongs to waybill/fulfillment.
+                <Button size="sm" variant="danger" onClick={() => {
+                  setCancelReason(''); setCancelNotes('')
+                  setPendingStatus('cancelled'); setShowReasonModal(true)
+                }}>
+                  Cancel Order
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setShowStatusModal(true)}>
+                  Status
+                </Button>
+              )
             )}
           </div>
         }
@@ -545,6 +576,12 @@ export function OrderDetailPage() {
               <StatusBadge status={order.status} />
               <span className="text-xs text-gray-400">{formatDateTime(order.updated_at)}</span>
             </div>
+            {(orderOfficersQ.data || []).length > 0 && (
+              <p className="text-[11px] text-gray-400 mb-2 -mt-1">
+                Fulfillment officer{orderOfficersQ.data.length !== 1 ? 's' : ''} ({order.state}):{' '}
+                {orderOfficersQ.data.map(o => o.name).join(', ')}
+              </p>
+            )}
             {order.status === 'partially_paid' && (
               <div className="mt-2 p-3 bg-amber-50 rounded-xl">
                 <p className="text-xs text-amber-700">
@@ -1054,6 +1091,15 @@ export function OrderDetailPage() {
             rows={4}
             required
           />
+          {pendingStatus === 'cancelled' && (
+            <Textarea
+              label="Notes (optional)"
+              placeholder="Anything else worth recording..."
+              value={cancelNotes}
+              onChange={e => setCancelNotes(e.target.value)}
+              rows={2}
+            />
+          )}
           {pendingStatus === 'returned' && (
             <>
               <Select label="Condition of Product" required value={returnExtra.condition}
