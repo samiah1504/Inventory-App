@@ -11,6 +11,7 @@ import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
+import { accessFor } from '../../hooks/useStaff'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 
@@ -171,9 +172,11 @@ export function AccountingPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // Fulfillment officers record and manage only their own business
-  // expenses — they never see the full accounting module
-  if (user?.role === 'fulfillment') return <Navigate to="/my-expenses" replace />
+  // The full accounting module — everyone's expenses — is only for
+  // roles with accounting access (CEO, super admin, ops manager,
+  // accountant, or an explicit tick). Everyone else records and sees
+  // only their own business expenses.
+  if (!accessFor(user).includes('accounting')) return <Navigate to="/my-expenses" replace />
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
