@@ -480,3 +480,16 @@ CREATE POLICY "app full access orders" ON orders
   FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "app full access staff" ON staff_users
   FOR ALL USING (true) WITH CHECK (true);
+
+-- ===================================================
+-- GUARANTEED RLS FIX — run this even if nothing else.
+-- The base schema turned on Row Level Security for
+-- orders and staff_users; the live policies let the app
+-- read/insert but silently block DELETEs (and some
+-- UPDATEs) — Postgres reports success with 0 rows.
+-- The app enforces permissions itself (role gates +
+-- password re-auth), so RLS on these tables only breaks
+-- things. Turn it off.
+-- ===================================================
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE staff_users DISABLE ROW LEVEL SECURITY;

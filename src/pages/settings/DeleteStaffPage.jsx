@@ -126,10 +126,22 @@ export function DeleteStaffPage() {
             is_active: false, status: 'inactive', password: null,
             updated_at: new Date().toISOString(),
           }).eq('id', s.id)
-          if (fallback.error) errors.push(`${s.name}: ${fallback.error.message}`)
-          else errors.push(`${s.name}: access removed, but run the staff deletion migration to finish the delete.`)
-        } else {
+          if (fallback.error) {
+            errors.push(`${s.name}: ${fallback.error.message}`)
+            continue
+          }
+        }
+        // Trust nothing: confirm the change actually stuck — RLS can
+        // block writes silently (0 rows affected, no error)
+        const { data: checkRows } = await supabase.from('staff_users')
+          .select('*').eq('id', s.id).limit(1)
+        const after = checkRows?.[0]
+        if (after?.is_deleted) {
           deleted++
+        } else if (after && after.is_active === false) {
+          errors.push(`${s.name}: access removed, but run the staff deletion migration to finish the delete.`)
+        } else {
+          errors.push(`${s.name}: the database silently blocked the update — Row Level Security on staff_users is denying writes for the app. Run the RLS fix in supabase/migrations.sql.`)
         }
       }
       queryClient.invalidateQueries()
