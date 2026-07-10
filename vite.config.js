@@ -14,8 +14,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icons/*.png'],
       manifest: {
-        name: 'Kanziy Operations',
-        short_name: 'KanziyOps',
+        name: 'MaalOps',
+        short_name: 'MaalOps',
         description: 'Internal Operations Management System',
         theme_color: '#1e40af',
         background_color: '#ffffff',

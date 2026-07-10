@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { User, Lock, Eye, EyeOff } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
@@ -39,12 +39,6 @@ export function LoginPage() {
     setForgotState('sent')
   }
 
-  useEffect(() => {
-    // Demo: prefill for easy testing
-    setUsername('admin')
-    setPassword('admin123')
-  }, [])
-
   async function handleSubmit(e) {
     e.preventDefault()
     const errs = {}
@@ -61,9 +55,9 @@ export function LoginPage() {
       {/* Header */}
       <div className="flex-1 flex flex-col items-center justify-center px-6 pt-12 pb-6">
         <div className="w-20 h-20 bg-white/20 rounded-3xl flex items-center justify-center mb-6 backdrop-blur">
-          <span className="text-4xl">📦</span>
+          <span className="text-4xl font-bold text-white tracking-tight">M</span>
         </div>
-        <h1 className="text-3xl font-bold text-white mb-1">Kanziy Ops</h1>
+        <h1 className="text-3xl font-bold text-white mb-1">MaalOps</h1>
         <p className="text-blue-200 text-sm">Internal Operations System</p>
       </div>
 
@@ -127,11 +121,6 @@ export function LoginPage() {
         >
           Forgot password?
         </button>
-
-        <div className="mt-4 p-4 bg-blue-50 rounded-xl">
-          <p className="text-xs text-blue-700 font-medium">Demo credentials:</p>
-          <p className="text-xs text-blue-600">Username: admin · Password: admin123</p>
-        </div>
       </div>
 
       {/* Forgot password — neutral response, recovery email never shown */}
