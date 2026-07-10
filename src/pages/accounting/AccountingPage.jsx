@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Plus, DollarSign, ChevronDown, ChevronUp, TrendingUp, Trash2, Pencil } from 'lucide-react'
+import { Plus, DollarSign, ChevronDown, ChevronUp, Trash2, Pencil } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
+import { SearchBar } from '../../components/ui/SearchBar'
 import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
 import { Input, Select, Textarea } from '../../components/ui/Input'
@@ -17,8 +18,6 @@ import { formatCurrency, formatDate } from '../../utils/format'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const REVENUE_STATUSES = ['paid', 'partially_paid']
-
 const EXPENSE_TYPES = [
   'delivery', 'installation', 'offloading', 'waybill',
   'supplier_payment', 'rent', 'salary', 'ads', 'electricity',
@@ -29,27 +28,51 @@ const ADMIN_ONLY_TYPES = [
   'supplier_payment', 'rent', 'salary', 'ads', 'electricity', 'fuel', 'office', 'marketing',
 ]
 
+const PAYMENT_METHODS = [
+  { value: 'cash',          label: 'Cash' },
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'card',          label: 'Card' },
+  { value: 'pos',           label: 'POS' },
+  { value: 'other',         label: 'Other' },
+]
+
+const SORTS = [
+  { value: 'newest',  label: 'Newest' },
+  { value: 'oldest',  label: 'Oldest' },
+  { value: 'highest', label: 'Highest Amount' },
+  { value: 'lowest',  label: 'Lowest Amount' },
+]
+
+const typeLabel = (t) => (t || '').replace(/_/g, ' ')
+
+const EMPTY_FORM = {
+  business_id: '', expense_type: 'misc', amount: '', description: '',
+  date: new Date().toISOString().split('T')[0], notes: '',
+  paid_to: '', payment_method: 'cash',
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function AccountingPage() {
-  const [showModal, setShowModal]             = useState(false)
-  const [editingExp, setEditingExp]           = useState(null)
-  const [showExpenseSummary, setShowExpenseSummary] = useState(false)
+  const [showModal, setShowModal]   = useState(false)
+  const [editingExp, setEditingExp] = useState(null)
+  const [expanded, setExpanded]     = useState(null)
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
   })
-  const [dateTo,   setDateTo]   = useState(new Date().toISOString().split('T')[0])
-  const [businessFilter, setBusinessFilter]   = useState('')
-  const [form, setForm] = useState({
-    business_id: '', expense_type: 'misc', amount: '', description: '',
-    date: new Date().toISOString().split('T')[0], notes: '', is_admin_only: false,
-  })
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0])
+  const [businessFilter, setBusinessFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [statusFilter, setStatusFilter]     = useState('')
+  const [search, setSearch] = useState('')
+  const [sort, setSort]     = useState('newest')
+  const [form, setForm]     = useState(EMPTY_FORM)
 
-  const { user }          = useAuthStore()
+  const { user }             = useAuthStore()
   const { data: businesses } = useBusinesses()
-  const { showToast }     = useAppStore()
-  const queryClient       = useQueryClient()
-  const isCeo             = ['ceo', 'super_admin'].includes(user?.role)
+  const { showToast }        = useAppStore()
+  const queryClient          = useQueryClient()
+  const isCeo                = ['ceo', 'super_admin'].includes(user?.role)
 
   // ── Expenses query ────────────────────────────────────────────────────────
 
@@ -58,7 +81,7 @@ export function AccountingPage() {
     queryFn: async () => {
       let q = supabase.from('expenses').select('*, business:businesses(name)')
         .gte('date', dateFrom).lte('date', dateTo)
-        .order('date', { ascending: false }).limit(200)
+        .order('date', { ascending: false }).limit(300)
       if (!isCeo) q = q.eq('is_admin_only', false)
       if (businessFilter) q = q.eq('business_id', businessFilter)
       const { data, error } = await q
@@ -68,69 +91,64 @@ export function AccountingPage() {
     staleTime: 30000,
   })
 
-  // ── Orders query for P&L ──────────────────────────────────────────────────
-
-  const ordersForPL = useQuery({
-    queryKey: ['accounting_orders_pl', dateFrom, dateTo, businessFilter],
+  // Staff names for "Created By" (deleted accounts shown as former staff)
+  const staffQ = useQuery({
+    queryKey: ['expense_staff_names'],
     queryFn: async () => {
       try {
-        let q = supabase
-          .from('orders')
-          .select('id, total_amount, amount_paid, status, business_id')
-          .gte('created_at', `${dateFrom}T00:00:00`)
-          .lte('created_at', `${dateTo}T23:59:59`)
-        if (businessFilter) q = q.eq('business_id', businessFilter)
-        const { data, error } = await q
+        const { data, error } = await supabase.from('staff_users').select('*')
         if (error) throw error
-        return data || []
-      } catch { return [] }
+        return new Map((data || []).map(s =>
+          [s.id, s.is_deleted ? `${s.name} (Former Staff)` : s.name]))
+      } catch { return new Map() }
     },
-    staleTime: 60000,
+    staleTime: 60000 * 5,
   })
+  const staffName = (id) => (id && staffQ.data?.get(id)) || null
 
-  // ── Add expense mutation ──────────────────────────────────────────────────
+  // ── Save (create / CEO edit) ──────────────────────────────────────────────
 
-  const addExpense = useMutation({
+  const saveExpense = useMutation({
     mutationFn: async (data) => {
       const isAdminType = ADMIN_ONLY_TYPES.includes(data.expense_type)
       const flags = { is_admin_only: isAdminType, category: isAdminType ? 'admin' : 'operational' }
+      const core = {
+        business_id: data.business_id,
+        expense_type: data.expense_type,
+        amount: Number(data.amount),
+        description: data.description || null,
+        date: data.date,
+        notes: data.notes || null,
+        ...flags,
+      }
+      // Newer columns — best-effort so saves work pre-migration
+      const extras = {
+        paid_to: data.paid_to || null,
+        payment_method: data.payment_method || null,
+        created_by_name: user?.name || null,
+      }
       if (editingExp) {
-        // CEO can correct any expense; the edit is stamped
-        const { error } = await supabase.from('expenses').update({
-          business_id: data.business_id,
-          expense_type: data.expense_type,
-          amount: Number(data.amount),
-          description: data.description || null,
-          date: data.date,
-          notes: data.notes || null,
-          ...flags,
-        }).eq('id', editingExp.id)
+        const { error } = await supabase.from('expenses').update(core).eq('id', editingExp.id)
         if (error) throw error
-        // Audit columns may predate the migration — best-effort
         await supabase.from('expenses').update({
+          paid_to: data.paid_to || null,
+          payment_method: data.payment_method || null,
           last_edited_by: user?.name || null,
           last_edited_at: new Date().toISOString(),
         }).eq('id', editingExp.id)
       } else {
-        const { error } = await supabase.from('expenses').insert({
-          ...data,
-          amount: Number(data.amount),
-          ...flags,
-          staff_id: user?.id,
-        })
+        const { data: created, error } = await supabase.from('expenses')
+          .insert({ ...core, staff_id: user?.id }).select('id').single()
         if (error) throw error
+        if (created) await supabase.from('expenses').update(extras).eq('id', created.id)
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] })
-      queryClient.invalidateQueries({ queryKey: ['accounting_orders_pl'] })
       showToast(editingExp ? 'Expense updated' : 'Expense added', 'success')
       setShowModal(false)
       setEditingExp(null)
-      setForm({
-        business_id: '', expense_type: 'misc', amount: '', description: '',
-        date: new Date().toISOString().split('T')[0], notes: '', is_admin_only: false,
-      })
+      setForm(EMPTY_FORM)
     },
     onError: (err) => showToast(err.message, 'error'),
   })
@@ -141,62 +159,66 @@ export function AccountingPage() {
     mutationFn: async (id) => {
       const { error } = await supabase.from('expenses').delete().eq('id', id)
       if (error) throw error
+      const { data: still } = await supabase.from('expenses').select('id').eq('id', id).limit(1)
+      if (still && still.length > 0) throw new Error('The database blocked the delete')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] })
-      showToast('Expense permanently removed', 'success')
+      showToast('Expense deleted', 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
   })
 
-  // ── Derived values ────────────────────────────────────────────────────────
+  // ── Derived list: search, category/status filters, sorting ───────────────
 
-  // Voided expenses stay listed for audit but never count in totals
-  const expListAll   = expenses || []
-  const expList      = expListAll.filter(e => e.status !== 'voided')
-  const orderList    = ordersForPL.data || []
+  const expListAll = expenses || []
 
-  const totalExpenses  = expList.reduce((s, e) => s + Number(e.amount), 0)
-  const adminExpenses  = expList.filter(e =>  e.is_admin_only)
-  const opsExpenses    = expList.filter(e => !e.is_admin_only)
-  const adminTotal     = adminExpenses.reduce((s, e) => s + Number(e.amount), 0)
+  const list = useMemo(() => {
+    let l = expListAll
+    if (categoryFilter) l = l.filter(e => e.expense_type === categoryFilter)
+    if (statusFilter === 'active') l = l.filter(e => e.status !== 'voided')
+    if (statusFilter === 'voided') l = l.filter(e => e.status === 'voided')
+    if (search) {
+      const q = search.toLowerCase()
+      l = l.filter(e =>
+        (e.description || '').toLowerCase().includes(q) ||
+        (e.business?.name || '').toLowerCase().includes(q) ||
+        typeLabel(e.expense_type).toLowerCase().includes(q) ||
+        (staffName(e.staff_id) || e.created_by_name || '').toLowerCase().includes(q) ||
+        (e.paid_to || '').toLowerCase().includes(q))
+    }
+    const sorted = [...l]
+    if (sort === 'newest')  sorted.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+    if (sort === 'oldest')  sorted.sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    if (sort === 'highest') sorted.sort((a, b) => Number(b.amount) - Number(a.amount))
+    if (sort === 'lowest')  sorted.sort((a, b) => Number(a.amount) - Number(b.amount))
+    return sorted
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expListAll, categoryFilter, statusFilter, search, sort, staffQ.data])
 
-  const grossSales = orderList
-    .filter(o => REVENUE_STATUSES.includes(o.status))
-    .reduce((s, o) => s + Number(o.total_amount || 0), 0)
+  // Summary counts active records only; voided stay listed for audit
+  const activeList = list.filter(e => e.status !== 'voided')
+  const totalExpenses = activeList.reduce((s, e) => s + Number(e.amount || 0), 0)
+  const voidedCount = list.filter(e => e.status === 'voided').length
 
-  const cashCollected = orderList
-    .filter(o => ['paid', 'partially_paid'].includes(o.status))
-    .reduce((s, o) => s + Number(o.amount_paid || 0), 0)
-
-  const plNetProfit = grossSales - totalExpenses
-  const plMargin    = grossSales > 0 ? (plNetProfit / grossSales) * 100 : 0
-
-  // Expense type totals
-  const byExpenseType = useMemo(() => {
-    const map = {}
-    expList.forEach(e => { map[e.expense_type] = (map[e.expense_type] || 0) + Number(e.amount) })
-    return Object.entries(map).sort(([, a], [, b]) => b - a)
-  }, [expList])
-
-  // Per-business P&L
-  const bizPL = useMemo(() => {
-    if (!businesses || businesses.length <= 1) return []
-    return businesses.map(biz => {
-      const bizOrders = orderList.filter(o => o.business_id === biz.id)
-      const bizExp    = expList.filter(e => e.business_id === biz.id)
-      const sales     = bizOrders.filter(o => REVENUE_STATUSES.includes(o.status)).reduce((s, o) => s + Number(o.total_amount || 0), 0)
-      const exp       = bizExp.reduce((s, e) => s + Number(e.amount || 0), 0)
-      return { id: biz.id, name: biz.name, short_code: biz.short_code, sales, expenses: exp, profit: sales - exp }
+  function openEdit(exp) {
+    setForm({
+      business_id: exp.business_id || '',
+      expense_type: exp.expense_type || 'misc',
+      amount: String(exp.amount ?? ''),
+      description: exp.description || '',
+      date: exp.date || new Date().toISOString().split('T')[0],
+      notes: exp.notes || '',
+      paid_to: exp.paid_to || '',
+      payment_method: exp.payment_method || 'cash',
     })
-  }, [businesses, orderList, expList])
-
-  // ── Render ────────────────────────────────────────────────────────────────
+    setEditingExp(exp)
+    setShowModal(true)
+  }
 
   // The full accounting module — everyone's expenses — is only for
-  // roles with accounting access (CEO, super admin, ops manager,
-  // accountant, or an explicit tick). Everyone else records and sees
-  // only their own business expenses.
+  // roles with accounting access. Everyone else manages their own
+  // expenses on /my-expenses.
   if (!accessFor(user).includes('accounting')) return <Navigate to="/my-expenses" replace />
 
   return (
@@ -205,7 +227,7 @@ export function AccountingPage() {
         title="Expenses"
         actions={
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => { setEditingExp(null); setForm(EMPTY_FORM); setShowModal(true) }}
             className="p-2 bg-blue-600 text-white rounded-xl active:scale-95"
           >
             <Plus size={20} />
@@ -215,244 +237,180 @@ export function AccountingPage() {
 
       {/* ── Filters ── */}
       <div className="px-4 py-3 bg-white border-b border-gray-100 sticky top-[57px] z-20 space-y-2">
+        <SearchBar value={search} onChange={setSearch} placeholder="Search title, business, category, staff..." />
         <div className="flex gap-2">
           <Input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="flex-1 min-w-0" />
           <Input type="date" value={dateTo}   onChange={e => setDateTo(e.target.value)}   className="flex-1 min-w-0" />
         </div>
-        {businesses && businesses.length > 1 && (
-          <select
-            value={businessFilter}
-            onChange={e => setBusinessFilter(e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Businesses</option>
-            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        )}
+        <div className="flex gap-2">
+          {businesses && businesses.length > 1 && (
+            <div className="flex-1 min-w-0">
+              <Select value={businessFilter} onChange={e => setBusinessFilter(e.target.value)}>
+                <option value="">All Businesses</option>
+                {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </Select>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <Select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}>
+              <option value="">All Categories</option>
+              {EXPENSE_TYPES.filter(t => isCeo || !ADMIN_ONLY_TYPES.includes(t)).map(t => (
+                <option key={t} value={t} className="capitalize">{typeLabel(t)}</option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <div className="flex-1 min-w-0">
+            <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="">All Status</option>
+              <option value="active">Active</option>
+              <option value="voided">Voided</option>
+            </Select>
+          </div>
+          <div className="flex-1 min-w-0">
+            <Select value={sort} onChange={e => setSort(e.target.value)}>
+              {SORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </Select>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
 
-        {/* ── P&L Summary ── */}
-        <div className="bg-gray-900 rounded-2xl p-4 text-white">
-          <div className="flex items-center gap-2 mb-3">
-            <TrendingUp size={16} className="text-gray-400" />
-            <h3 className="text-sm font-semibold text-gray-300">P&L Summary</h3>
-          </div>
-          {ordersForPL.isLoading ? (
-            <div className="h-20 bg-gray-800 rounded-xl animate-pulse" />
-          ) : (
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-300">Gross Sales</span>
-                <span className="text-sm font-bold text-green-400">{formatCurrency(grossSales)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-300">Cash Collected</span>
-                <span className="text-sm font-semibold text-gray-100">{formatCurrency(cashCollected)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-300">(-) Expenses</span>
-                <span className="text-sm font-bold text-red-400">{formatCurrency(totalExpenses)}</span>
-              </div>
-              <div className="border-t border-gray-700 pt-2">
-                <p className="text-xs text-gray-400 mb-0.5">Net Profit</p>
-                <p className={`text-lg font-bold ${plNetProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                  {formatCurrency(plNetProfit)}
-                </p>
-              </div>
-              {grossSales > 0 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-gray-400">Margin</span>
-                  <span className={`text-sm font-bold ${plMargin >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {plMargin.toFixed(1)}%
-                  </span>
-                </div>
-              )}
-              {/* Margin bar */}
-              {grossSales > 0 && (
-                <div className="h-1.5 bg-gray-700 rounded-full overflow-hidden mt-1">
-                  <div
-                    className={`h-full rounded-full ${plNetProfit >= 0 ? 'bg-green-500' : 'bg-red-500'}`}
-                    style={{ width: `${Math.min(100, Math.abs(plMargin))}%` }}
-                  />
-                </div>
-              )}
+        {/* ── Expense Summary ── */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <p className="text-xs text-gray-500">Total Expenses</p>
+              <p className="text-lg font-bold text-red-600 leading-tight">{formatCurrency(totalExpenses)}</p>
             </div>
-          )}
+            <div>
+              <p className="text-xs text-gray-500">Records</p>
+              <p className="text-lg font-bold text-gray-900 leading-tight">{activeList.length}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500">Voided</p>
+              <p className="text-lg font-bold text-gray-400 leading-tight">{voidedCount}</p>
+            </div>
+          </div>
+          <p className="text-[11px] text-gray-400 mt-2">
+            Profit &amp; Loss, sales and business performance live in Reports.
+          </p>
         </div>
-
-        {/* ── Per-business P&L ── */}
-        {bizPL.length > 1 && (
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <div className="px-4 pt-3 pb-2">
-              <h3 className="text-sm font-semibold text-gray-900">By Business</h3>
-            </div>
-            <div className="divide-y divide-gray-50">
-              {bizPL.map(biz => (
-                <div key={biz.id} className="px-4 py-2.5">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-sm font-medium text-gray-900">{biz.name}</span>
-                    {biz.short_code && (
-                      <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">{biz.short_code}</span>
-                    )}
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">Sales</span>
-                      <span className="text-sm font-bold text-green-600">{formatCurrency(biz.sales)}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-gray-400">Expenses</span>
-                      <span className="text-sm font-bold text-red-500">{formatCurrency(biz.expenses)}</span>
-                    </div>
-                    <div className="flex items-center justify-between border-t border-gray-100 pt-1.5">
-                      <span className="text-xs font-semibold text-gray-700">Profit</span>
-                      <span className={`text-sm font-bold ${biz.profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {formatCurrency(biz.profit)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Existing summary cards ── */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <p className="text-xs text-gray-500">Total Expenses</p>
-            <p className="text-xl font-bold text-red-600">{formatCurrency(totalExpenses)}</p>
-          </div>
-          {isCeo && (
-            <div className="bg-white rounded-2xl p-4 border border-gray-100">
-              <p className="text-xs text-gray-500">Admin Only</p>
-              <p className="text-xl font-bold text-gray-900">{formatCurrency(adminTotal)}</p>
-            </div>
-          )}
-        </div>
-
-        {/* ── Expense type breakdown (collapsed accordion) ── */}
-        {expList.length > 0 && (
-          <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
-            <button
-              onClick={() => setShowExpenseSummary(v => !v)}
-              className="w-full px-4 py-3 flex items-center justify-between active:bg-gray-50 transition-colors"
-            >
-              <span className="text-sm font-semibold text-gray-900">Breakdown by Type</span>
-              {showExpenseSummary
-                ? <ChevronUp size={16} className="text-gray-500" />
-                : <ChevronDown size={16} className="text-gray-500" />
-              }
-            </button>
-            {showExpenseSummary && (
-              <div className="px-4 pb-4 space-y-1.5 border-t border-gray-50">
-                {byExpenseType.map(([type, amt]) => (
-                  <div key={type} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                    <div className="flex items-center gap-2">
-                      {ADMIN_ONLY_TYPES.includes(type)
-                        ? <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
-                        : <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
-                      }
-                      <span className="text-sm text-gray-700 capitalize">{type.replace(/_/g, ' ')}</span>
-                    </div>
-                    <span className="text-sm font-bold text-gray-900">{formatCurrency(amt)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ── Expense list ── */}
         {isLoading ? <SkeletonList count={5} /> :
-         expListAll.length === 0 ? (
+         list.length === 0 ? (
            <EmptyState
-             title="No expenses recorded"
+             title="No expenses found for the selected filters."
              icon={<DollarSign size={28} />}
-             action={() => setShowModal(true)}
+             action={() => { setEditingExp(null); setForm(EMPTY_FORM); setShowModal(true) }}
              actionLabel="Add Expense"
            />
          ) : (
            <div className="space-y-3">
-             <p className="text-xs text-gray-500">{expList.length} expense{expList.length !== 1 ? 's' : ''}</p>
-             {expListAll.map(exp => {
+             {list.map(exp => {
                const voided = exp.status === 'voided'
+               const isOpen = expanded === exp.id
+               const createdBy = staffName(exp.staff_id) || exp.created_by_name
                return (
-               <div key={exp.id} className={`bg-white rounded-2xl p-4 border border-gray-100 ${voided ? 'opacity-60' : ''}`}>
-                 <div className="flex items-start justify-between gap-2">
-                   <div className="flex-1 min-w-0">
-                     <div className="flex items-center gap-2 flex-wrap mb-0.5">
-                       <p className={`text-sm font-semibold text-gray-900 capitalize ${voided ? 'line-through' : ''}`}>
-                         {exp.expense_type.replace(/_/g, ' ')}
-                       </p>
-                       {exp.is_admin_only && (
-                         <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">Admin</span>
-                       )}
-                       {voided && (
-                         <span className="text-[10px] font-semibold bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">VOIDED</span>
-                       )}
+                 <div key={exp.id} className={`bg-white rounded-2xl border border-gray-100 overflow-hidden ${voided ? 'opacity-60' : ''}`}>
+                   <button onClick={() => setExpanded(isOpen ? null : exp.id)}
+                     className="w-full text-left p-4 active:bg-gray-50 transition-colors">
+                     <div className="flex items-start justify-between gap-2">
+                       <div className="flex-1 min-w-0">
+                         <div className="flex items-center gap-2 flex-wrap mb-0.5">
+                           <p className={`text-sm font-semibold text-gray-900 ${voided ? 'line-through' : ''}`}>
+                             {exp.description || <span className="capitalize">{typeLabel(exp.expense_type)}</span>}
+                           </p>
+                           {exp.is_admin_only && (
+                             <span className="text-[10px] font-semibold bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">ADMIN</span>
+                           )}
+                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                             voided ? 'bg-gray-200 text-gray-600' : 'bg-green-50 text-green-700'
+                           }`}>
+                             {voided ? 'VOIDED' : 'ACTIVE'}
+                           </span>
+                         </div>
+                         <p className="text-xs text-gray-500 capitalize">
+                           {[exp.business?.name, typeLabel(exp.expense_type), formatDate(exp.date)].filter(Boolean).join(' · ')}
+                         </p>
+                       </div>
+                       <div className="flex items-center gap-1.5 shrink-0">
+                         <p className={`text-base font-bold ${voided ? 'text-gray-400 line-through' : 'text-red-600'}`}>
+                           {formatCurrency(exp.amount)}
+                         </p>
+                         {isOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                       </div>
                      </div>
-                     <p className="text-xs text-gray-500">{exp.business?.name} · {formatDate(exp.date)}</p>
-                     {exp.paid_to && <p className="text-xs text-gray-500">Paid to: {exp.paid_to}</p>}
-                     {exp.description && <p className="text-xs text-gray-400 mt-0.5">{exp.description}</p>}
-                     {voided && (exp.void_reason || exp.voided_by) && (
-                       <p className="text-xs text-gray-400 mt-0.5">
-                         Voided{exp.voided_by ? ` by ${exp.voided_by}` : ''}{exp.void_reason ? `: ${exp.void_reason}` : ''}
-                       </p>
-                     )}
-                     {exp.last_edited_by && !voided && (
-                       <p className="text-[11px] text-gray-400 mt-0.5">
-                         Edited by {exp.last_edited_by}{exp.last_edited_at ? ` · ${formatDate(exp.last_edited_at)}` : ''}
-                       </p>
-                     )}
-                   </div>
-                   <div className="flex flex-col items-end gap-2 shrink-0">
-                     <p className={`text-base font-bold ${voided ? 'text-gray-400 line-through' : 'text-red-600'}`}>{formatCurrency(exp.amount)}</p>
-                     {isCeo && (
-                       <div className="flex gap-1">
-                         {!voided && (
-                           <button
+                   </button>
+
+                   {isOpen && (
+                     <div className="px-4 pb-4 space-y-3">
+                       <div className="bg-gray-50 rounded-xl p-3 grid grid-cols-2 gap-2">
+                         {[
+                           ['Paid To', exp.paid_to],
+                           ['Payment Method', PAYMENT_METHODS.find(m => m.value === exp.payment_method)?.label || exp.payment_method],
+                           ['Created By', createdBy],
+                           ['Date', formatDate(exp.date)],
+                         ].filter(([, v]) => v).map(([label, value]) => (
+                           <div key={label}>
+                             <p className="text-[10px] text-gray-400 uppercase tracking-wide">{label}</p>
+                             <p className="text-xs font-semibold text-gray-800 truncate">{value}</p>
+                           </div>
+                         ))}
+                       </div>
+                       {exp.notes && <p className="text-xs text-gray-600"><span className="text-gray-400">Notes: </span>{exp.notes}</p>}
+                       {voided && (exp.void_reason || exp.voided_by) && (
+                         <p className="text-xs text-gray-500">
+                           Voided{exp.voided_by ? ` by ${exp.voided_by}` : ''}{exp.void_reason ? `: ${exp.void_reason}` : ''}
+                         </p>
+                       )}
+                       {exp.last_edited_by && (
+                         <p className="text-[11px] text-gray-400">
+                           Edited by {exp.last_edited_by}{exp.last_edited_at ? ` · ${formatDate(exp.last_edited_at)}` : ''}
+                         </p>
+                       )}
+                       {isCeo && !voided && (
+                         <div className="flex gap-2">
+                           <Button size="sm" variant="secondary" className="flex-1" onClick={() => openEdit(exp)}>
+                             <span className="flex items-center justify-center gap-1.5"><Pencil size={13} /> Edit</span>
+                           </Button>
+                           <Button size="sm" variant="danger" className="flex-1"
+                             loading={deleteExpense.isPending}
                              onClick={() => {
-                               setForm({
-                                 business_id: exp.business_id || '',
-                                 expense_type: exp.expense_type || 'misc',
-                                 amount: String(exp.amount ?? ''),
-                                 description: exp.description || '',
-                                 date: exp.date || new Date().toISOString().split('T')[0],
-                                 notes: exp.notes || '',
-                                 is_admin_only: !!exp.is_admin_only,
-                               })
-                               setEditingExp(exp)
-                               setShowModal(true)
-                             }}
-                             className="p-1.5 text-gray-300 active:text-blue-500">
-                             <Pencil size={15} />
-                           </button>
-                         )}
-                         <button
+                               if (window.confirm('Permanently delete this expense? This cannot be undone.')) {
+                                 deleteExpense.mutate(exp.id)
+                               }
+                             }}>
+                             <span className="flex items-center justify-center gap-1.5"><Trash2 size={13} /> Delete</span>
+                           </Button>
+                         </div>
+                       )}
+                       {isCeo && voided && (
+                         <Button size="sm" variant="danger" className="w-full"
+                           loading={deleteExpense.isPending}
                            onClick={() => {
-                             if (window.confirm('Permanently remove this expense? This cannot be undone.')) {
+                             if (window.confirm('Permanently delete this voided expense? This cannot be undone.')) {
                                deleteExpense.mutate(exp.id)
                              }
-                           }}
-                           className="p-1.5 text-gray-300 active:text-red-500">
-                           <Trash2 size={15} />
-                         </button>
-                       </div>
-                     )}
-                   </div>
+                           }}>
+                           <span className="flex items-center justify-center gap-1.5"><Trash2 size={13} /> Delete Permanently</span>
+                         </Button>
+                       )}
+                     </div>
+                   )}
                  </div>
-               </div>
-             )})}
+               )
+             })}
+             <p className="text-xs text-gray-400">{list.length} expense record{list.length !== 1 ? 's' : ''}</p>
            </div>
          )
         }
-
       </div>
 
-      {/* ── Add Expense Modal ── */}
+      {/* ── Add / Edit Expense Modal ── */}
       <Modal
         isOpen={showModal}
         onClose={() => { setShowModal(false); setEditingExp(null) }}
@@ -461,8 +419,8 @@ export function AccountingPage() {
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => { setShowModal(false); setEditingExp(null) }} className="flex-1">Cancel</Button>
             <Button
-              onClick={() => addExpense.mutate(form)}
-              loading={addExpense.isPending}
+              onClick={() => saveExpense.mutate(form)}
+              loading={saveExpense.isPending}
               className="flex-1"
               disabled={!form.business_id || !form.amount}
             >
@@ -472,28 +430,36 @@ export function AccountingPage() {
         }
       >
         <div className="space-y-4">
+          <Input label="Expense Title" placeholder="What was this expense for?"
+            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
           <Select label="Business" required value={form.business_id} onChange={e => setForm({ ...form, business_id: e.target.value })}>
             <option value="">Select business...</option>
             {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
-          <Select label="Expense Type" required value={form.expense_type} onChange={e => setForm({ ...form, expense_type: e.target.value })}>
+          <Select label="Category" required value={form.expense_type} onChange={e => setForm({ ...form, expense_type: e.target.value })}>
             {EXPENSE_TYPES
               .filter(t => isCeo || !ADMIN_ONLY_TYPES.includes(t))
-              .map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)
+              .map(t => <option key={t} value={t}>{typeLabel(t)}</option>)
             }
           </Select>
-          <Input
-            label="Amount (₦)" type="number" inputMode="decimal" required
-            value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
-          />
-          <Input
-            label="Description" placeholder="Brief description"
-            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-          />
-          <Input
-            label="Date" type="date"
-            value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
-          />
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Amount (₦)" type="number" inputMode="decimal" required
+              value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
+            />
+            <Input
+              label="Date" type="date"
+              value={form.date} onChange={e => setForm({ ...form, date: e.target.value })}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Paid To" placeholder="Person or company"
+              value={form.paid_to} onChange={e => setForm({ ...form, paid_to: e.target.value })} />
+            <Select label="Payment Method" value={form.payment_method}
+              onChange={e => setForm({ ...form, payment_method: e.target.value })}>
+              {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </Select>
+          </div>
           <Textarea
             label="Notes" rows={2}
             value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })}

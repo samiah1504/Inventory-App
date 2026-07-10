@@ -493,3 +493,8 @@ CREATE POLICY "app full access staff" ON staff_users
 -- ===================================================
 ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
 ALTER TABLE staff_users DISABLE ROW LEVEL SECURITY;
+
+-- ===================================================
+-- Expenses page redesign: payment method on expenses
+-- ===================================================
+ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_method TEXT;
