@@ -226,7 +226,20 @@ function NonAdminSettings({ user, logout }) {
           </p>
         </div>
 
-        {/* Leave self-service for all staff */}
+        {/* Self-service for all staff */}
+        <button
+          onClick={() => navigate('/settings/profile')}
+          className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+        >
+          <div className="w-10 h-10 bg-yellow-50 rounded-xl flex items-center justify-center text-yellow-600 shrink-0">
+            <Users size={20} />
+          </div>
+          <div className="flex-1 text-left min-w-0">
+            <p className="text-sm font-semibold text-gray-900">My Profile</p>
+            <p className="text-xs text-gray-500">Personal information, documents & employment contract</p>
+          </div>
+          <ChevronRight size={18} className="text-gray-400 shrink-0" />
+        </button>
         <button
           onClick={() => navigate('/settings/leave')}
           className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"

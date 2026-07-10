@@ -21,9 +21,12 @@ import { NIGERIAN_STATES } from '../../utils/format'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
 import { savePdf } from '../../lib/pdf'
+import { EmploymentTab, ContractTab } from './StaffHrTabs'
 
 const TABS = [
   { key: 'profile',     label: 'Profile' },
+  { key: 'employment',  label: 'Employment', ceoOnly: true },
+  { key: 'contract',    label: 'Contract', ceoOnly: true },
   { key: 'leave',       label: 'Leave' },
   { key: 'discipline',  label: 'Discipline' },
   { key: 'documents',   label: 'Documents' },
@@ -163,7 +166,7 @@ export function StaffDetailPage() {
           </div>
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          {TABS.filter(t => t.key !== 'notes' || isManager).map(({ key, label }) => (
+          {TABS.filter(t => (t.key !== 'notes' || isManager) && (!t.ceoOnly || isCeo)).map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
             >{label}</button>
@@ -305,6 +308,12 @@ export function StaffDetailPage() {
             )}
           </>
         )}
+
+        {/* ── EMPLOYMENT (official terms, CEO only) ── */}
+        {tab === 'employment' && isCeo && <EmploymentTab staff={staff} />}
+
+        {/* ── CONTRACT (onboarding pipeline, CEO only) ── */}
+        {tab === 'contract' && isCeo && <ContractTab staff={staff} />}
 
         {/* ── LEAVE ── */}
         {tab === 'leave' && (

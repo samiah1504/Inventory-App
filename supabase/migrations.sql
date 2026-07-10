@@ -498,3 +498,102 @@ ALTER TABLE staff_users DISABLE ROW LEVEL SECURITY;
 -- Expenses page redesign: payment method on expenses
 -- ===================================================
 ALTER TABLE expenses ADD COLUMN IF NOT EXISTS payment_method TEXT;
+
+-- ===================================================
+-- Staff Profile & Employment Contract module
+-- Personal info (staff-owned) is separated from official
+-- employment terms (CEO-owned); contracts merge the two.
+-- ===================================================
+
+-- Personal profile completed by the staff member
+CREATE TABLE IF NOT EXISTS staff_profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID UNIQUE REFERENCES staff_users(id) ON DELETE CASCADE,
+  dob DATE,
+  gender TEXT,
+  personal_email TEXT,
+  residential_address TEXT,
+  state_of_residence TEXT,
+  photo_url TEXT,
+  emergency_name TEXT,
+  emergency_phone TEXT,
+  emergency_relationship TEXT,
+  nok_name TEXT,
+  nok_phone TEXT,
+  nok_relationship TEXT,
+  bank_name TEXT,
+  bank_account_name TEXT,
+  bank_account_number TEXT,
+  id_type TEXT,
+  id_number TEXT,
+  id_document_url TEXT,
+  marital_status TEXT,
+  education TEXT,
+  work_experience TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',  -- draft / submitted / returned / verified
+  return_note TEXT,
+  submitted_at TIMESTAMPTZ,
+  verified_by TEXT,
+  verified_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Official employment terms (CEO/Admin only)
+ALTER TABLE staff_users
+  ADD COLUMN IF NOT EXISTS salary DECIMAL(15,2),
+  ADD COLUMN IF NOT EXISTS work_location TEXT,
+  ADD COLUMN IF NOT EXISTS working_days TEXT,
+  ADD COLUMN IF NOT EXISTS working_hours TEXT,
+  ADD COLUMN IF NOT EXISTS probation_period TEXT,
+  ADD COLUMN IF NOT EXISTS supervisor_id UUID REFERENCES staff_users(id),
+  ADD COLUMN IF NOT EXISTS leave_entitlement TEXT,
+  ADD COLUMN IF NOT EXISTS contract_date DATE,
+  ADD COLUMN IF NOT EXISTS special_conditions TEXT,
+  ADD COLUMN IF NOT EXISTS id_card_issued_at DATE,
+  ADD COLUMN IF NOT EXISTS id_card_expiry DATE;
+
+-- Employment contracts (versioned; body editable before issuing)
+CREATE TABLE IF NOT EXISTS staff_contracts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  version INT NOT NULL DEFAULT 1,
+  body TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',  -- draft / issued / accepted / superseded
+  issued_by TEXT,
+  issued_at TIMESTAMPTZ,
+  acknowledged_at TIMESTAMPTZ,
+  accepted_at TIMESTAMPTZ,
+  accepted_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_contracts_staff ON staff_contracts(staff_id);
+
+-- Change requests for locked personal fields
+CREATE TABLE IF NOT EXISTS staff_change_requests (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  field TEXT NOT NULL,
+  current_value TEXT,
+  new_value TEXT NOT NULL,
+  reason TEXT,
+  document_url TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',  -- pending / approved / rejected
+  reviewed_by TEXT,
+  reviewed_at TIMESTAMPTZ,
+  review_note TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_change_requests_staff ON staff_change_requests(staff_id);
+
+-- Full audit history of the onboarding pipeline
+CREATE TABLE IF NOT EXISTS staff_profile_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  staff_id UUID,
+  action TEXT NOT NULL,
+  details TEXT,
+  actor_id UUID,
+  actor_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_profile_audit_staff ON staff_profile_audit(staff_id);
