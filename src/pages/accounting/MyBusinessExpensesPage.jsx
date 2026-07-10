@@ -50,6 +50,11 @@ export function MyBusinessExpensesPage() {
   const [editItem, setEditItem] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
+  // Role preview keeps the CEO's identity, so their own entries would
+  // show here and look like a leak — a preview sees an empty page,
+  // exactly like a brand-new officer
+  const previewing = !!user?._preview
+
   // Only this officer's own business expenses — never other staff's
   // records and never order-linked expenses
   const { data: expenses, isLoading } = useQuery({
@@ -64,7 +69,7 @@ export function MyBusinessExpensesPage() {
       if (error) throw error
       return data || []
     },
-    enabled: !!user?.id,
+    enabled: !!user?.id && !previewing,
     staleTime: 30000,
   })
 
@@ -76,6 +81,7 @@ export function MyBusinessExpensesPage() {
 
   const addExpense = useMutation({
     mutationFn: async (f) => {
+      if (previewing) throw new Error('Exit role preview to record expenses')
       const { data, error } = await supabase.from('expenses').insert({
         business_id: f.business_id,
         expense_type: f.expense_type,
@@ -146,7 +152,7 @@ export function MyBusinessExpensesPage() {
     onError: (err) => showToast(err.message, 'error'),
   })
 
-  const list = expenses || []
+  const list = previewing ? [] : (expenses || [])
   const activeList = list.filter(e => e.status !== 'voided')
   const total = activeList.reduce((s, e) => s + Number(e.amount || 0), 0)
 
@@ -206,6 +212,12 @@ export function MyBusinessExpensesPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4">
+        {previewing && (
+          <div className="bg-cyan-50 border border-cyan-200 rounded-2xl p-3 text-xs text-cyan-800">
+            <span className="font-semibold">Role preview:</span> every officer sees only the expenses
+            they added themselves, so this page starts empty. Your own entries as CEO live in Accounting.
+          </div>
+        )}
         <p className="text-xs text-gray-500">
           Operational costs not tied to a customer order — park charges, handling, storage, interstate transport.
           Order costs stay on the order itself.

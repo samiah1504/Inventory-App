@@ -103,10 +103,12 @@ export function FulfillmentDashboard() {
   })
   const holdingCount = holdingQ.data || 0
 
-  // This officer's own business expenses this month (voided excluded)
+  // This officer's own business expenses this month (voided excluded).
+  // Role preview keeps the CEO's identity, so skip the query there —
+  // a real officer only ever matches their own staff id.
   const myExpensesQ = useQuery({
     queryKey: ['my_expenses_month', user?.id],
-    enabled: !!user?.id,
+    enabled: !!user?.id && !user?._preview,
     queryFn: async () => {
       try {
         const d = new Date(); d.setDate(1)
