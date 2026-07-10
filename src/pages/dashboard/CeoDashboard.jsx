@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   ShoppingCart, DollarSign, Package, AlertTriangle, Users, Plus,
-  BarChart3, TrendingUp, ChevronRight, Star, Briefcase, LineChart, Truck,
+  BarChart3, TrendingUp, ChevronRight, Star, Briefcase, LineChart, Truck, Inbox,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuthStore } from '../../stores/authStore'
@@ -442,6 +442,7 @@ export function CeoDashboard() {
               { label: 'Inventory', icon: Package,    action: () => navigate('/inventory'),        color: 'bg-amber-50 text-amber-600' },
               { label: 'Customers', icon: Users,      action: () => navigate('/customers'),        color: 'bg-pink-50 text-pink-600' },
               { label: 'Accounting',icon: DollarSign, action: () => navigate('/accounting'),       color: 'bg-teal-50 text-teal-600' },
+              { label: 'Holding',   icon: Inbox,      action: () => navigate('/holding'),          color: 'bg-cyan-50 text-cyan-600' },
             ].map(({ label, icon: Icon, action, color }) => (
               <button
                 key={label}
