@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Plus, Edit, CheckCircle, AlertCircle, Tag } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Edit, CheckCircle, AlertCircle, Tag, GitMerge } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useBusinesses } from '../../hooks/useBusinesses'
@@ -9,17 +10,37 @@ import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
 import { Input, Select } from '../../components/ui/Input'
 import { Badge } from '../../components/ui/Badge'
+import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
-import { formatCurrency } from '../../utils/format'
+import { formatCurrency, formatDate } from '../../utils/format'
+
+const EMPTY_FORM = {
+  name: '', business_id: '', category_id: '', selling_price: '', cost_price: '',
+  sku: '', image_url: '', description: '', is_verified: true,
+}
 
 export function ProductsPage() {
+  const [searchParams] = useSearchParams()
   const [mainTab, setMainTab] = useState('products')
   const [search, setSearch] = useState('')
   const [filterBusiness, setFilterBusiness] = useState('')
-  const [filterTab, setFilterTab] = useState('all')
+  const [filterTab, setFilterTab] = useState(searchParams.get('tab') === 'unverified' ? 'unverified' : 'all')
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
-  const [form, setForm] = useState({ name: '', business_id: '', category_id: '', selling_price: '', cost_price: '', is_verified: true })
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [mergeSource, setMergeSource] = useState(null)
+  const [mergeSearch, setMergeSearch] = useState('')
+  const { user } = useAuthStore()
+
+  // Every catalogue action leaves an audit record (best-effort pre-migration)
+  async function audit(product_id, action, details) {
+    try {
+      await supabase.from('product_audit').insert({
+        product_id, action, details,
+        staff_id: user?.id || null, staff_name: user?.name || null,
+      })
+    } catch { /* table may not exist yet */ }
+  }
 
   // Category management state
   const [showCatModal, setShowCatModal] = useState(false)
@@ -36,11 +57,17 @@ export function ProductsPage() {
       let query = supabase.from('products')
         .select('*, business:businesses(name), category:product_categories(name)')
         .order('name')
-      if (search) query = query.ilike('name', `%${search}%`)
       if (filterBusiness) query = query.eq('business_id', filterBusiness)
       const { data, error } = await query
       if (error) throw error
-      return data || []
+      let list = data || []
+      if (search) {
+        const q = search.toLowerCase()
+        list = list.filter(p =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.sku ? String(p.sku).toLowerCase().includes(q) : false))
+      }
+      return list
     },
     staleTime: 30000,
   })
@@ -56,17 +83,27 @@ export function ProductsPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      const { sku, image_url, description, ...core } = data
       const payload = {
-        ...data,
+        ...core,
         selling_price: data.selling_price ? Number(data.selling_price) : null,
         cost_price: data.cost_price ? Number(data.cost_price) : null,
       }
+      // SKU / image / description live in newer columns — save them
+      // separately so the core save works pre-migration too
+      const extras = { sku: sku || null, image_url: image_url || null, description: description || null }
       if (editing) {
         const { error } = await supabase.from('products').update(payload).eq('id', editing.id)
         if (error) throw error
+        await supabase.from('products').update(extras).eq('id', editing.id)
+        await audit(editing.id, 'edited', `Edited by ${user?.name}`)
       } else {
-        const { error } = await supabase.from('products').insert(payload)
+        const { data: created, error } = await supabase.from('products').insert(payload).select('id').single()
         if (error) throw error
+        if (created) {
+          await supabase.from('products').update(extras).eq('id', created.id)
+          await audit(created.id, 'created', `Added by ${user?.name}`)
+        }
       }
     },
     onSuccess: () => {
@@ -75,7 +112,7 @@ export function ProductsPage() {
       showToast(editing ? 'Product updated' : 'Product added', 'success')
       setShowModal(false)
       setEditing(null)
-      setForm({ name: '', business_id: '', category_id: '', selling_price: '', cost_price: '', is_verified: true })
+      setForm(EMPTY_FORM)
     },
     onError: (err) => showToast(err.message, 'error'),
   })
@@ -84,8 +121,75 @@ export function ProductsPage() {
     mutationFn: async ({ id, is_active }) => {
       const { error } = await supabase.from('products').update({ is_active: !is_active }).eq('id', id)
       if (error) throw error
+      await audit(id, is_active ? 'deactivated' : 'reactivated',
+        `${is_active ? 'Deactivated' : 'Reactivated'} by ${user?.name}`)
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['all_products'] }),
+  })
+
+  const verifyMutation = useMutation({
+    mutationFn: async (p) => {
+      const { error } = await supabase.from('products').update({ is_verified: true }).eq('id', p.id)
+      if (error) throw error
+      // Newer columns — best-effort
+      await supabase.from('products').update({
+        verified_by: user?.name || null,
+        verified_at: new Date().toISOString(),
+      }).eq('id', p.id)
+      await audit(p.id, 'verified', `Verified by ${user?.name}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all_products'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+      showToast('Product verified — available for order intake', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+
+  // Merge a duplicate into the final product. Order history is
+  // repointed to the target but keeps its original text; the duplicate
+  // is closed, never deleted.
+  const mergeMutation = useMutation({
+    mutationFn: async ({ source, target }) => {
+      await supabase.from('orders').update({ product_id: target.id }).eq('product_id', source.id)
+      await supabase.from('order_items').update({ product_id: target.id }).eq('product_id', source.id)
+      try {
+        const { data: srcRows } = await supabase.from('inventory').select('*').eq('product_id', source.id)
+        for (const row of (srcRows || [])) {
+          const { data: tgtRows } = await supabase.from('inventory').select('*')
+            .eq('product_id', target.id).eq('warehouse_id', row.warehouse_id).limit(1)
+          const tgt = tgtRows?.[0]
+          if (tgt) {
+            await supabase.from('inventory').update({
+              quantity_physical: (tgt.quantity_physical || 0) + (row.quantity_physical || 0),
+              quantity_available: (tgt.quantity_available || 0) + (row.quantity_available || 0),
+              quantity_reserved: (tgt.quantity_reserved || 0) + (row.quantity_reserved || 0),
+            }).eq('id', tgt.id)
+            await supabase.from('inventory').delete().eq('id', row.id)
+          } else {
+            await supabase.from('inventory').update({ product_id: target.id }).eq('id', row.id)
+          }
+        }
+      } catch (e) { console.warn('inventory merge', e) }
+      await supabase.from('inventory_movements').update({ product_id: target.id }).eq('product_id', source.id)
+      await supabase.from('holding_queue').update({ product_id: target.id }).eq('product_id', source.id)
+      const { error } = await supabase.from('products')
+        .update({ is_active: false, is_verified: true }).eq('id', source.id)
+      if (error) throw error
+      await supabase.from('products').update({ merged_into: target.id }).eq('id', source.id)
+      await audit(source.id, 'merged', `Merged into "${target.name}" by ${user?.name}`)
+      await audit(target.id, 'merge_target', `"${source.name}" merged into this product by ${user?.name}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['all_products'] })
+      queryClient.invalidateQueries({ queryKey: ['products'] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      showToast('Products merged — history moved to the final product', 'success')
+      setMergeSource(null)
+      setMergeSearch('')
+    },
+    onError: (err) => showToast(err.message, 'error'),
   })
 
   const saveCatMutation = useMutation({
@@ -111,7 +215,9 @@ export function ProductsPage() {
   function openEdit(p) {
     setEditing(p)
     setForm({ name: p.name, business_id: p.business_id || '', category_id: p.category_id || '',
-      selling_price: p.selling_price || '', cost_price: p.cost_price || '', is_verified: p.is_verified })
+      selling_price: p.selling_price || '', cost_price: p.cost_price || '',
+      sku: p.sku || '', image_url: p.image_url || '', description: p.description || '',
+      is_verified: p.is_verified })
     setShowModal(true)
   }
 
@@ -141,7 +247,7 @@ export function ProductsPage() {
         title="Products"
         actions={
           <button
-            onClick={() => mainTab === 'categories' ? openNewCat() : (setEditing(null), setShowModal(true))}
+            onClick={() => mainTab === 'categories' ? openNewCat() : (setEditing(null), setForm(EMPTY_FORM), setShowModal(true))}
             className="p-2 bg-blue-600 text-black rounded-xl active:scale-95"
           >
             <Plus size={20} />
@@ -195,20 +301,36 @@ export function ProductsPage() {
             <div key={p.id} className="bg-white rounded-2xl p-4 border border-gray-100">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
+                  <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                     <p className="text-sm font-semibold text-gray-900">{p.name}</p>
                     {!p.is_verified && <Badge color="amber">Unverified</Badge>}
                     {!p.is_active && <Badge color="red">Inactive</Badge>}
                   </div>
-                  <p className="text-xs text-gray-500">{p.business?.name} · {p.category?.name || 'No category'}</p>
+                  <p className="text-xs text-gray-500">
+                    {p.business?.name} · {p.category?.name || 'No category'}{p.sku ? ` · SKU ${p.sku}` : ''}
+                  </p>
                   <div className="flex gap-3 mt-1">
                     {p.selling_price && <p className="text-xs text-green-600 font-medium">Sale: {formatCurrency(p.selling_price)}</p>}
                     {p.cost_price && <p className="text-xs text-gray-500">Cost: {formatCurrency(p.cost_price)}</p>}
                   </div>
+                  {!p.is_verified && (p.created_by_name || p.first_order_number || p.created_at) && (
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      {[
+                        p.created_by_name ? `Added by ${p.created_by_name}` : null,
+                        p.created_at ? formatDate(p.created_at) : null,
+                        p.first_order_number ? `first used in ${p.first_order_number}` : null,
+                      ].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {p.merged_into && <p className="text-[11px] text-gray-400 mt-0.5">Merged into another product</p>}
                 </div>
                 <div className="flex gap-2 shrink-0">
                   <button onClick={() => openEdit(p)} className="p-2 bg-gray-100 rounded-xl active:scale-95">
                     <Edit size={16} className="text-gray-600" />
+                  </button>
+                  <button onClick={() => { setMergeSource(p); setMergeSearch('') }}
+                    className="p-2 bg-purple-50 rounded-xl active:scale-95" title="Merge into another product">
+                    <GitMerge size={16} className="text-purple-600" />
                   </button>
                   <button
                     onClick={() => toggleActive.mutate({ id: p.id, is_active: p.is_active })}
@@ -221,10 +343,11 @@ export function ProductsPage() {
               </div>
               {!p.is_verified && (
                 <button
-                  onClick={() => supabase.from('products').update({ is_verified: true }).eq('id', p.id).then(() => queryClient.invalidateQueries({ queryKey: ['all_products'] }))}
+                  onClick={() => verifyMutation.mutate(p)}
+                  disabled={verifyMutation.isPending}
                   className="mt-2 w-full py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg flex items-center justify-center gap-1 active:scale-95 transition-all"
                 >
-                  <CheckCircle size={12} /> Approve Product
+                  <CheckCircle size={12} /> Verify Product
                 </button>
               )}
             </div>
@@ -285,6 +408,53 @@ export function ProductsPage() {
               value={form.selling_price} onChange={e => setForm({ ...form, selling_price: e.target.value })} />
             <Input label="Cost Price (₦)" type="number" inputMode="decimal"
               value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} />
+          </div>
+          <Input label="SKU / Product Code" placeholder="e.g. KZ-TRI-001"
+            value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })} />
+          <Input label="Product Image Link" type="url" placeholder="https:// — photo of the product"
+            value={form.image_url} onChange={e => setForm({ ...form, image_url: e.target.value })} />
+          <Input label="Description (optional)"
+            value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* Merge duplicate modal */}
+      <Modal isOpen={!!mergeSource} onClose={() => setMergeSource(null)}
+        title="Merge with Existing Product">
+        <div className="space-y-3">
+          {mergeSource && (
+            <div className="bg-purple-50 rounded-xl p-3">
+              <p className="text-xs text-purple-700">
+                <span className="font-semibold">"{mergeSource.name}"</span> will be closed and all its
+                orders, stock and history moved to the product you pick below. Old orders keep their
+                original details.
+              </p>
+            </div>
+          )}
+          <SearchBar value={mergeSearch} onChange={setMergeSearch} placeholder="Search the product to keep..." />
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {allProducts
+              .filter(t => t.id !== mergeSource?.id && !t.merged_into)
+              .filter(t => !mergeSearch || (t.name || '').toLowerCase().includes(mergeSearch.toLowerCase()))
+              .slice(0, 30)
+              .map(t => (
+                <button key={t.id}
+                  disabled={mergeMutation.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Merge "${mergeSource.name}" into "${t.name}"?`)) {
+                      mergeMutation.mutate({ source: mergeSource, target: t })
+                    }
+                  }}
+                  className="w-full text-left bg-white border border-gray-100 rounded-xl p-3 active:bg-gray-50">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-gray-900">{t.name}</p>
+                    {t.is_verified ? <Badge color="green">Verified</Badge> : <Badge color="amber">Unverified</Badge>}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {t.business?.name}{t.selling_price ? ` · ${formatCurrency(t.selling_price)}` : ''}
+                  </p>
+                </button>
+              ))}
           </div>
         </div>
       </Modal>

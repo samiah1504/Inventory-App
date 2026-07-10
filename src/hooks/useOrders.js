@@ -162,6 +162,40 @@ export function useCreateOrder() {
         staff_name: user?.name,
       })
 
+      // Custom products typed during intake join the catalogue as
+      // UNVERIFIED — the Operations Manager reviews them later.
+      // Best-effort: order creation never fails because of this.
+      for (const item of cleanItems.filter(i => !i.product_id && i.product_name?.trim())) {
+        try {
+          const name = item.product_name.trim()
+          const { data: existing } = await supabase.from('products')
+            .select('id').ilike('name', name).limit(1)
+          if (existing && existing.length > 0) continue
+          const { data: p, error: pErr } = await supabase.from('products').insert({
+            name,
+            business_id: orderFields.business_id || null,
+            selling_price: Number(item.unit_price) || null,
+            is_verified: false,
+            is_active: true,
+          }).select('id').single()
+          if (pErr || !p) continue
+          // Columns from the governance migration — ignore if missing
+          await supabase.from('products').update({
+            created_by: user?.id || null,
+            created_by_name: user?.name || null,
+            first_order_id: data.id,
+            first_order_number: orderNumber,
+          }).eq('id', p.id)
+          await supabase.from('product_audit').insert({
+            product_id: p.id,
+            action: 'created_from_order',
+            details: `Created as unverified during order ${orderNumber}`,
+            staff_id: user?.id || null,
+            staff_name: user?.name || null,
+          })
+        } catch (e) { console.warn('unverified product create failed', e) }
+      }
+
       // Auto-reserve stock for products tracked in inventory
       await reserveStockForOrder(data, user?.id)
 

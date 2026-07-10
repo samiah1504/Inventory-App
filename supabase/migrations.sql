@@ -379,3 +379,35 @@ ALTER TABLE expenses
   ADD COLUMN IF NOT EXISTS created_by_name TEXT,
   ADD COLUMN IF NOT EXISTS last_edited_by TEXT,
   ADD COLUMN IF NOT EXISTS last_edited_at TIMESTAMPTZ;
+
+-- ===================================================
+-- Product catalogue governance & warehouse management
+-- (Operations Manager permissions)
+-- ===================================================
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS sku TEXT,
+  ADD COLUMN IF NOT EXISTS image_url TEXT,
+  ADD COLUMN IF NOT EXISTS description TEXT,
+  ADD COLUMN IF NOT EXISTS created_by UUID REFERENCES staff_users(id),
+  ADD COLUMN IF NOT EXISTS created_by_name TEXT,
+  ADD COLUMN IF NOT EXISTS first_order_id UUID REFERENCES orders(id),
+  ADD COLUMN IF NOT EXISTS first_order_number TEXT,
+  ADD COLUMN IF NOT EXISTS merged_into UUID REFERENCES products(id),
+  ADD COLUMN IF NOT EXISTS verified_by TEXT,
+  ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ;
+
+ALTER TABLE warehouses
+  ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+
+-- Audit trail for every catalogue action (verify, edit, merge,
+-- deactivate, reactivate, business reassignment)
+CREATE TABLE IF NOT EXISTS product_audit (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  product_id UUID,
+  action TEXT NOT NULL,
+  details TEXT,
+  staff_id UUID REFERENCES staff_users(id),
+  staff_name TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_product_audit_product ON product_audit(product_id);

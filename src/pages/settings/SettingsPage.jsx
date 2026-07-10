@@ -154,6 +154,32 @@ function NonAdminSettings({ user, logout }) {
         {isOpsManager && (
           <>
             <button
+              onClick={() => navigate('/settings/products')}
+              className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+            >
+              <div className="w-10 h-10 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
+                <Package size={20} />
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Products</p>
+                <p className="text-xs text-gray-500">Verify, edit, merge and manage the catalogue</p>
+              </div>
+              <ChevronRight size={18} className="text-gray-400 shrink-0" />
+            </button>
+            <button
+              onClick={() => navigate('/settings/warehouses')}
+              className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+            >
+              <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shrink-0">
+                <Warehouse size={20} />
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold text-gray-900">Warehouses</p>
+                <p className="text-xs text-gray-500">Add, edit and deactivate warehouses</p>
+              </div>
+              <ChevronRight size={18} className="text-gray-400 shrink-0" />
+            </button>
+            <button
               onClick={() => navigate('/accounting')}
               className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
             >
