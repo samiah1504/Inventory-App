@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle, Inbox } from 'lucide-react'
+import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle, Inbox, DollarSign, Plus } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -103,6 +103,26 @@ export function FulfillmentDashboard() {
   })
   const holdingCount = holdingQ.data || 0
 
+  // This officer's own business expenses this month (voided excluded)
+  const myExpensesQ = useQuery({
+    queryKey: ['my_expenses_month', user?.id],
+    enabled: !!user?.id,
+    queryFn: async () => {
+      try {
+        const d = new Date(); d.setDate(1)
+        const { data, error } = await supabase.from('expenses')
+          .select('*')
+          .eq('staff_id', user.id)
+          .is('order_id', null)
+          .gte('date', d.toISOString().split('T')[0])
+        if (error) throw error
+        return (data || []).filter(e => e.status !== 'voided')
+          .reduce((s, e) => s + Number(e.amount || 0), 0)
+      } catch { return 0 }
+    },
+    staleTime: 30000,
+  })
+
   const c = counts.data
   const loading = counts.isLoading
 
@@ -191,6 +211,32 @@ export function FulfillmentDashboard() {
             onClick={() => navigate('/orders?status=failed_delivery')} />
           <StatCard label="Holding Queue" value={holdingQ.isLoading ? '...' : holdingCount} icon={<Inbox size={20} />} color={holdingCount > 0 ? 'amber' : 'gray'}
             onClick={() => navigate('/holding')} />
+        </div>
+
+        {/* Business expenses — logistics costs not tied to an order */}
+        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <DollarSign size={16} className="text-red-500 shrink-0" />
+              <h3 className="text-sm font-semibold text-gray-900 truncate">Business Expenses</h3>
+            </div>
+            <span className="text-sm font-bold text-red-600 shrink-0">
+              {myExpensesQ.isLoading ? '...' : `₦${Number(myExpensesQ.data || 0).toLocaleString()}`}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">Your logistics costs this month — park charges, handling, storage</p>
+          <div className="flex gap-2 mt-3">
+            <button
+              onClick={() => navigate('/my-expenses?add=1')}
+              className="flex-1 py-2.5 bg-blue-600 text-black rounded-xl font-semibold text-xs active:scale-95 transition-all flex items-center justify-center gap-1.5">
+              <Plus size={14} /> Add Business Expense
+            </button>
+            <button
+              onClick={() => navigate('/my-expenses')}
+              className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl font-semibold text-xs active:scale-95 transition-all">
+              View My Expenses
+            </button>
+          </div>
         </div>
 
         {/* Scheduled Today + Overdue */}

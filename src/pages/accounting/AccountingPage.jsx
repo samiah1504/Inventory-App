@@ -171,9 +171,9 @@ export function AccountingPage() {
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  // The Waybill Officer records and manages only her own business
-  // expenses — she never sees the full accounting module
-  if (user?.role === 'waybill') return <Navigate to="/my-expenses" replace />
+  // Fulfillment officers record and manage only their own business
+  // expenses — they never see the full accounting module
+  if (user?.role === 'fulfillment') return <Navigate to="/my-expenses" replace />
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
