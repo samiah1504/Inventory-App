@@ -121,16 +121,18 @@ export function DeleteStaffPage() {
         return
       }
 
+      const { scrambledPassword } = await import('../../lib/passwords')
       const errors = []
       let deleted = 0
       for (const s of dbStaff) {
-        // Access is destroyed and the profile leaves daily operations,
-        // but the row (name) survives so history keeps resolving
+        // Targeted UPDATE by id — never an insert/upsert, and only the
+        // fields below change. The password column is NOT NULL in the
+        // database, so credentials are scrambled, not nulled.
         const { error } = await supabase.from('staff_users').update({
           is_deleted: true,
           is_active: false,
-          status: 'deleted',
-          password: null,
+          status: 'former_staff',
+          password: scrambledPassword(),
           password_hash: null,
           password_salt: null,
           extra_permissions: null,
@@ -145,7 +147,7 @@ export function DeleteStaffPage() {
         if (error) {
           // Deletion columns may predate the migration — still kill access
           const fallback = await supabase.from('staff_users').update({
-            is_active: false, status: 'inactive', password: null,
+            is_active: false, status: 'inactive', password: scrambledPassword(),
             updated_at: new Date().toISOString(),
           }).eq('id', s.id)
           if (fallback.error) {

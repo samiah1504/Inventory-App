@@ -26,14 +26,21 @@ export async function verifyStaffPassword(row, input) {
   return !!row.password && row.password === input
 }
 
+// An unguessable placeholder for the legacy plain-text column — it
+// is NOT NULL in the live database, so it can never be set to null.
+// Once a hash exists it takes priority, making this value inert.
+export function scrambledPassword() {
+  return `#locked-${crypto.randomUUID()}`
+}
+
 // Build the update payload that stores a new password as a hash and
-// wipes any plain-text copy
+// makes the plain-text copy unusable (without violating NOT NULL)
 export async function passwordUpdatePayload(newPassword, extra = {}) {
   const salt = newSalt()
   return {
     password_hash: await hashPassword(newPassword, salt),
     password_salt: salt,
-    password: null,
+    password: scrambledPassword(),
     ...extra,
   }
 }
