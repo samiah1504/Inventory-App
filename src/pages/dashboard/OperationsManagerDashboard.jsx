@@ -101,7 +101,7 @@ export function OperationsManagerDashboard() {
               { label: 'Documents', icon: FileText, action: () => navigate('/documents'), color: 'bg-blue-50 text-blue-700' },
               { label: 'Customers', icon: Users, action: () => navigate('/customers'), color: 'bg-green-50 text-green-600' },
               { label: 'Fulfillment', icon: Truck, action: () => navigate('/fulfillment'), color: 'bg-amber-50 text-amber-600' },
-              { label: 'Accounting', icon: DollarSign, action: () => navigate('/accounting'), color: 'bg-teal-50 text-teal-600' },
+              { label: 'My Expenses', icon: DollarSign, action: () => navigate('/my-expenses'), color: 'bg-teal-50 text-teal-600' },
               { label: 'Holding', icon: Inbox, action: () => navigate('/holding'), color: 'bg-cyan-50 text-cyan-600' },
               { label: 'Products', icon: Package, action: () => navigate('/settings/products'), color: 'bg-indigo-50 text-indigo-600' },
               { label: 'Warehouses', icon: Warehouse, action: () => navigate('/settings/warehouses'), color: 'bg-orange-50 text-orange-600' },

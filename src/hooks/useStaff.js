@@ -347,7 +347,10 @@ export const ACCESS_AREAS = [
 export const ROLE_DEFAULT_ACCESS = {
   ceo:                ACCESS_AREAS.map(a => a.key),
   super_admin:        ACCESS_AREAS.map(a => a.key),
-  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'accounting', 'documents'],
+  // No 'accounting': ops managers record their own expenses on
+  // /my-expenses; company-wide financials stay CEO-only unless the
+  // CEO explicitly ticks accounting access
+  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'documents'],
   customer_support:   ['orders', 'new_order', 'customers'],
   fulfillment:        ['fulfillment', 'orders'],
   waybill:            ['waybill', 'orders'],

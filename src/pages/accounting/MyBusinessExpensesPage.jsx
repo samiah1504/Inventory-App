@@ -14,8 +14,8 @@ import { useBusinesses } from '../../hooks/useBusinesses'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 
-// Logistics / warehouse operational categories — no salaries, rent,
-// utilities or marketing here; those stay admin-only in Accounting
+// Operational categories only — no salaries, rent, utilities or
+// marketing here; those stay admin-only in Accounting (CEO)
 export const LOGISTICS_EXPENSE_TYPES = [
   { value: 'warehouse_handling',   label: 'Warehouse Handling' },
   { value: 'warehouse_storage',    label: 'Warehouse Storage' },
@@ -24,7 +24,11 @@ export const LOGISTICS_EXPENSE_TYPES = [
   { value: 'loading',              label: 'Vehicle Loading' },
   { value: 'offloading',           label: 'Offloading' },
   { value: 'courier_operational',  label: 'Courier Operational' },
-  { value: 'logistics_misc',       label: 'Miscellaneous Logistics' },
+  { value: 'local_transport',      label: 'Local Transport' },
+  { value: 'fuel',                 label: 'Fuel' },
+  { value: 'airtime_data',         label: 'Airtime / Data' },
+  { value: 'office_supplies',      label: 'Office Supplies' },
+  { value: 'logistics_misc',       label: 'Miscellaneous' },
 ]
 
 const EMPTY_FORM = {
@@ -195,7 +199,7 @@ export function MyBusinessExpensesPage() {
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
       <TopBar
-        title="Business Expenses"
+        title="My Expenses"
         actions={
           <button onClick={() => { setForm(EMPTY_FORM); setShowAdd(true) }}
             className="p-2 bg-blue-600 text-white rounded-xl active:scale-95">
@@ -219,8 +223,8 @@ export function MyBusinessExpensesPage() {
           </div>
         )}
         <p className="text-xs text-gray-500">
-          Operational costs not tied to a customer order — park charges, handling, storage, interstate transport.
-          Order costs stay on the order itself.
+          Expenses you personally incur on duty, not tied to a customer order — transport, park charges,
+          handling, storage. You only ever see expenses you recorded yourself.
         </p>
 
         <div className="grid grid-cols-2 gap-3">

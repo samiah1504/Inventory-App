@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Navigate } from 'react-router-dom'
-import { Plus, DollarSign, ChevronDown, ChevronUp, TrendingUp, Trash2 } from 'lucide-react'
+import { Plus, DollarSign, ChevronDown, ChevronUp, TrendingUp, Trash2, Pencil } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
@@ -33,6 +33,7 @@ const ADMIN_ONLY_TYPES = [
 
 export function AccountingPage() {
   const [showModal, setShowModal]             = useState(false)
+  const [editingExp, setEditingExp]           = useState(null)
   const [showExpenseSummary, setShowExpenseSummary] = useState(false)
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]
@@ -92,20 +93,40 @@ export function AccountingPage() {
   const addExpense = useMutation({
     mutationFn: async (data) => {
       const isAdminType = ADMIN_ONLY_TYPES.includes(data.expense_type)
-      const { error } = await supabase.from('expenses').insert({
-        ...data,
-        amount: Number(data.amount),
-        is_admin_only: isAdminType,
-        category: isAdminType ? 'admin' : 'operational',
-        staff_id: user?.id,
-      })
-      if (error) throw error
+      const flags = { is_admin_only: isAdminType, category: isAdminType ? 'admin' : 'operational' }
+      if (editingExp) {
+        // CEO can correct any expense; the edit is stamped
+        const { error } = await supabase.from('expenses').update({
+          business_id: data.business_id,
+          expense_type: data.expense_type,
+          amount: Number(data.amount),
+          description: data.description || null,
+          date: data.date,
+          notes: data.notes || null,
+          ...flags,
+        }).eq('id', editingExp.id)
+        if (error) throw error
+        // Audit columns may predate the migration — best-effort
+        await supabase.from('expenses').update({
+          last_edited_by: user?.name || null,
+          last_edited_at: new Date().toISOString(),
+        }).eq('id', editingExp.id)
+      } else {
+        const { error } = await supabase.from('expenses').insert({
+          ...data,
+          amount: Number(data.amount),
+          ...flags,
+          staff_id: user?.id,
+        })
+        if (error) throw error
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['expenses'] })
       queryClient.invalidateQueries({ queryKey: ['accounting_orders_pl'] })
-      showToast('Expense added', 'success')
+      showToast(editingExp ? 'Expense updated' : 'Expense added', 'success')
       setShowModal(false)
+      setEditingExp(null)
       setForm({
         business_id: '', expense_type: 'misc', amount: '', description: '',
         date: new Date().toISOString().split('T')[0], notes: '', is_admin_only: false,
@@ -390,15 +411,36 @@ export function AccountingPage() {
                    <div className="flex flex-col items-end gap-2 shrink-0">
                      <p className={`text-base font-bold ${voided ? 'text-gray-400 line-through' : 'text-red-600'}`}>{formatCurrency(exp.amount)}</p>
                      {isCeo && (
-                       <button
-                         onClick={() => {
-                           if (window.confirm('Permanently remove this expense? This cannot be undone.')) {
-                             deleteExpense.mutate(exp.id)
-                           }
-                         }}
-                         className="p-1.5 text-gray-300 active:text-red-500">
-                         <Trash2 size={15} />
-                       </button>
+                       <div className="flex gap-1">
+                         {!voided && (
+                           <button
+                             onClick={() => {
+                               setForm({
+                                 business_id: exp.business_id || '',
+                                 expense_type: exp.expense_type || 'misc',
+                                 amount: String(exp.amount ?? ''),
+                                 description: exp.description || '',
+                                 date: exp.date || new Date().toISOString().split('T')[0],
+                                 notes: exp.notes || '',
+                                 is_admin_only: !!exp.is_admin_only,
+                               })
+                               setEditingExp(exp)
+                               setShowModal(true)
+                             }}
+                             className="p-1.5 text-gray-300 active:text-blue-500">
+                             <Pencil size={15} />
+                           </button>
+                         )}
+                         <button
+                           onClick={() => {
+                             if (window.confirm('Permanently remove this expense? This cannot be undone.')) {
+                               deleteExpense.mutate(exp.id)
+                             }
+                           }}
+                           className="p-1.5 text-gray-300 active:text-red-500">
+                           <Trash2 size={15} />
+                         </button>
+                       </div>
                      )}
                    </div>
                  </div>
@@ -413,18 +455,18 @@ export function AccountingPage() {
       {/* ── Add Expense Modal ── */}
       <Modal
         isOpen={showModal}
-        onClose={() => setShowModal(false)}
-        title="Add Expense"
+        onClose={() => { setShowModal(false); setEditingExp(null) }}
+        title={editingExp ? 'Edit Expense' : 'Add Expense'}
         footer={
           <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => setShowModal(false)} className="flex-1">Cancel</Button>
+            <Button variant="secondary" onClick={() => { setShowModal(false); setEditingExp(null) }} className="flex-1">Cancel</Button>
             <Button
               onClick={() => addExpense.mutate(form)}
               loading={addExpense.isPending}
               className="flex-1"
               disabled={!form.business_id || !form.amount}
             >
-              Add
+              {editingExp ? 'Save Changes' : 'Add'}
             </Button>
           </div>
         }

@@ -180,15 +180,15 @@ function NonAdminSettings({ user, logout }) {
               <ChevronRight size={18} className="text-gray-400 shrink-0" />
             </button>
             <button
-              onClick={() => navigate('/accounting')}
+              onClick={() => navigate('/my-expenses')}
               className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
             >
               <div className="w-10 h-10 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shrink-0">
                 <DollarSign size={20} />
               </div>
               <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-semibold text-gray-900">Accounting</p>
-                <p className="text-xs text-gray-500">Log operational expenses</p>
+                <p className="text-sm font-semibold text-gray-900">My Expenses</p>
+                <p className="text-xs text-gray-500">Record expenses you personally incur</p>
               </div>
               <ChevronRight size={18} className="text-gray-400 shrink-0" />
             </button>
