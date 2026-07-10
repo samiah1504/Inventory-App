@@ -170,7 +170,7 @@ export async function purgeOrder(order, { reason, notes, deleteCustomer }, user)
   // Trust nothing: confirm the row is actually gone
   const { data: still } = await supabase.from('orders').select('id').eq('id', order.id).limit(1)
   if (still && still.length > 0) {
-    throw new Error(`${order.order_number}: the database refused the delete (a linked record is still referencing it). Nothing was hidden — the order remains.`)
+    throw new Error(`${order.order_number}: the database blocked the delete. Most likely Row Level Security on the orders table has no DELETE policy for the app — run the RLS fix in supabase/migrations.sql.`)
   }
 
   // Optional customer profile removal — only when nothing else references them

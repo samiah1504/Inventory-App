@@ -463,3 +463,20 @@ ALTER TABLE staff_users
   ADD COLUMN IF NOT EXISTS deleted_by TEXT,
   ADD COLUMN IF NOT EXISTS delete_reason TEXT,
   ADD COLUMN IF NOT EXISTS delete_notes TEXT;
+
+-- ===================================================
+-- RLS fix: the base schema enabled Row Level Security on
+-- orders and staff_users. The app connects with the anon
+-- key, and without an explicit DELETE-capable policy for
+-- it, deletes silently remove 0 rows ("0 orders deleted").
+-- Recreate the policies so the app key has full access —
+-- permissions are enforced by the app's role gates.
+-- ===================================================
+DROP POLICY IF EXISTS "Allow all authenticated" ON orders;
+DROP POLICY IF EXISTS "Allow all authenticated" ON staff_users;
+DROP POLICY IF EXISTS "app full access orders" ON orders;
+DROP POLICY IF EXISTS "app full access staff" ON staff_users;
+CREATE POLICY "app full access orders" ON orders
+  FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "app full access staff" ON staff_users
+  FOR ALL USING (true) WITH CHECK (true);
