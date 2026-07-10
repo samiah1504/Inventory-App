@@ -240,6 +240,20 @@ export function useAdvanceBatchStatus() {
   const { user } = useAuthStore()
   return useMutation({
     mutationFn: async ({ batchId, newStatus, batchNumber, orderIds, notes }) => {
+      // The workflow only ever moves forward. A completed batch is
+      // final — no reconfirming packing/dispatch, even from a stale
+      // screen on another device.
+      const ORDER = ['created', 'packed', 'waybilled', 'received']
+      const { data: fresh } = await supabase.from('waybill_batches')
+        .select('status').eq('id', batchId).limit(1)
+      const current = fresh?.[0]?.status === 'in_transit' ? 'waybilled' : fresh?.[0]?.status
+      if (current === 'received') {
+        throw new Error('This batch is already completed and locked — it cannot be reprocessed.')
+      }
+      if (ORDER.indexOf(newStatus) <= ORDER.indexOf(current)) {
+        throw new Error(`This batch is already ${current} — the workflow only moves forward.`)
+      }
+
       await supabase.from('waybill_batches').update({
         status: newStatus,
         ...(newStatus === 'received' ? { received_at: new Date().toISOString(), received_by: user?.id } : {}),

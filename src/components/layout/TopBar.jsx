@@ -2,7 +2,7 @@ import { ArrowLeft, Wifi, WifiOff } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../stores/appStore'
 
-export function TopBar({ title, back, actions, subtitle }) {
+export function TopBar({ title, back, backTo, actions, subtitle }) {
   const navigate = useNavigate()
   const { isOnline, offlineQueueCount } = useAppStore()
 
@@ -11,7 +11,7 @@ export function TopBar({ title, back, actions, subtitle }) {
       <div className="flex items-center px-4 py-3 gap-3 max-w-lg mx-auto">
         {back !== false && (
           <button
-            onClick={() => navigate(-1)}
+            onClick={() => backTo ? navigate(backTo, { replace: true }) : navigate(-1)}
             className="p-1.5 -ml-1.5 rounded-xl text-gray-600 hover:bg-gray-100 active:scale-95 transition-all"
           >
             <ArrowLeft size={20} />

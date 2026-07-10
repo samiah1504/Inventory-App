@@ -137,12 +137,17 @@ export function WaybillBatchDetailPage() {
     sum + COST_KEYS.reduce((s, { key }) => s + (Number(exp[key]) || 0), 0), 0)
 
   async function handleAdvance(newStatus) {
-    await advanceBatchStatus.mutateAsync({
-      batchId: id,
-      newStatus,
-      batchNumber: batch.batch_number,
-      orderIds,
-    })
+    try {
+      await advanceBatchStatus.mutateAsync({
+        batchId: id,
+        newStatus,
+        batchNumber: batch.batch_number,
+        orderIds,
+      })
+    } catch (err) {
+      showToast(err.message, 'error')
+      return
+    }
     showToast(
       newStatus === 'packed' ? 'Packing confirmed' :
       newStatus === 'waybilled' ? 'Batch dispatched — add expenses below' :
@@ -226,7 +231,9 @@ export function WaybillBatchDetailPage() {
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
-      <TopBar title={batch.batch_number} />
+      {/* Back always exits to the batches list — never into a previous
+          confirmation step of the workflow */}
+      <TopBar title={batch.batch_number} backTo="/waybill?tab=batches" />
 
       {/* Batch Header */}
       <div className="bg-gray-900 text-white px-4 pt-4 pb-5">
@@ -236,6 +243,13 @@ export function WaybillBatchDetailPage() {
           </span>
           <span className="text-xs text-gray-400">{formatDate(batch.created_at)}</span>
         </div>
+        {isDone && (
+          <div className="mt-2 bg-green-500/15 border border-green-500/40 rounded-xl px-3 py-2">
+            <p className="text-xs font-semibold text-green-400">
+              ✓ Completed — this batch is locked. Everything below is read-only; documents can still be viewed and downloaded.
+            </p>
+          </div>
+        )}
         <p className="text-base font-semibold text-white mt-1">{batch.courier_company || 'No courier'}</p>
         {(batch.source_state || batch.source_warehouse_id) && (
           <p className="text-xs text-gray-400">From: {batch.source_state || 'warehouse'}</p>
@@ -591,7 +605,7 @@ export function WaybillBatchDetailPage() {
                         <Copy size={14} className="mr-1.5" /> Copy WhatsApp Notification
                       </Button>
                     </>
-                  ) : (isTransit || isDone) && stateArrivals !== null && (
+                  ) : isTransit && stateArrivals !== null && (
                     <Button
                       size="sm" className="w-full mt-3"
                       onClick={() => {
