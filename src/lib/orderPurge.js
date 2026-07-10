@@ -140,7 +140,27 @@ export async function purgeOrder(order, { reason, notes, deleteCustomer }, user)
 
   // Order-exclusive records
   await supabase.from('inventory_movements').delete().eq('reference_id', order.id)
+
+  // Waybill links go; a batch that only carried this order goes with
+  // it (otherwise it lingers as an empty "batch to pack" on the
+  // waybill dashboard). Batches shared with other orders survive.
+  let batchIds = []
+  try {
+    const { data: links } = await supabase.from('waybill_batch_orders')
+      .select('batch_id').eq('order_id', order.id)
+    batchIds = [...new Set((links || []).map(l => l.batch_id).filter(Boolean))]
+  } catch { /* ignore */ }
   await supabase.from('waybill_batch_orders').delete().eq('order_id', order.id)
+  for (const batchId of batchIds) {
+    try {
+      const { count } = await supabase.from('waybill_batch_orders')
+        .select('*', { count: 'exact', head: true }).eq('batch_id', batchId)
+      if ((count || 0) === 0) {
+        const { error: bErr } = await supabase.from('waybill_batches').delete().eq('id', batchId)
+        if (!bErr) warnings.push(`${order.order_number}: its waybill batch had no other orders and was removed too.`)
+      }
+    } catch { /* batch stays; harmless */ }
+  }
   await supabase.from('expenses').delete().eq('order_id', order.id)
   await supabase.from('order_notes').delete().eq('order_id', order.id)
   await supabase.from('order_timeline').delete().eq('order_id', order.id)

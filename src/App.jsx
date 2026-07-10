@@ -45,7 +45,11 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       retry: 1,
-      refetchOnWindowFocus: false,
+      // Refetch whenever the app regains focus so every device shows
+      // the current database state (deletions on the CEO's phone must
+      // reach an officer's already-open dashboard)
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
       staleTime: 30000,
     },
   },
