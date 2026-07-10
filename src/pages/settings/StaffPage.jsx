@@ -32,7 +32,8 @@ export function StaffPage() {
     queryFn: async () => {
       const { data, error } = await supabase.from('staff_users').select('*').order('name')
       if (error) throw error
-      return data || []
+      // Deleted accounts leave daily operations entirely
+      return (data || []).filter(s => !s.is_deleted)
     },
   })
 

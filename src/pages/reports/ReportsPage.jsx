@@ -445,9 +445,10 @@ export function ReportsPage() {
     enabled: tab === 'expenses' && isCeo,
     queryFn: async () => {
       try {
-        const { data, error } = await supabase.from('staff_users').select('id, name')
+        const { data, error } = await supabase.from('staff_users').select('*')
         if (error) throw error
-        return data || []
+        // Deleted accounts still resolve for history, marked as former staff
+        return (data || []).map(s => ({ ...s, name: s.is_deleted ? `${s.name} (Former Staff)` : s.name }))
       } catch { return [] }
     },
     staleTime: 60000 * 5,

@@ -37,7 +37,7 @@ export function useProductMovements(productId) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inventory_movements')
-        .select('*, warehouse:warehouses(name, state), staff:staff_users(name)')
+        .select('*, warehouse:warehouses(name, state), staff:staff_users(*)')
         .eq('product_id', productId)
         .order('created_at', { ascending: false })
         .limit(30)

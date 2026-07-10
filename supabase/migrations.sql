@@ -451,3 +451,15 @@ ALTER TABLE staff_users
   ADD COLUMN IF NOT EXISTS password_salt TEXT,
   ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false,
   ADD COLUMN IF NOT EXISTS recovery_email TEXT;
+
+-- ===================================================
+-- CEO-only staff deletion (access removed, history kept)
+-- The row is retained so every historical record still
+-- resolves to the person's name — shown as (Former Staff)
+-- ===================================================
+ALTER TABLE staff_users
+  ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS deleted_by TEXT,
+  ADD COLUMN IF NOT EXISTS delete_reason TEXT,
+  ADD COLUMN IF NOT EXISTS delete_notes TEXT;

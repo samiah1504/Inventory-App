@@ -32,6 +32,7 @@ import { DocumentsPage } from './pages/documents/DocumentsPage'
 import { EditOrderPage } from './pages/orders/EditOrderPage'
 import { AlertsPage } from './pages/settings/AlertsPage'
 import { DeleteOrdersPage } from './pages/settings/DeleteOrdersPage'
+import { DeleteStaffPage } from './pages/settings/DeleteStaffPage'
 import { DeletedOrderAuditPage } from './pages/settings/DeletedOrderAuditPage'
 import { useAuthStore } from './stores/authStore'
 import { useAppStore } from './stores/appStore'
@@ -140,6 +141,7 @@ export default function App() {
             <Route path="/settings/products" element={<ProductsPage />} />
             <Route path="/settings/alerts" element={<AlertsPage />} />
             <Route path="/settings/delete-orders" element={<DeleteOrdersPage />} />
+            <Route path="/settings/delete-staff" element={<DeleteStaffPage />} />
             <Route path="/settings/deleted-audit" element={<DeletedOrderAuditPage />} />
             <Route path="/orders/:id/edit" element={<EditOrderPage />} />
           </Route>

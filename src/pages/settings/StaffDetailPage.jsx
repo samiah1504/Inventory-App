@@ -16,7 +16,7 @@ import {
   useIssueWarning, useSaveDocument, useDeleteDocument, useAddStaffNote, useDeleteStaffNote,
   LEAVE_TYPES, WARNING_TYPES, DOCUMENT_CATEGORIES, STAFF_STATUSES, labelOf,
 } from '../../hooks/useStaff'
-import { useSetStaffStatus, useDeleteStaff, useSetStaffAccess, useSetAssignedStates, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
+import { useSetStaffStatus, useSetStaffAccess, useSetAssignedStates, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
 import { NIGERIAN_STATES } from '../../utils/format'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
@@ -76,7 +76,6 @@ export function StaffDetailPage() {
   const deleteDocument = useDeleteDocument()
   const addNote = useAddStaffNote()
   const deleteNote = useDeleteStaffNote()
-  const deleteStaff = useDeleteStaff()
   const setAccess = useSetStaffAccess()
   const setAssignedStates = useSetAssignedStates()
   const [accessDraft, setAccessDraft] = useState(null)
@@ -136,20 +135,7 @@ export function StaffDetailPage() {
         title={staff.name}
         actions={isCeo && (
           <div className="flex gap-2">
-            {staff.id !== user?.id && (
-              <button
-                title="Delete staff"
-                onClick={async () => {
-                  if (!window.confirm(`Delete ${staff.name}? This cannot be undone.`)) return
-                  try {
-                    await deleteStaff.mutateAsync({ staff_id: staff.id })
-                    navigate('/settings/staff')
-                  } catch { /* toast shown; may have been deactivated instead */ }
-                }}
-                className="p-2 bg-red-50 text-red-600 rounded-xl active:scale-95 transition-all">
-                <Trash2 size={18} />
-              </button>
-            )}
+            {/* Deletion is an advanced function: Settings → Advanced → Delete Staff */}
             <button onClick={() => setShowReset(true)} title="Reset password"
               className="p-2 bg-gray-100 text-gray-700 rounded-xl active:scale-95 transition-all">
               <KeyRound size={18} />

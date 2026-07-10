@@ -528,7 +528,7 @@ export function InventoryPage() {
                                           <p className="text-[11px] text-gray-400">
                                             {formatDate(m.created_at)}
                                             {m.warehouse?.name ? ` · ${m.warehouse.name}` : ''}
-                                            {m.staff?.name ? ` · ${m.staff.name}` : ''}
+                                            {m.staff?.name ? ` · ${m.staff.name}${m.staff.is_deleted ? ' (Former Staff)' : ''}` : ''}
                                           </p>
                                         </div>
                                       </div>

@@ -388,19 +388,11 @@ export function useSetStaffAccess() {
 
 // Hard delete when possible; staff referenced by orders/expenses/etc. can't be
 // removed without losing history, so they're deactivated instead.
-export function useDeleteStaff() {
-  return useHrMutation(async ({ staff_id }) => {
-    const { error } = await supabase.from('staff_users').delete().eq('id', staff_id)
-    if (error) {
-      if (error.code === '23503' || /foreign key|violates/i.test(error.message || '')) {
-        await supabase.from('staff_users')
-          .update({ is_active: false, status: 'inactive', updated_at: new Date().toISOString() })
-          .eq('id', staff_id)
-        throw new Error('This staff member has history (orders, expenses…) so the record was kept but marked Inactive — they can no longer log in.')
-      }
-      throw error
-    }
-  }, ['staff'], 'Staff deleted')
+// Staff deletion lives in Settings → Advanced → Delete Staff. The row
+// is kept (marked is_deleted) so historical records keep the name.
+export function formerName(staff) {
+  if (!staff?.name) return ''
+  return staff.is_deleted ? `${staff.name} (Former Staff)` : staff.name
 }
 
 // States a fulfillment officer covers (36 states + FCT)

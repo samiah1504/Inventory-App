@@ -133,6 +133,13 @@ export function SettingsPage() {
               <ChevronRight size={16} className="text-red-300" />
             </button>
             <button
+              onClick={() => navigate('/settings/delete-staff')}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-red-50 rounded-xl active:scale-[0.99] transition-all"
+            >
+              <span className="text-sm font-semibold text-red-700">Delete Staff</span>
+              <ChevronRight size={16} className="text-red-300" />
+            </button>
+            <button
               onClick={() => navigate('/settings/deleted-audit')}
               className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-gray-50 rounded-xl active:scale-[0.99] transition-all"
             >
