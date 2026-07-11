@@ -9,6 +9,7 @@ import { StatCard } from '../../components/ui/Card'
 import { SkeletonList } from '../../components/ui/Skeleton'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { useAuthStore } from '../../stores/authStore'
+import { scopeToBusinesses } from '../../lib/businessScope'
 import {
   BarChart3, TrendingUp, Package, Truck, Users, DollarSign,
   AlertCircle, Download, ChevronDown, ChevronUp, Search, X,
@@ -339,6 +340,7 @@ export function ReportsPage() {
           .lte('created_at', `${dateTo}T23:59:59`)
           .order('created_at', { ascending: false })
         if (businessId) q = q.eq('business_id', businessId)
+        q = scopeToBusinesses(q, user)
         const { data, error } = await q
         if (error) throw error
         return data || []
@@ -356,6 +358,7 @@ export function ReportsPage() {
         let q = supabase.from('expenses').select('*, business:businesses(name)')
           .gte('date', dateFrom).lte('date', dateTo)
         if (businessId) q = q.eq('business_id', businessId)
+        q = scopeToBusinesses(q, user)
         const { data, error } = await q
         if (error) throw error
         // Voided expenses stay on record for audit but never count
@@ -480,6 +483,7 @@ export function ReportsPage() {
           .select('*, product:products(name, business:businesses(name)), warehouse:warehouses(name, state)')
           .order('quantity_available', { ascending: true })
         if (businessId) q = q.eq('business_id', businessId)
+        q = scopeToBusinesses(q, user)
         const { data, error } = await q
         if (error) throw error
         return data || []
@@ -500,6 +504,7 @@ export function ReportsPage() {
           .lte('created_at', `${dateTo}T23:59:59`)
           .order('created_at', { ascending: false })
         if (businessId) q = q.eq('business_id', businessId)
+        q = scopeToBusinesses(q, user)
         const { data, error } = await q
         if (error) throw error
         return data || []
@@ -774,10 +779,12 @@ export function ReportsPage() {
           .gte('created_at', `${startISO}T00:00:00`)
           .in('status', ['paid', 'partially_paid'])
         if (businessId) oq = oq.eq('business_id', businessId)
+        oq = scopeToBusinesses(oq, user)
         let eq = supabase.from('expenses')
           .select('*')
           .gte('date', startISO)
         if (businessId) eq = eq.eq('business_id', businessId)
+        eq = scopeToBusinesses(eq, user)
         const [oR, eR] = await Promise.all([oq, eq])
         if (oR.error || eR.error) throw oR.error || eR.error
         return { orders: oR.data || [], expenses: (eR.data || []).filter(e => e.status !== 'voided') }

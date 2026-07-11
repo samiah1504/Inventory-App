@@ -9,6 +9,7 @@ import { SkeletonList } from '../../components/ui/Skeleton'
 import { EmptyState } from '../../components/ui/EmptyState'
 import { useAuthStore } from '../../stores/authStore'
 import { formatDate } from '../../utils/format'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 const STATUS = {
   out:       { label: 'Out of Stock', chip: 'bg-red-50 text-red-700' },
@@ -39,9 +40,9 @@ export function MyWarehouseStockPage() {
     ? user.assigned_states : null
 
   const { data: inventory, isLoading } = useQuery({
-    queryKey: ['my_warehouse_stock', myStates],
+    queryKey: ['my_warehouse_stock', myStates, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('inventory')
         .select(`
           *,
@@ -49,6 +50,8 @@ export function MyWarehouseStockPage() {
           warehouse:warehouses(id, name, state)
         `)
         .order('quantity_available', { ascending: true })
+      q = scopeToBusinesses(q, user)
+      const { data, error } = await q
       if (error) throw error
       const rows = data || []
       return myStates

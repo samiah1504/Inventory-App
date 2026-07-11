@@ -395,6 +395,16 @@ export function formerName(staff) {
   return staff.is_deleted ? `${staff.name} (Former Staff)` : staff.name
 }
 
+// Businesses a staff member can access (empty = all businesses)
+export function useSetStaffBusinesses() {
+  return useHrMutation(async ({ staff_id, business_ids }) => {
+    const { error } = await supabase.from('staff_users')
+      .update({ business_ids, updated_at: new Date().toISOString() })
+      .eq('id', staff_id)
+    if (error) throw error
+  }, ['staff', 'staff_member'], 'Business access updated — applies at their next login')
+}
+
 // States a fulfillment officer covers (36 states + FCT)
 export function useSetAssignedStates() {
   return useHrMutation(async ({ staff_id, states }) => {

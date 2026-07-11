@@ -13,6 +13,7 @@ import { EmptyState } from '../../components/ui/EmptyState'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
 import { accessFor } from '../../hooks/useStaff'
+import { scopeToBusinesses } from '../../lib/businessScope'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/format'
 
@@ -62,12 +63,13 @@ const DEFAULT_FILTERS = () => {
 }
 
 // Enrich expense rows with their linked order (number, customer, state…)
-async function fetchExpensesWithOrders({ from, to, isCeo, businessId }) {
+async function fetchExpensesWithOrders({ from, to, isCeo, businessId, user }) {
   let q = supabase.from('expenses').select('*, business:businesses(name)')
     .gte('date', from).lte('date', to)
     .order('date', { ascending: false }).limit(500)
   if (!isCeo) q = q.eq('is_admin_only', false)
   if (businessId) q = q.eq('business_id', businessId)
+  q = scopeToBusinesses(q, user)
   const { data, error } = await q
   if (error) throw error
   const rows = data || []
@@ -127,15 +129,15 @@ export function AccountingPage() {
 
   // Overview: this month + trailing 7 days, fixed scope
   const overviewQ = useQuery({
-    queryKey: ['expenses_overview', overviewFrom, todayISO, isCeo],
-    queryFn: () => fetchExpensesWithOrders({ from: overviewFrom, to: todayISO, isCeo }),
+    queryKey: ['expenses_overview', overviewFrom, todayISO, isCeo, user?.id],
+    queryFn: () => fetchExpensesWithOrders({ from: overviewFrom, to: todayISO, isCeo, user }),
     staleTime: 30000,
   })
 
   // List: driven by the filter bar
   const listQ = useQuery({
-    queryKey: ['expenses', f.dateFrom, f.dateTo, isCeo, f.business],
-    queryFn: () => fetchExpensesWithOrders({ from: f.dateFrom, to: f.dateTo, isCeo, businessId: f.business }),
+    queryKey: ['expenses', f.dateFrom, f.dateTo, isCeo, f.business, user?.id],
+    queryFn: () => fetchExpensesWithOrders({ from: f.dateFrom, to: f.dateTo, isCeo, businessId: f.business, user }),
     staleTime: 30000,
   })
 

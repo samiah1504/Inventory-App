@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { queueAction, isOnline } from '../lib/offline'
 import { reserveStockForOrder, resolveOrderStock, startReturnProcess, receiveOrderStockAtWarehouse, resolveFailedDeliveryStock } from '../lib/stockOps'
+import { scopeToBusinesses, businessAllowed } from '../lib/businessScope'
 
 export function useOrders(filters = {}) {
   const { user } = useAuthStore()
@@ -28,6 +29,9 @@ export function useOrders(filters = {}) {
       if (user?.role === 'fulfillment' && Array.isArray(user?.assigned_states) && user.assigned_states.length > 0) {
         query = query.in('state', user.assigned_states)
       }
+      // Business restriction: staff only ever receive rows for their
+      // assigned business(es) — enforced in the database request
+      query = scopeToBusinesses(query, user)
       if (filters.status) query = query.eq('status', filters.status)
       if (filters.delivery_fee_pending) query = query.eq('delivery_fee_pending', true)
       if (filters.statuses) query = query.in('status', filters.statuses)
@@ -51,8 +55,9 @@ export function useOrders(filters = {}) {
 }
 
 export function useOrder(id) {
+  const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['order', id],
+    queryKey: ['order', id, user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('orders')
@@ -68,6 +73,11 @@ export function useOrder(id) {
         .eq('id', id)
         .single()
       if (error) throw error
+
+      // A direct URL must not bypass the business restriction
+      if (!businessAllowed(user, data.business_id)) {
+        throw new Error('Order not found')
+      }
 
       // Load items: prefer order_items table, fall back to items_data JSONB column on the order
       let items = []

@@ -65,6 +65,8 @@ export function useHoldingQueue(includeClosed = false) {
         if (user?.role === 'fulfillment' && Array.isArray(user?.assigned_states) && user.assigned_states.length > 0) {
           q = q.in('state', user.assigned_states)
         }
+        const { scopeToBusinesses } = await import('../lib/businessScope')
+        q = scopeToBusinesses(q, user)
         const { data, error } = await q
         if (error) throw error
         return data || []

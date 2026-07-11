@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
 import { useAuthStore } from '../../stores/authStore'
+import { scopeToBusinesses } from '../../lib/businessScope'
 import { useBusinesses } from '../../hooks/useBusinesses'
 
 const MONTHS = [
@@ -51,7 +52,7 @@ export function SalesAnalyticsPage() {
         .order('created_at', { ascending: false })
 
       if (businessId) q = q.eq('business_id', businessId)
-      else if (!isCeo && user?.business_id) q = q.eq('business_id', user.business_id)
+      q = scopeToBusinesses(q, user)
 
       const { data, error } = await q
       if (error) throw error

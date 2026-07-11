@@ -2,10 +2,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
+import { scopeToBusinesses } from '../lib/businessScope'
 
 export function useInventory(filters = {}) {
+  const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['inventory', filters],
+    queryKey: ['inventory', filters, user?.id],
     queryFn: async () => {
       let query = supabase
         .from('inventory')
@@ -20,6 +22,7 @@ export function useInventory(filters = {}) {
       if (filters.warehouse_id) query = query.eq('warehouse_id', filters.warehouse_id)
       if (filters.business_id) query = query.eq('business_id', filters.business_id)
       if (filters.low_stock) query = query.lte('quantity_available', 5)
+      query = scopeToBusinesses(query, user)
 
       const { data, error } = await query
       if (error) throw error
@@ -374,8 +377,9 @@ export function useTransferAtPark() {
 // ─── Returns ─────────────────────────────────────────────────────────────────
 
 export function useReturns(filters = {}) {
+  const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['returns', filters],
+    queryKey: ['returns', filters, user?.id],
     queryFn: async () => {
       let query = supabase
         .from('returns')
@@ -386,6 +390,7 @@ export function useReturns(filters = {}) {
           timeline:return_timeline(*)
         `)
         .order('created_at', { ascending: false })
+      query = scopeToBusinesses(query, user)
       if (filters.status) query = query.eq('status', filters.status)
       const { data, error } = await query
       if (error) throw error

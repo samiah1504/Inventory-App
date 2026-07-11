@@ -56,7 +56,7 @@ export function CeoDashboard() {
       const [
         newC, awaitingC, failedRows, delayedRows, deliveredRows, partialRows,
         feePendingC, returnedRows, cashRows, transfersC, pendingLeaveC,
-        activeStaffC, onLeaveRows, unverifiedC,
+        activeStaffC, onLeaveRows, unverifiedC, holdingC,
       ] = await Promise.all([
         count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'new')),
         count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill')),
@@ -72,6 +72,7 @@ export function CeoDashboard() {
         count(supabase.from('staff_users').select('*', { count: 'exact', head: true }).eq('is_active', true)),
         rows(supabase.from('staff_leave').select('id').eq('status', 'approved').lte('start_date', today).gte('end_date', today)),
         count(supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_verified', false).eq('is_active', true).then(r => r, () => ({ count: 0 }))),
+        count(supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected']).then(r => r, () => ({ count: 0 }))),
       ])
       return {
         newC, awaitingC, failedRows, delayedRows, deliveredRows, partialRows,
@@ -81,6 +82,7 @@ export function CeoDashboard() {
         transfersC, pendingLeaveC, activeStaffC,
         onLeaveC: onLeaveRows.length,
         unverifiedC,
+        holdingC,
       }
     },
     staleTime: 30000,
@@ -187,6 +189,7 @@ export function CeoDashboard() {
     { label: 'Leave requests pending',   count: a?.pendingLeaveC || 0,   to: '/settings/staff' },
     { label: 'Low stock products',       count: inv?.low || 0,           to: '/inventory?filter=low_stock' },
     { label: 'Unverified products',      count: a?.unverifiedC || 0,     to: '/settings/products?tab=unverified' },
+    { label: 'Products in holding queue', count: a?.holdingC || 0,       to: '/holding' },
   ]
   const inboxTotal = inboxItems.reduce((s, i) => s + i.count, 0)
 
@@ -335,11 +338,12 @@ export function CeoDashboard() {
         {/* ── 4. Inventory Health ── */}
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <h3 className="text-sm font-semibold text-gray-900 mb-2">Inventory Health</h3>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {[
               { label: 'Low Stock', value: inv?.low || 0, to: '/inventory?filter=low_stock', warn: (inv?.low || 0) > 0 },
               { label: 'Out of Stock', value: inv?.out || 0, to: '/inventory', warn: (inv?.out || 0) > 0, red: true },
               { label: 'In Transit', value: a?.transfersC || 0, to: '/inventory?tab=transfers' },
+              { label: 'Holding Queue', value: a?.holdingC || 0, to: '/holding', warn: (a?.holdingC || 0) > 0 },
             ].map(c => (
               <button key={c.label} onClick={() => navigate(c.to)}
                 className="rounded-xl bg-gray-50 p-2.5 text-center active:scale-[0.97] transition-all">

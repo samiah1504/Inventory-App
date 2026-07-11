@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 import { formatDate } from '../../utils/format'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 const BATCH_STATUS = {
   created:  { label: 'To Pack',    color: 'bg-blue-100 text-blue-700' },
@@ -19,21 +20,22 @@ export function WaybillDashboard() {
   const navigate = useNavigate()
 
   const dash = useQuery({
-    queryKey: ['waybill_dashboard'],
+    queryKey: ['waybill_dashboard', user?.id],
     queryFn: async () => {
       const count = (builder) => builder.then(r => r.count || 0)
+      const s = (q) => scopeToBusinesses(q, user)
       const [toPack, toDispatch, inTransit, completed, sentToPark, awaiting, holding, recentR] = await Promise.all([
-        count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'created')),
-        count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'packed')),
-        count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).in('status', ['waybilled', 'in_transit'])),
-        count(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'received')),
-        count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'sent_to_park')),
-        count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill')),
-        count(supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected'])).catch(() => 0),
-        supabase.from('waybill_batches')
+        count(s(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'created'))),
+        count(s(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'packed'))),
+        count(s(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).in('status', ['waybilled', 'in_transit']))),
+        count(s(supabase.from('waybill_batches').select('*', { count: 'exact', head: true }).eq('status', 'received'))),
+        count(s(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'sent_to_park'))),
+        count(s(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill'))),
+        count(s(supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected']))).catch(() => 0),
+        s(supabase.from('waybill_batches')
           .select('id, batch_number, status, courier_company, destination_state, created_at')
           .order('created_at', { ascending: false })
-          .limit(5),
+          .limit(5)),
       ])
       return { toPack, toDispatch, inTransit, completed, sentToPark, awaiting, holding, recent: recentR.data || [] }
     },

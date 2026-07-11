@@ -17,6 +17,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { useWarehouses, useProducts } from '../../hooks/useBusinesses'
 import { NIGERIAN_STATES, formatDate } from '../../utils/format'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 const TABS = [
   { key: 'awaiting', label: 'Awaiting Waybill' },
@@ -47,13 +48,15 @@ export function WaybillPage() {
   const waybilledOrders = useOrders({ status: 'waybilled' })
 
   const batches = useQuery({
-    queryKey: ['waybill_batches'],
+    queryKey: ['waybill_batches', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('waybill_batches')
         .select('*, items:waybill_batch_orders(count)')
         .order('created_at', { ascending: false })
         .limit(50)
+      q = scopeToBusinesses(q, user)
+      const { data, error } = await q
       if (error) throw error
       return data || []
     },
@@ -96,10 +99,12 @@ export function WaybillPage() {
     retry: false,
     queryFn: async () => {
       try {
-        const { data, error } = await supabase
+        let hq = supabase
           .from('holding_queue')
           .select('*')
           .in('status', ['holding', 'collected'])
+        hq = scopeToBusinesses(hq, user)
+        const { data, error } = await hq
           .order('created_at', { ascending: false })
         if (error) throw error
         return data || []

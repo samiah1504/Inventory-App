@@ -16,7 +16,7 @@ import {
   useIssueWarning, useSaveDocument, useDeleteDocument, useAddStaffNote, useDeleteStaffNote,
   LEAVE_TYPES, WARNING_TYPES, DOCUMENT_CATEGORIES, STAFF_STATUSES, labelOf,
 } from '../../hooks/useStaff'
-import { useSetStaffStatus, useSetStaffAccess, useSetAssignedStates, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
+import { useSetStaffStatus, useSetStaffAccess, useSetAssignedStates, useSetStaffBusinesses, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
 import { NIGERIAN_STATES } from '../../utils/format'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
@@ -81,8 +81,10 @@ export function StaffDetailPage() {
   const deleteNote = useDeleteStaffNote()
   const setAccess = useSetStaffAccess()
   const setAssignedStates = useSetAssignedStates()
+  const setStaffBusinesses = useSetStaffBusinesses()
   const [accessDraft, setAccessDraft] = useState(null)
   const [statesDraft, setStatesDraft] = useState(null)
+  const [bizDraft, setBizDraft] = useState(null)
 
   const staff = staffQ.data
   const isCeo = ['ceo', 'super_admin'].includes(user?.role)
@@ -240,6 +242,51 @@ export function StaffDetailPage() {
                         setStatesDraft(null)
                       }}>
                       Save Assigned States
+                    </Button>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Business access — which business(es) this staff can see */}
+            {isCeo && !['ceo', 'super_admin'].includes(staff.role) && (businesses || []).length > 0 && (() => {
+              const current = bizDraft ?? (Array.isArray(staff.business_ids) ? staff.business_ids : [])
+              const dirty = bizDraft !== null
+              const toggle = (id) => setBizDraft(
+                current.includes(id) ? current.filter(x => x !== id) : [...current, id]
+              )
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Business Access</p>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    {staff.name.split(' ')[0]} only sees orders, inventory, waybills, expenses and reports
+                    for the ticked businesses. No ticks = all businesses. Applies at their next login.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {businesses.map(b => {
+                      const on = current.includes(b.id)
+                      return (
+                        <button key={b.id} onClick={() => toggle(b.id)}
+                          className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-left transition-all active:scale-[0.99] ${
+                            on ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'
+                          }`}>
+                          <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+                            on ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-transparent'
+                          }`}>
+                            <Check size={12} />
+                          </span>
+                          <span className="text-xs text-gray-800 truncate">{b.name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {dirty && (
+                    <Button className="w-full mt-3" size="sm" loading={setStaffBusinesses.isPending}
+                      onClick={async () => {
+                        await setStaffBusinesses.mutateAsync({ staff_id: staff.id, business_ids: current })
+                        setBizDraft(null)
+                      }}>
+                      Save Business Access
                     </Button>
                   )}
                 </div>

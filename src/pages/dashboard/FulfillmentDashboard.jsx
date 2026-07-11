@@ -7,6 +7,7 @@ import { StatCard } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { formatDate } from '../../utils/format'
 import { useReceiveTransfer, useTransferAtPark } from '../../hooks/useInventory'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 export function FulfillmentDashboard() {
   const { user } = useAuthStore()
@@ -21,7 +22,7 @@ export function FulfillmentDashboard() {
   const counts = useQuery({
     queryKey: ['fulfillment_counts', today, myStates],
     queryFn: async () => {
-      const scoped = (q) => myStates ? q.in('state', myStates) : q
+      const scoped = (q) => scopeToBusinesses(myStates ? q.in('state', myStates) : q, user)
       const byStatus = (status) =>
         scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', status))
 
@@ -94,6 +95,7 @@ export function FulfillmentDashboard() {
           .select('*', { count: 'exact', head: true })
           .in('status', ['holding', 'collected'])
         if (myStates) q = q.in('state', myStates)
+        q = scopeToBusinesses(q, user)
         const { count, error } = await q
         if (error) throw error
         return count || 0

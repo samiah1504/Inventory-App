@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 function today() { return new Date().toISOString().split('T')[0] }
 
@@ -14,13 +15,14 @@ export function OperationsManagerDashboard() {
   const counts = useQuery({
     queryKey: ['ops_counts', today()],
     queryFn: async () => {
+      const s = (q) => scopeToBusinesses(q, user)
       const [todayR, processingR, waybilledR, awaitingR, holdingR, unverifiedR] = await Promise.all([
-        supabase.from('orders').select('*', { count: 'exact', head: true }).gte('created_at', `${today()}T00:00:00`).lte('created_at', `${today()}T23:59:59`),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'waybilled'),
-        supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill'),
-        supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected']).then(r => r, () => ({ count: 0 })),
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_verified', false).eq('is_active', true).then(r => r, () => ({ count: 0 })),
+        s(supabase.from('orders').select('*', { count: 'exact', head: true }).gte('created_at', `${today()}T00:00:00`).lte('created_at', `${today()}T23:59:59`)),
+        s(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing')),
+        s(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'waybilled')),
+        s(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'awaiting_waybill')),
+        s(supabase.from('holding_queue').select('*', { count: 'exact', head: true }).in('status', ['holding', 'collected'])).then(r => r, () => ({ count: 0 })),
+        s(supabase.from('products').select('*', { count: 'exact', head: true }).eq('is_verified', false).eq('is_active', true)).then(r => r, () => ({ count: 0 })),
       ])
       return {
         today: todayR.count || 0,
