@@ -107,18 +107,31 @@ export function useCreateOrder() {
   const { showToast } = useAppStore()
   const { user } = useAuthStore()
 
+  // Same ORD-YYYY-NNNNN format, but generated atomically in the
+  // database from ONE global sequence — never reused, unaffected by
+  // deletions, safe under concurrent staff
+  async function nextOrderNumber(businessId) {
+    try {
+      const { data, error } = await supabase.rpc('get_next_order_number')
+      if (!error && data) return data
+    } catch { /* function not migrated yet */ }
+    // Legacy per-business counter until the migration runs
+    const year = new Date().getFullYear()
+    const { data: counter } = await supabase.rpc('get_next_counter', {
+      counter_type: 'order', business_id_param: businessId, year_param: year,
+    })
+    if (counter) return `ORD-${year}-${String(counter).padStart(5, '0')}`
+    // Last resort: one above the highest existing number this year
+    const { data: last } = await supabase.from('orders')
+      .select('order_number').ilike('order_number', `ORD-${year}-%`)
+      .order('order_number', { ascending: false }).limit(1)
+    const lastN = parseInt(last?.[0]?.order_number?.split('-')[2]) || 0
+    return `ORD-${year}-${String(lastN + 1).padStart(5, '0')}`
+  }
+
   return useMutation({
     mutationFn: async (orderData) => {
       const { items, ...orderFields } = orderData
-
-      // Get next order number
-      const year = new Date().getFullYear()
-      const { data: counter } = await supabase.rpc('get_next_counter', {
-        counter_type: 'order',
-        business_id_param: orderFields.business_id,
-        year_param: year
-      })
-      const orderNumber = `ORD-${year}-${String(counter || 1).padStart(5, '0')}`
 
       // Upsert customer
       const { data: customer } = await supabase
@@ -141,19 +154,32 @@ export function useCreateOrder() {
         size: item.size || null,
       }))
 
-      const payload = {
-        ...orderFields,
-        order_number: orderNumber,
-        customer_id: customer?.id,
-        staff_code: user?.staff_code,
-        created_by: user?.id,
-        status: 'new',
-        // Store all items as JSON directly on the order — always works, no extra table needed
-        items_data: cleanItems.length > 0 ? cleanItems : null,
+      // Generate + insert with automatic retry: if a duplicate number
+      // somehow slips through, a fresh number is drawn and retried.
+      // No partial order is ever created, and the raw database error
+      // never reaches the user.
+      let data = null
+      let orderNumber = null
+      for (let attempt = 0; attempt < 5; attempt++) {
+        orderNumber = await nextOrderNumber(orderFields.business_id)
+        const payload = {
+          ...orderFields,
+          order_number: orderNumber,
+          customer_id: customer?.id,
+          staff_code: user?.staff_code,
+          created_by: user?.id,
+          status: 'new',
+          // Store all items as JSON directly on the order — always works, no extra table needed
+          items_data: cleanItems.length > 0 ? cleanItems : null,
+        }
+        const res = await supabase.from('orders').insert(payload).select().single()
+        if (!res.error) { data = res.data; break }
+        const isDuplicate = res.error.code === '23505' || /duplicate key/i.test(res.error.message || '')
+        if (!isDuplicate) throw new Error(res.error.message)
       }
-
-      const { data, error } = await supabase.from('orders').insert(payload).select().single()
-      if (error) throw error
+      if (!data) {
+        throw new Error('We could not generate a unique order number. Please try again.')
+      }
 
       // Also insert into order_items table when it exists (for waybill packing queries)
       if (cleanItems.length > 0) {

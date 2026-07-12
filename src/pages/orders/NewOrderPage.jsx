@@ -99,7 +99,10 @@ export function NewOrderPage() {
       ? primaryItem.product_name
       : `${primaryItem.product_name} +${validItems.length - 1} more`
 
-    const result = await createOrder.mutateAsync({
+    // On failure the toast explains why; the form keeps everything typed
+    let result = null
+    try {
+      result = await createOrder.mutateAsync({
       ...data,
       business_id: firstBusinessId,
       product_id: primaryItem.product_id || null,
@@ -118,7 +121,8 @@ export function NewOrderPage() {
         color: item.color || null,
         size: item.size || null,
       })),
-    })
+      })
+    } catch { return }
     if (result) navigate(`/orders/${result.id}`)
   }
 

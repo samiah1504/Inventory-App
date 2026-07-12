@@ -616,3 +616,32 @@ CREATE TABLE IF NOT EXISTS holding_history (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_holding_history ON holding_history(holding_id);
+
+-- ===================================================
+-- Fix duplicate order numbers.
+-- The old counter was per business+year while ORD-YYYY-NNNNN is
+-- globally unique, so two businesses eventually produced the same
+-- number. One global, atomic sequence now feeds the number,
+-- starting above the highest existing order. Deleting orders can
+-- never cause reuse, and concurrent staff each get distinct values.
+-- ===================================================
+CREATE SEQUENCE IF NOT EXISTS order_number_seq;
+
+SELECT setval('order_number_seq', GREATEST(
+  COALESCE((
+    SELECT MAX((split_part(order_number, '-', 3))::BIGINT)
+    FROM orders
+    WHERE order_number ~ '^ORD-[0-9]{4}-[0-9]+$'
+  ), 0),
+  (SELECT last_value FROM order_number_seq)
+));
+
+CREATE OR REPLACE FUNCTION get_next_order_number()
+RETURNS TEXT
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN 'ORD-' || EXTRACT(YEAR FROM NOW())::INT || '-' ||
+         LPAD(nextval('order_number_seq')::TEXT, 5, '0');
+END;
+$$;
