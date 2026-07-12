@@ -147,8 +147,13 @@ export function CeoDashboard() {
   // ── Derived figures ───────────────────────────────────────────────────────
   const todayRows = todayOrdersQ.data || []
   const ordersToday = todayRows.length
-  const salesToday = todayRows.filter(o => o.status !== 'cancelled')
-    .reduce((s, o) => s + Number(o.total_amount || 0), 0)
+  // Revenue = money actually received, never the listed product price
+  const salesToday = todayRows
+    .filter(o => REVENUE.includes(o.status))
+    .reduce((s, o) => {
+      const paid = Number(o.amount_paid) || 0
+      return s + (paid > 0 ? paid : (o.status === 'paid' ? Number(o.total_amount || 0) : 0))
+    }, 0)
   const cashToday = a?.cashToday || 0
   const expensesToday = exp?.today || 0
   const netToday = cashToday - expensesToday
@@ -206,7 +211,7 @@ export function CeoDashboard() {
 
   const overviewRows = [
     { label: 'Orders Today',        value: String(ordersToday), to: '/orders' },
-    { label: 'Sales Today',         value: formatCurrency(salesToday), to: '/reports' },
+    { label: 'Revenue Today (from payments)', value: formatCurrency(salesToday), to: '/reports' },
     { label: 'Cash Collected Today', value: formatCurrency(cashToday), to: '/orders?status=paid', color: 'text-green-600' },
     { label: 'Expenses Today',      value: formatCurrency(expensesToday), to: '/accounting?today=1', color: 'text-red-600' },
     { label: 'Net Today (cash)',    value: formatCurrency(netToday), to: '/reports', color: netToday >= 0 ? 'text-green-600' : 'text-red-600', bold: true },

@@ -39,10 +39,28 @@ const REPORT_TABS = [
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Revenue = money actually received. amount_paid always wins; the
+// product price only stands in for fully-paid orders recorded before
+// amount_paid existed. Unpaid/partially-unpaid value never counts.
+export function orderRevenue(o) {
+  const paid = Number(o.amount_paid) || 0
+  if (paid > 0) return paid
+  return o.status === 'paid' ? Number(o.total_amount || 0) : 0
+}
+
+// Fraction of an order's value that was actually paid — used to
+// allocate real revenue across the order's line items
+function paidFactor(o) {
+  const total = Number(o.total_amount) || 0
+  const rev = orderRevenue(o)
+  if (total <= 0) return rev > 0 ? 1 : 0
+  return Math.min(1, rev / total)
+}
+
 function salesFromOrders(orders) {
   return orders
     .filter(o => REVENUE_STATUSES.includes(o.status))
-    .reduce((s, o) => s + Number(o.amount_paid || o.total_amount || 0), 0)
+    .reduce((s, o) => s + orderRevenue(o), 0)
 }
 
 const DELIVERY_EXP_TYPES = ['delivery', 'logistics', 'shipping', 'dispatch', 'courier']
@@ -57,27 +75,31 @@ function buildProductStats(revenueOrders, orderItemRows, allExpenses) {
     if (orderId) byProduct[key].orderIds.add(orderId)
   }
 
-  // Priority 1 — items_data JSONB: always complete, stores correct per-item price
+  // Priority 1 — items_data JSONB: always complete, stores correct per-item price.
+  // Item revenue is scaled to what the customer actually paid.
   const coveredByJson = new Set()
   revenueOrders.forEach(o => {
     const fromJson = Array.isArray(o.items_data) && o.items_data.length > 0 ? o.items_data : null
     if (!fromJson) return
     coveredByJson.add(o.id)
+    const factor = paidFactor(o)
     fromJson.forEach(item => {
       const name = (item.product_name || item.name || 'Unknown').trim()
       const rev  = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
-      addItem(name, item.quantity, rev, o.id)
+      addItem(name, item.quantity, rev * factor, o.id)
     })
   })
 
   // Priority 2 — order_items table: only for orders that have no items_data
+  const ordersById   = new Map(revenueOrders.map(o => [o.id, o]))
   const revOrderIds  = new Set(revenueOrders.map(o => o.id))
   const validItems   = orderItemRows.filter(i => revOrderIds.has(i.order_id) && !coveredByJson.has(i.order_id))
   const coveredByTbl = new Set(validItems.map(i => i.order_id))
   validItems.forEach(item => {
     const name = (item.product_name || item.name || 'Unknown').trim()
     const rev  = Number(item.total_amount) || (Number(item.unit_price) || 0) * (Number(item.quantity) || 1)
-    addItem(name, item.quantity, rev, item.order_id)
+    const factor = paidFactor(ordersById.get(item.order_id) || {})
+    addItem(name, item.quantity, rev * factor, item.order_id)
   })
 
   // Priority 3 — product_name string: last resort so NO order is ever dropped.
@@ -86,7 +108,7 @@ function buildProductStats(revenueOrders, orderItemRows, allExpenses) {
   revenueOrders.forEach(o => {
     if (coveredByJson.has(o.id) || coveredByTbl.has(o.id)) return
     const name = (o.product_name || 'Unknown').replace(/\s*\+\s*\d+\s*more\s*$/i, '').trim() || 'Unknown'
-    const rev  = Number(o.amount_paid) || Number(o.total_amount) || 0
+    const rev  = orderRevenue(o)
     addItem(name, o.quantity || 1, rev, o.id)
   })
 
@@ -185,7 +207,7 @@ function orderItemsSync(o, itemRowsByOrder) {
 // deducted after gross profit.
 function computePL(orders, expenses, catalogById, catalogByName, itemRowsByOrder) {
   const paidOrders = orders.filter(o => REVENUE_STATUSES.includes(o.status))
-  const revenueOf = o => o.status === 'paid' ? Number(o.total_amount || 0) : Number(o.amount_paid || 0)
+  const revenueOf = orderRevenue
   const revenue = paidOrders.reduce((s, o) => s + revenueOf(o), 0)
 
   const cogsByProduct = {}
@@ -818,7 +840,7 @@ export function ReportsPage() {
       const bizOrders   = orders.filter(o => o.business_id === biz.id)
       const bizExpenses = expenses.filter(e => e.business_id === biz.id)
       const revOrds     = bizOrders.filter(o => REVENUE_STATUSES.includes(o.status))
-      const grossSales  = revOrds.reduce((s, o) => s + Number(o.total_amount || 0), 0)
+      const grossSales  = revOrds.reduce((s, o) => s + orderRevenue(o), 0)
       const totalExp    = bizExpenses.reduce((s, e) => s + Number(e.amount || 0), 0)
       const netPrft     = grossSales - totalExp
       const margin      = grossSales > 0 ? (netPrft / grossSales) * 100 : 0
@@ -1364,7 +1386,7 @@ export function ReportsPage() {
               const byStateRev = {}
               orders.filter(o => REVENUE_STATUSES.includes(o.status)).forEach(o => {
                 const s = o.state || 'Unknown'
-                byStateRev[s] = (byStateRev[s] || 0) + Number(o.amount_paid || o.total_amount)
+                byStateRev[s] = (byStateRev[s] || 0) + orderRevenue(o)
               })
               const entries = Object.entries(byStateRev).sort(([, a], [, b]) => b - a)
               return entries.length > 0 ? (
@@ -2296,7 +2318,7 @@ function PLDrillContent({ drill, orderNumbersById }) {
               </p>
             </div>
             <p className="text-sm font-bold text-gray-900 shrink-0">
-              {formatCurrency(o.status === 'paid' ? o.total_amount : o.amount_paid || 0)}
+              {formatCurrency(orderRevenue(o))}
             </p>
           </div>
         ))}
