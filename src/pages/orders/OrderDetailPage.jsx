@@ -41,7 +41,10 @@ const NEXT_STATUSES = {
   delivered: ['paid', 'partially_paid', 'returned', 'failed_delivery'],
   partially_paid: ['paid', 'returned'],
   paid: ['returned'],
-  failed_delivery: ['processing', 'returned', 'cancelled'],
+  // Final for all normal staff: physical movements continue in the
+  // Product Holding Queue; a new attempt = a NEW order from Customer
+  // Support. Only the CEO override (separate flow) can change it.
+  failed_delivery: [],
   cancelled: [],
   returned: [],   // decision is recorded via the Return Decision card
   sent_to_park: ['waybilled', 'arrived_at_park', 'cancelled'],
@@ -80,6 +83,8 @@ export function OrderDetailPage() {
   })
   const [cancelReason, setCancelReason] = useState('')
   const [cancelNotes, setCancelNotes] = useState('')
+  const [showOverride, setShowOverride] = useState(false)
+  const [overrideForm, setOverrideForm] = useState({ status: '', reason: '', notes: '' })
   const [returnReason, setReturnReason] = useState('')
   const [returnExtra, setReturnExtra] = useState({ condition: 'good', photos: '' })
   const [showDecisionModal, setShowDecisionModal] = useState(false)
@@ -581,6 +586,21 @@ export function OrderDetailPage() {
                 Fulfillment officer{orderOfficersQ.data.length !== 1 ? 's' : ''} ({order.state}):{' '}
                 {orderOfficersQ.data.map(o => o.name).join(', ')}
               </p>
+            )}
+            {order.status === 'failed_delivery' && (
+              <div className="mb-2 bg-gray-50 rounded-xl p-3">
+                <p className="text-xs text-gray-600">
+                  <span className="font-semibold">Failed Delivery is final.</span> Product movements
+                  continue in the Product Holding Queue. If the customer wants another attempt,
+                  Customer Support creates a new order.
+                </p>
+                {['ceo', 'super_admin'].includes(user?.role) && !user?._preview && (
+                  <Button size="sm" variant="secondary" className="w-full mt-2"
+                    onClick={() => { setOverrideForm({ status: '', reason: '', notes: '' }); setShowOverride(true) }}>
+                    CEO Override — Change Status
+                  </Button>
+                )}
+              </div>
             )}
             {order.status === 'partially_paid' && (
               <div className="mt-2 p-3 bg-amber-50 rounded-xl">
@@ -1117,6 +1137,54 @@ export function OrderDetailPage() {
               </p>
             </>
           )}
+        </div>
+      </Modal>
+
+      {/* CEO override for the final Failed Delivery status */}
+      <Modal isOpen={showOverride} onClose={() => setShowOverride(false)} title="CEO Override — Failed Delivery"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowOverride(false)}>Cancel</Button>
+            <Button variant="danger" className="flex-1"
+              disabled={!overrideForm.status || !overrideForm.reason.trim()}
+              loading={updateStatus.isPending}
+              onClick={async () => {
+                if (!window.confirm(`Change this order from Failed Delivery to ${statusLabel(overrideForm.status)}?`)) return
+                await updateStatus.mutateAsync({
+                  id: order.id,
+                  status: overrideForm.status,
+                  timelineDesc: `CEO OVERRIDE: Failed Delivery → ${statusLabel(overrideForm.status)} — Reason: ${overrideForm.reason.trim()}${overrideForm.notes.trim() ? ` · ${overrideForm.notes.trim()}` : ''} — by ${user?.name} (${user?.role})`,
+                })
+                setShowOverride(false)
+              }}>
+              Confirm Override
+            </Button>
+          </div>
+        }>
+        <div className="space-y-4">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+            <p className="text-xs text-red-800">
+              <span className="font-semibold">Warning:</span> Failed Delivery is final for all staff.
+              This override reopens the order outside the normal workflow. Stock adjustments made
+              when the delivery failed (release, holding queue, transfer, damage) are NOT reversed
+              automatically — reconcile inventory yourself if needed. The change is recorded
+              permanently in the order timeline.
+            </p>
+          </div>
+          <Select label="New Status" required value={overrideForm.status}
+            onChange={e => setOverrideForm({ ...overrideForm, status: e.target.value })}>
+            <option value="">Select status...</option>
+            {['processing', 'awaiting_waybill', 'delivered', 'returned', 'cancelled'].map(s => (
+              <option key={s} value={s}>{statusLabel(s)}</option>
+            ))}
+          </Select>
+          <Textarea label="Reason for Change" required rows={2}
+            placeholder="Why is this failed delivery being reopened?"
+            value={overrideForm.reason}
+            onChange={e => setOverrideForm({ ...overrideForm, reason: e.target.value })} />
+          <Textarea label="Notes (optional)" rows={2}
+            value={overrideForm.notes}
+            onChange={e => setOverrideForm({ ...overrideForm, notes: e.target.value })} />
         </div>
       </Modal>
 
