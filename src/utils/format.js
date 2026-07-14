@@ -64,7 +64,8 @@ export function statusLabel(status) {
     failed_delivery: 'Failed Delivery',
     cancelled: 'Cancelled',
     returned: 'Returned',
-    sent_to_park: 'Sent to State Park'
+    sent_to_park: 'Sent to State Park',
+    customer_rescheduled: 'Customer Rescheduled'
   }
   return labels[status] || status
 }

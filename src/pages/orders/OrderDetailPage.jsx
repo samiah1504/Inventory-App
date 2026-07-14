@@ -17,11 +17,11 @@ import { supabase } from '../../lib/supabase'
 import { recordReturnDecision, sendReturnToAnotherState } from '../../lib/stockOps'
 
 const STATUS_TRANSITIONS = {
-  ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
-  super_admin: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned'],
-  operations_manager: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled'],
+  ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned', 'customer_rescheduled'],
+  super_admin: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned', 'customer_rescheduled'],
+  operations_manager: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'customer_rescheduled'],
   customer_support: ['cancelled'],
-  fulfillment: ['awaiting_waybill', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery'],
+  fulfillment: ['awaiting_waybill', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'customer_rescheduled'],
   waybill: ['awaiting_waybill', 'waybilled', 'arrived_at_park'],
   inventory: ['received_at_warehouse'],
 }
@@ -37,10 +37,13 @@ const NEXT_STATUSES = {
   arrived_at_park: ['picked_up_from_park', 'received_at_warehouse', 'cancelled'],
   picked_up_from_park: ['processing', 'delivered', 'failed_delivery'],
   received_at_warehouse: ['processing', 'cancelled'],
-  processing: ['delivered', 'failed_delivery', 'cancelled'],
+  processing: ['delivered', 'failed_delivery', 'customer_rescheduled', 'cancelled'],
   delivered: ['paid', 'partially_paid', 'returned', 'failed_delivery'],
   partially_paid: ['paid', 'returned'],
   paid: ['returned'],
+  // Customer asked to postpone — still an active order; can be
+  // delivered, re-rescheduled, or end like any processing order
+  customer_rescheduled: ['processing', 'delivered', 'failed_delivery', 'customer_rescheduled', 'cancelled'],
   // Final for all normal staff: physical movements continue in the
   // Product Holding Queue; a new attempt = a NEW order from Customer
   // Support. Only the CEO override (separate flow) can change it.
@@ -49,6 +52,14 @@ const NEXT_STATUSES = {
   returned: [],   // decision is recorded via the Return Decision card
   sent_to_park: ['waybilled', 'arrived_at_park', 'cancelled'],
 }
+
+const RESCHEDULE_REASONS = [
+  { value: 'customer_travelling', label: 'Customer travelling' },
+  { value: 'customer_unavailable', label: 'Customer not available' },
+  { value: 'customer_requested_another_date', label: 'Customer requested another date' },
+  { value: 'weekend_delivery', label: 'Weekend delivery requested' },
+  { value: 'other', label: 'Other (explain below)' },
+]
 
 const RETURN_DECISIONS = [
   { value: 'returned_warehouse', label: 'Returned to Warehouse' },
@@ -84,6 +95,8 @@ export function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [cancelNotes, setCancelNotes] = useState('')
   const [showOverride, setShowOverride] = useState(false)
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false)
+  const [rescheduleForm, setRescheduleForm] = useState({ date: '', time: '', reason: 'customer_requested_another_date', custom: '', notes: '' })
   const [overrideForm, setOverrideForm] = useState({ status: '', reason: '', notes: '' })
   const [returnReason, setReturnReason] = useState('')
   const [returnExtra, setReturnExtra] = useState({ condition: 'good', photos: '' })
@@ -183,6 +196,15 @@ export function OrderDetailPage() {
       setShowStatusModal(false)
       return
     }
+    if (newStatus === 'customer_rescheduled') {
+      setRescheduleForm({
+        date: '', time: order.preferred_delivery_time || '',
+        reason: 'customer_requested_another_date', custom: '', notes: '',
+      })
+      setShowRescheduleModal(true)
+      setShowStatusModal(false)
+      return
+    }
     if (newStatus === 'cancelled' || newStatus === 'returned') {
       setPendingStatus(newStatus)
       setShowReasonModal(true)
@@ -279,6 +301,32 @@ export function OrderDetailPage() {
       timelineDesc,
     })
     setShowProcessingModal(false)
+  }
+
+  async function handleRescheduleSubmit() {
+    if (!rescheduleForm.date) {
+      showToast('Enter the new delivery date', 'error')
+      return
+    }
+    if (rescheduleForm.reason === 'other' && !rescheduleForm.custom.trim()) {
+      showToast('Describe the reason for rescheduling', 'error')
+      return
+    }
+    const reasonText = rescheduleForm.reason === 'other'
+      ? rescheduleForm.custom.trim()
+      : RESCHEDULE_REASONS.find(r => r.value === rescheduleForm.reason)?.label || rescheduleForm.reason
+    const prevDate = order.planned_delivery_date ? formatDate(order.planned_delivery_date) : 'not set'
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'customer_rescheduled',
+      extra: { planned_delivery_date: rescheduleForm.date },
+      extraSafe: {
+        preferred_delivery_time: rescheduleForm.time || null,
+        reschedule_reason: reasonText,
+      },
+      timelineDesc: `Customer Rescheduled Delivery — from ${statusLabel(order.status)}; delivery ${prevDate} → ${formatDate(rescheduleForm.date)}${rescheduleForm.time ? ` at ${rescheduleForm.time}` : ''} — Reason: ${reasonText}${rescheduleForm.notes.trim() ? ` · ${rescheduleForm.notes.trim()}` : ''} — by ${user?.name} (${user?.role})`,
+    })
+    setShowRescheduleModal(false)
   }
 
   async function handlePaymentSubmit() {
@@ -600,6 +648,16 @@ export function OrderDetailPage() {
                     CEO Override — Change Status
                   </Button>
                 )}
+              </div>
+            )}
+            {order.status === 'customer_rescheduled' && (
+              <div className="mb-2 bg-purple-50 rounded-xl p-3">
+                <p className="text-xs text-purple-800">
+                  <span className="font-semibold">Customer rescheduled this delivery.</span>{' '}
+                  New date: <span className="font-semibold">{order.planned_delivery_date ? formatDate(order.planned_delivery_date) : 'not set'}</span>
+                  {order.preferred_delivery_time && <> at {order.preferred_delivery_time}</>}
+                  {order.reschedule_reason && <> · Reason: {order.reschedule_reason}</>}
+                </p>
               </div>
             )}
             {order.status === 'partially_paid' && (
@@ -1137,6 +1195,55 @@ export function OrderDetailPage() {
               </p>
             </>
           )}
+        </div>
+      </Modal>
+
+      {/* Customer Rescheduled Delivery — new date + reason, order leaves the Processing queue */}
+      <Modal
+        isOpen={showRescheduleModal}
+        onClose={() => setShowRescheduleModal(false)}
+        title="Customer Rescheduled Delivery"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowRescheduleModal(false)}>Cancel</Button>
+            <Button className="flex-1" loading={updateStatus.isPending}
+              disabled={!rescheduleForm.date || (rescheduleForm.reason === 'other' && !rescheduleForm.custom.trim())}
+              onClick={handleRescheduleSubmit}>
+              Confirm Reschedule
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+            <p className="text-xs text-purple-800">
+              The order moves out of the Processing queue into the <span className="font-semibold">Rescheduled</span> queue.
+              It appears in the fulfillment officer's <span className="font-semibold">Due Today</span> reminder on the new date.
+              {order.planned_delivery_date && <> Current delivery date: <span className="font-semibold">{formatDate(order.planned_delivery_date)}</span>.</>}
+            </p>
+          </div>
+          <Input label="New Delivery Date" type="date" required
+            min={new Date().toISOString().slice(0, 10)}
+            value={rescheduleForm.date}
+            onChange={e => setRescheduleForm({ ...rescheduleForm, date: e.target.value })} />
+          <Input label="Preferred Delivery Time (optional)" type="time"
+            value={rescheduleForm.time}
+            onChange={e => setRescheduleForm({ ...rescheduleForm, time: e.target.value })} />
+          <Select label="Reason for Rescheduling" required value={rescheduleForm.reason}
+            onChange={e => setRescheduleForm({ ...rescheduleForm, reason: e.target.value })}>
+            {RESCHEDULE_REASONS.map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </Select>
+          {rescheduleForm.reason === 'other' && (
+            <Textarea label="Describe the reason" required rows={2}
+              value={rescheduleForm.custom}
+              onChange={e => setRescheduleForm({ ...rescheduleForm, custom: e.target.value })} />
+          )}
+          <Textarea label="Internal Notes (optional)" rows={2}
+            placeholder="Anything the team should know — not shown to the customer"
+            value={rescheduleForm.notes}
+            onChange={e => setRescheduleForm({ ...rescheduleForm, notes: e.target.value })} />
         </div>
       </Modal>
 

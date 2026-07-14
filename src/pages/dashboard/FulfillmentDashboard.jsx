@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle, Inbox, DollarSign, Plus } from 'lucide-react'
+import { Truck, Package, Clock, MapPin, CheckCircle, AlertTriangle, Inbox, DollarSign, Plus, CalendarClock, Phone } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -26,7 +26,7 @@ export function FulfillmentDashboard() {
       const byStatus = (status) =>
         scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', status))
 
-      const [newR, awaitingR, waybilledR, atParkR, pickedR, atWarehouseR, processingR, deliveredR, paidR, failedR, returnedR, todayR, overdueR] = await Promise.all([
+      const [newR, awaitingR, waybilledR, atParkR, pickedR, atWarehouseR, processingR, rescheduledR, deliveredR, paidR, failedR, returnedR, todayR, overdueR] = await Promise.all([
         byStatus('new'),
         byStatus('awaiting_waybill'),
         byStatus('waybilled'),
@@ -34,12 +34,13 @@ export function FulfillmentDashboard() {
         byStatus('picked_up_from_park'),
         byStatus('received_at_warehouse'),
         byStatus('processing'),
+        byStatus('customer_rescheduled'),
         byStatus('delivered'),
         byStatus('paid'),
         byStatus('failed_delivery'),
         byStatus('returned'),
         scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('planned_delivery_date', today)),
-        scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'processing').lt('planned_delivery_date', today)),
+        scoped(supabase.from('orders').select('*', { count: 'exact', head: true }).in('status', ['processing', 'customer_rescheduled']).lt('planned_delivery_date', today)),
       ])
       return {
         new: newR.count || 0,
@@ -49,6 +50,7 @@ export function FulfillmentDashboard() {
         picked_up: pickedR.count || 0,
         at_warehouse: atWarehouseR.count || 0,
         processing: processingR.count || 0,
+        rescheduled: rescheduledR.count || 0,
         delivered: deliveredR.count || 0,
         paid: paidR.count || 0,
         failed: failedR.count || 0,
@@ -105,6 +107,29 @@ export function FulfillmentDashboard() {
   })
   const holdingCount = holdingQ.data || 0
 
+  // Rescheduled deliveries due today (the morning reminder) or overdue.
+  // Overdue rescheduled orders never disappear — they stay on this panel
+  // until they are delivered, re-rescheduled, or otherwise closed.
+  const rescheduledDueQ = useQuery({
+    queryKey: ['rescheduled_due', today, myStates, user?.id],
+    queryFn: async () => {
+      try {
+        let q = supabase.from('orders')
+          .select('id, order_number, customer_name, customer_phone, product_name, state, city, planned_delivery_date, preferred_delivery_time, reschedule_reason')
+          .eq('status', 'customer_rescheduled')
+          .lte('planned_delivery_date', today)
+          .order('planned_delivery_date', { ascending: true })
+        if (myStates) q = q.in('state', myStates)
+        q = scopeToBusinesses(q, user)
+        const { data, error } = await q
+        if (error) throw error
+        return data || []
+      } catch { return [] }
+    },
+    staleTime: 30000,
+  })
+  const rescheduledDue = rescheduledDueQ.data || []
+
   // This officer's own business expenses this month (voided excluded).
   // Role preview keeps the CEO's identity, so skip the query there —
   // a real officer only ever matches their own staff id.
@@ -146,6 +171,46 @@ export function FulfillmentDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Rescheduled deliveries due today or overdue — the morning reminder */}
+        {rescheduledDue.length > 0 && (
+          <div className="bg-white rounded-2xl border border-purple-200 overflow-hidden">
+            <div className="px-4 pt-4 pb-2 flex items-center gap-2 bg-purple-50">
+              <CalendarClock size={16} className="text-purple-700" />
+              <h3 className="text-sm font-semibold text-purple-900">
+                Rescheduled Deliveries Due ({rescheduledDue.length})
+              </h3>
+            </div>
+            <div className="divide-y divide-gray-50">
+              {rescheduledDue.map(o => {
+                const overdue = o.planned_delivery_date < today
+                return (
+                  <div key={o.id} className="px-4 py-3 active:bg-gray-50 cursor-pointer"
+                    onClick={() => navigate(`/orders/${o.id}`)}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{o.order_number} · {o.customer_name}</p>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${overdue ? 'bg-red-100 text-red-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {overdue ? `OVERDUE — ${formatDate(o.planned_delivery_date)}` : 'DUE TODAY'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-600 mt-0.5 truncate">{o.product_name}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">
+                      {[o.city, o.state].filter(Boolean).join(', ')}
+                      {o.preferred_delivery_time ? ` · ${o.preferred_delivery_time}` : ''}
+                      {o.reschedule_reason ? ` · ${o.reschedule_reason}` : ''}
+                    </p>
+                    {o.customer_phone && (
+                      <a href={`tel:${o.customer_phone}`} onClick={e => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 mt-1">
+                        <Phone size={11} /> {o.customer_phone}
+                      </a>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Incoming transfers to this officer's state(s) */}
         {incoming.length > 0 && (
@@ -207,6 +272,8 @@ export function FulfillmentDashboard() {
             onClick={() => navigate('/orders?status=received_at_warehouse')} />
           <StatCard label="Processing" value={loading ? '...' : c.processing} icon={<AlertTriangle size={20} />} color="green"
             onClick={() => navigate('/orders?status=processing')} />
+          <StatCard label="Rescheduled" value={loading ? '...' : c.rescheduled} icon={<CalendarClock size={20} />} color={c && c.rescheduled > 0 ? 'purple' : 'gray'}
+            onClick={() => navigate('/orders?status=customer_rescheduled')} />
           <StatCard label="Delivered (Unpaid)" value={loading ? '...' : c.delivered} icon={<CheckCircle size={20} />} color="gray"
             onClick={() => navigate('/orders?status=delivered')} />
           <StatCard label="Paid" value={loading ? '...' : c.paid} icon={<CheckCircle size={20} />} color="green"

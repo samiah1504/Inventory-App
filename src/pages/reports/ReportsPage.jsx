@@ -372,6 +372,38 @@ export function ReportsPage() {
     staleTime: 60000,
   })
 
+  // Customer-rescheduled deliveries in the period. Sourced from timeline
+  // events so an order rescheduled twice counts twice, and the officer who
+  // recorded each reschedule is known even after the order moves on.
+  const rescheduledReport = useQuery({
+    queryKey: ['report_rescheduled', dateFrom, dateTo, businessId],
+    enabled: tab === 'orders' && !!dateFrom && !!dateTo,
+    queryFn: async () => {
+      try {
+        const { data: events, error } = await supabase.from('order_timeline')
+          .select('order_id, staff_name, created_at')
+          .eq('action', 'customer_rescheduled')
+          .gte('created_at', `${dateFrom}T00:00:00`)
+          .lte('created_at', `${dateTo}T23:59:59`)
+        if (error) throw error
+        const evts = events || []
+        if (evts.length === 0) return { events: [], orders: [] }
+        const ids = Array.from(new Set(evts.map(e => e.order_id)))
+        let q = supabase.from('orders')
+          .select('id, order_number, status, state, business_id, customer_requested_delivery_date, planned_delivery_date')
+          .in('id', ids)
+        if (businessId) q = q.eq('business_id', businessId)
+        q = scopeToBusinesses(q, user)
+        const { data: ords, error: e2 } = await q
+        if (e2) throw e2
+        // Business restriction: only keep events whose order survived the scope
+        const keep = new Set((ords || []).map(o => o.id))
+        return { events: evts.filter(ev => keep.has(ev.order_id)), orders: ords || [] }
+      } catch { return { events: [], orders: [] } }
+    },
+    staleTime: 60000,
+  })
+
   const expensesReport = useQuery({
     queryKey: ['report_expenses', dateFrom, dateTo, businessId],
     enabled: isCeo,
@@ -1370,6 +1402,81 @@ export function ReportsPage() {
                 )}
               </div>
             </div>
+
+            {/* ── Rescheduled Deliveries ── */}
+            {(() => {
+              const evts = rescheduledReport.data?.events || []
+              const rOrders = rescheduledReport.data?.orders || []
+              const orderById = new Map(rOrders.map(o => [o.id, o]))
+              const byStateR = {}
+              evts.forEach(ev => {
+                const s = orderById.get(ev.order_id)?.state || 'Unknown'
+                byStateR[s] = (byStateR[s] || 0) + 1
+              })
+              const byOfficer = {}
+              evts.forEach(ev => {
+                const n = ev.staff_name || 'Unknown'
+                byOfficer[n] = (byOfficer[n] || 0) + 1
+              })
+              // Days pushed = customer's original requested date → latest planned date
+              const dayDiffs = rOrders
+                .filter(o => o.customer_requested_delivery_date && o.planned_delivery_date)
+                .map(o => (new Date(o.planned_delivery_date) - new Date(o.customer_requested_delivery_date)) / 86400000)
+                .filter(d => d > 0)
+              const avgDays = dayDiffs.length > 0
+                ? (dayDiffs.reduce((s, d) => s + d, 0) / dayDiffs.length)
+                : null
+              const stillRescheduled = rOrders.filter(o => o.status === 'customer_rescheduled').length
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">Rescheduled Deliveries</h3>
+                  {rescheduledReport.isLoading ? (
+                    <p className="text-sm text-gray-400">Loading...</p>
+                  ) : evts.length === 0 ? (
+                    <p className="text-sm text-gray-400">No customer reschedules in this period</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-purple-50 rounded-xl px-2 py-2">
+                          <p className="text-xs text-purple-600 mb-0.5 truncate">Reschedules</p>
+                          <p className="text-lg font-bold text-purple-700">{evts.length}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl px-2 py-2">
+                          <p className="text-xs text-gray-500 mb-0.5 truncate">Still Pending</p>
+                          <p className="text-lg font-bold text-gray-900">{stillRescheduled}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-xl px-2 py-2">
+                          <p className="text-xs text-gray-500 mb-0.5 truncate">Avg Days Moved</p>
+                          <p className="text-lg font-bold text-gray-900">{avgDays === null ? '—' : avgDays.toFixed(1)}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">By State</p>
+                        <div className="divide-y divide-gray-50">
+                          {Object.entries(byStateR).sort(([, a], [, b]) => b - a).map(([state, count]) => (
+                            <div key={state} className="flex items-center justify-between py-2 first:pt-0 last:pb-0">
+                              <span className="text-sm text-gray-700 truncate">{state}</span>
+                              <span className="text-sm font-bold text-gray-900 shrink-0">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">By Officer</p>
+                        <div className="divide-y divide-gray-50">
+                          {Object.entries(byOfficer).sort(([, a], [, b]) => b - a).map(([name, count]) => (
+                            <div key={name} className="flex items-center justify-between py-2 first:pt-0 last:pb-0">
+                              <span className="text-sm text-gray-700 truncate">{name}</span>
+                              <span className="text-sm font-bold text-gray-900 shrink-0">{count}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         )}
 

@@ -50,6 +50,7 @@ body {
 .status-delivered { background: #bbf7d0; color: #14532d; }
 .status-paid { background: #86efac; color: #14532d; }
 .status-partially_paid { background: #fed7aa; color: #9a3412; }
+.status-customer_rescheduled { background: #f3e8ff; color: #6b21a8; }
 .status-failed_delivery { background: #fee2e2; color: #991b1b; }
 .status-cancelled { background: #f3f4f6; color: #374151; }
 .status-returned { background: #fce7f3; color: #9d174d; }
