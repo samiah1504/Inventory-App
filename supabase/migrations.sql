@@ -645,3 +645,12 @@ BEGIN
          LPAD(nextval('order_number_seq')::TEXT, 5, '0');
 END;
 $$;
+
+-- ===================================================
+-- Product Verification — confirmed historical cost per order line
+-- ===================================================
+-- When an unverified product is verified with an official cost price,
+-- that cost is stamped onto linked order lines that have none. Lines
+-- that already carry a confirmed cost are never overwritten, so past
+-- orders keep the cost that was true when they were sold.
+ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost_price DECIMAL(15,2);

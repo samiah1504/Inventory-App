@@ -183,6 +183,7 @@ function orderItemsSync(o, itemRowsByOrder) {
       product_id: i.product_id || null,
       product_name: (i.product_name || i.name || '').trim(),
       quantity: Number(i.quantity) || 1,
+      cost_price: i.cost_price ?? null,
     }))
   }
   const rows = itemRowsByOrder?.get(o.id)
@@ -191,6 +192,7 @@ function orderItemsSync(o, itemRowsByOrder) {
       product_id: i.product_id || null,
       product_name: (i.product_name || '').trim(),
       quantity: Number(i.quantity) || 1,
+      cost_price: i.cost_price ?? null,
     }))
   }
   return [{
@@ -216,7 +218,10 @@ function computePL(orders, expenses, catalogById, catalogByName, itemRowsByOrder
     orderItemsSync(o, itemRowsByOrder).forEach(it => {
       const prod = (it.product_id && catalogById.get(it.product_id)) ||
         catalogByName.get(it.product_name.toLowerCase()) || null
-      const unitCost = Number(prod?.cost_price) || 0
+      // Confirmed historical cost on the order line wins; the catalog
+      // cost is the fallback for lines sold before costs were confirmed
+      const lineCost = Number(it.cost_price) || 0
+      const unitCost = lineCost > 0 ? lineCost : (Number(prod?.cost_price) || 0)
       const name = prod?.name || it.product_name || 'Unknown'
       if (!cogsByProduct[name]) cogsByProduct[name] = { name, qty: 0, unitCost, total: 0, hasCost: unitCost > 0 }
       cogsByProduct[name].qty   += it.quantity
@@ -579,7 +584,7 @@ export function ReportsPage() {
         if (orderIds.length === 0) return []
         const { data, error } = await supabase
           .from('order_items')
-          .select('order_id, product_id, product_name, quantity, unit_price, total_amount')
+          .select('*')
           .in('order_id', orderIds)
         if (error) throw error
         return data || []

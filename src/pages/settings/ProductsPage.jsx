@@ -13,6 +13,7 @@ import { Badge } from '../../components/ui/Badge'
 import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
+import { findLinkedOrders, applyProductToOrders } from '../../lib/productLinkUpdates'
 
 const EMPTY_FORM = {
   name: '', business_id: '', category_id: '', selling_price: '', cost_price: '',
@@ -30,7 +31,13 @@ export function ProductsPage() {
   const [form, setForm] = useState(EMPTY_FORM)
   const [mergeSource, setMergeSource] = useState(null)
   const [mergeSearch, setMergeSearch] = useState('')
+  // Verification flow: full correction form + linked-order summary
+  const [verifying, setVerifying] = useState(null)
+  const [vForm, setVForm] = useState(EMPTY_FORM)
+  const [vApply, setVApply] = useState(true)
   const { user } = useAuthStore()
+  // Cost price drives profit reporting — only the CEO enters or amends it
+  const isCeo = ['ceo', 'super_admin'].includes(user?.role) && !user?._preview
 
   // Every catalogue action leaves an audit record (best-effort pre-migration)
   async function audit(product_id, action, details) {
@@ -89,6 +96,9 @@ export function ProductsPage() {
         selling_price: data.selling_price ? Number(data.selling_price) : null,
         cost_price: data.cost_price ? Number(data.cost_price) : null,
       }
+      // Only the CEO may set or amend cost price — an edit by anyone
+      // else never touches the stored cost
+      if (!isCeo && editing) delete payload.cost_price
       // SKU / image / description live in newer columns — save them
       // separately so the core save works pre-migration too
       const extras = { sku: sku || null, image_url: image_url || null, description: description || null }
@@ -127,32 +137,90 @@ export function ProductsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['all_products'] }),
   })
 
+  // Orders that reference the product being verified (for the summary
+  // and the past-order update)
+  const linkedOrdersQ = useQuery({
+    queryKey: ['product_linked_orders', verifying?.id],
+    enabled: !!verifying,
+    queryFn: () => findLinkedOrders(verifying),
+    staleTime: 30000,
+  })
+
   const verifyMutation = useMutation({
-    mutationFn: async (p) => {
-      const { error } = await supabase.from('products').update({ is_verified: true }).eq('id', p.id)
+    mutationFn: async ({ product, form, apply }) => {
+      const newName = form.name.trim()
+      // Cost price is CEO-only; an Operations Manager's verify never
+      // touches whatever cost the CEO has set
+      const newCost = isCeo
+        ? (form.cost_price ? Number(form.cost_price) : null)
+        : (product.cost_price ?? null)
+      const payload = {
+        name: newName,
+        business_id: form.business_id || null,
+        category_id: form.category_id || null,
+        selling_price: form.selling_price ? Number(form.selling_price) : null,
+        cost_price: newCost,
+        is_verified: true,
+      }
+      const { error } = await supabase.from('products').update(payload).eq('id', product.id)
       if (error) throw error
       // Newer columns — best-effort
       await supabase.from('products').update({
+        sku: form.sku || null,
         verified_by: user?.name || null,
         verified_at: new Date().toISOString(),
-      }).eq('id', p.id)
-      await audit(p.id, 'verified', `Verified by ${user?.name}`)
+      }).eq('id', product.id)
+
+      // Correct the past orders that reference the unverified product:
+      // official name + product link everywhere, and the verified cost on
+      // lines without a confirmed historical cost
+      let ordersUpdated = 0
+      if (apply) {
+        ordersUpdated = await applyProductToOrders({
+          product,
+          target: { id: product.id, name: newName, cost_price: newCost },
+          applyCost: true,
+          user,
+          linkedOrders: linkedOrdersQ.data || null,
+        })
+      }
+
+      const changes = [
+        newName !== product.name ? `name "${product.name}" → "${newName}"` : null,
+        form.business_id !== (product.business_id || '') ? 'business changed' : null,
+        form.category_id !== (product.category_id || '') ? 'category changed' : null,
+        newCost && Number(newCost) !== Number(product.cost_price || 0) ? `cost price ₦${Number(newCost).toLocaleString()}` : null,
+      ].filter(Boolean).join('; ')
+      await audit(product.id, 'verified',
+        `Verified by ${user?.name}${changes ? ` — ${changes}` : ''} — ${ordersUpdated} linked order${ordersUpdated !== 1 ? 's' : ''} updated`)
+      return { ordersUpdated }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['all_products'] })
-      queryClient.invalidateQueries({ queryKey: ['products'] })
-      showToast('Product verified — available for order intake', 'success')
+    onSuccess: ({ ordersUpdated }) => {
+      // Names and costs on past orders changed — every list, document
+      // source and report must recalculate
+      queryClient.invalidateQueries()
+      showToast(
+        ordersUpdated > 0
+          ? `Product verified — ${ordersUpdated} past order${ordersUpdated !== 1 ? 's' : ''} updated`
+          : 'Product verified — available for order intake',
+        'success')
+      setVerifying(null)
     },
     onError: (err) => showToast(err.message, 'error'),
   })
 
-  // Merge a duplicate into the final product. Order history is
-  // repointed to the target but keeps its original text; the duplicate
-  // is closed, never deleted.
+  // Merge a duplicate into the final product. Linked orders are repointed
+  // to the target AND adopt its official name; the target's cost price is
+  // stamped on lines without a confirmed historical cost. The duplicate is
+  // closed, never deleted — audit history stays intact.
   const mergeMutation = useMutation({
     mutationFn: async ({ source, target }) => {
-      await supabase.from('orders').update({ product_id: target.id }).eq('product_id', source.id)
-      await supabase.from('order_items').update({ product_id: target.id }).eq('product_id', source.id)
+      const ordersUpdated = await applyProductToOrders({
+        product: source,
+        target: { id: target.id, name: target.name, cost_price: target.cost_price },
+        applyCost: true,
+        user,
+      })
       try {
         const { data: srcRows } = await supabase.from('inventory').select('*').eq('product_id', source.id)
         for (const row of (srcRows || [])) {
@@ -177,15 +245,18 @@ export function ProductsPage() {
         .update({ is_active: false, is_verified: true }).eq('id', source.id)
       if (error) throw error
       await supabase.from('products').update({ merged_into: target.id }).eq('id', source.id)
-      await audit(source.id, 'merged', `Merged into "${target.name}" by ${user?.name}`)
+      await audit(source.id, 'merged',
+        `Merged into "${target.name}" by ${user?.name} — ${ordersUpdated} linked order${ordersUpdated !== 1 ? 's' : ''} updated to the official name`)
       await audit(target.id, 'merge_target', `"${source.name}" merged into this product by ${user?.name}`)
+      return { ordersUpdated }
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['all_products'] })
-      queryClient.invalidateQueries({ queryKey: ['products'] })
-      queryClient.invalidateQueries({ queryKey: ['orders'] })
-      queryClient.invalidateQueries({ queryKey: ['inventory'] })
-      showToast('Products merged — history moved to the final product', 'success')
+    onSuccess: ({ ordersUpdated }) => {
+      queryClient.invalidateQueries()
+      showToast(
+        ordersUpdated > 0
+          ? `Products merged — ${ordersUpdated} past order${ordersUpdated !== 1 ? 's' : ''} now show the official product`
+          : 'Products merged — history moved to the final product',
+        'success')
       setMergeSource(null)
       setMergeSearch('')
     },
@@ -343,8 +414,16 @@ export function ProductsPage() {
               </div>
               {!p.is_verified && (
                 <button
-                  onClick={() => verifyMutation.mutate(p)}
-                  disabled={verifyMutation.isPending}
+                  onClick={() => {
+                    setVerifying(p)
+                    setVApply(true)
+                    setVForm({
+                      name: p.name, business_id: p.business_id || '', category_id: p.category_id || '',
+                      selling_price: p.selling_price || '', cost_price: p.cost_price || '',
+                      sku: p.sku || '', image_url: p.image_url || '', description: p.description || '',
+                      is_verified: true,
+                    })
+                  }}
                   className="mt-2 w-full py-1.5 text-xs font-medium text-green-700 bg-green-50 rounded-lg flex items-center justify-center gap-1 active:scale-95 transition-all"
                 >
                   <CheckCircle size={12} /> Verify Product
@@ -406,7 +485,8 @@ export function ProductsPage() {
           <div className="grid grid-cols-2 gap-3">
             <Input label="Selling Price (₦)" type="number" inputMode="decimal"
               value={form.selling_price} onChange={e => setForm({ ...form, selling_price: e.target.value })} />
-            <Input label="Cost Price (₦)" type="number" inputMode="decimal"
+            <Input label={isCeo ? 'Cost Price (₦)' : 'Cost Price (CEO only)'} type="number" inputMode="decimal"
+              disabled={!isCeo}
               value={form.cost_price} onChange={e => setForm({ ...form, cost_price: e.target.value })} />
           </div>
           <Input label="SKU / Product Code" placeholder="e.g. KZ-TRI-001"
@@ -418,6 +498,100 @@ export function ProductsPage() {
         </div>
       </Modal>
 
+      {/* Product verification modal — corrections + linked-order update */}
+      <Modal isOpen={!!verifying} onClose={() => setVerifying(null)} title="Verify Product"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setVerifying(null)}>Cancel</Button>
+            <Button className="flex-1"
+              disabled={!vForm.name.trim() || !vForm.business_id}
+              loading={verifyMutation.isPending}
+              onClick={() => {
+                const n = (linkedOrdersQ.data || []).length
+                if (!window.confirm(
+                  `Verify "${vForm.name.trim()}"${vApply && n > 0 ? ` and update ${n} linked order${n !== 1 ? 's' : ''}` : ''}?`
+                )) return
+                verifyMutation.mutate({ product: verifying, form: vForm, apply: vApply })
+              }}>
+              Verify Product
+            </Button>
+          </div>
+        }
+      >
+        {verifying && (
+          <div className="space-y-4">
+            <p className="text-xs text-gray-500">
+              Correct the details Customer Support typed during order entry. The verified record
+              becomes the one official product used across the app.
+            </p>
+            <Input label="Product Name" required value={vForm.name}
+              onChange={e => setVForm({ ...vForm, name: e.target.value })} />
+            <Select label="Business" required value={vForm.business_id}
+              onChange={e => setVForm({ ...vForm, business_id: e.target.value })}>
+              <option value="">Select business...</option>
+              {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </Select>
+            <Select label="Category" value={vForm.category_id}
+              onChange={e => setVForm({ ...vForm, category_id: e.target.value })}>
+              <option value="">No category</option>
+              {(categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Selling Price (₦)" type="number" inputMode="decimal"
+                value={vForm.selling_price} onChange={e => setVForm({ ...vForm, selling_price: e.target.value })} />
+              <Input label={isCeo ? 'Cost Price (₦)' : 'Cost Price (CEO only)'} type="number" inputMode="decimal"
+                disabled={!isCeo}
+                value={vForm.cost_price} onChange={e => setVForm({ ...vForm, cost_price: e.target.value })} />
+            </div>
+            {!isCeo && (
+              <p className="text-[11px] text-gray-400 -mt-2">
+                Cost price affects profit reporting and can only be entered or amended by the CEO.
+              </p>
+            )}
+            <Input label="SKU / Product Code" placeholder="e.g. KZ-TRI-001"
+              value={vForm.sku} onChange={e => setVForm({ ...vForm, sku: e.target.value })} />
+
+            {/* Summary of what verification will do */}
+            <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-blue-900">Verification Summary</p>
+              {vForm.name.trim() !== verifying.name ? (
+                <p className="text-xs text-blue-800">
+                  Name: <span className="line-through opacity-60">{verifying.name}</span>{' '}
+                  → <span className="font-semibold">{vForm.name.trim()}</span>
+                </p>
+              ) : (
+                <p className="text-xs text-blue-800">Name unchanged: {verifying.name}</p>
+              )}
+              <p className="text-xs text-blue-800">
+                Linked orders: <span className="font-semibold">
+                  {linkedOrdersQ.isLoading ? 'checking...' : (linkedOrdersQ.data || []).length}
+                </span>
+              </p>
+              {isCeo && vForm.cost_price && (
+                <p className="text-xs text-blue-800">
+                  Unit cost: <span className="font-semibold">{formatCurrency(Number(vForm.cost_price))}</span>
+                  {' '}— applied only to order lines without a confirmed historical cost
+                </p>
+              )}
+              <p className="text-[11px] text-blue-700 opacity-80">
+                Sales, product, COGS, profit and P&amp;L reports recalculate automatically. Invoices,
+                receipts, delivery notes and packing lists generated afterwards use the verified name.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2.5 bg-gray-50 rounded-xl p-3 cursor-pointer">
+              <input type="checkbox" checked={vApply}
+                onChange={e => setVApply(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-yellow-400 shrink-0" />
+              <span className="text-xs text-gray-700">
+                Apply verified name and cost to linked orders without confirmed historical costs.
+                Costs already confirmed on past orders are never overwritten.
+              </span>
+            </label>
+          </div>
+        )}
+      </Modal>
+
       {/* Merge duplicate modal */}
       <Modal isOpen={!!mergeSource} onClose={() => setMergeSource(null)}
         title="Merge with Existing Product">
@@ -426,8 +600,9 @@ export function ProductsPage() {
             <div className="bg-purple-50 rounded-xl p-3">
               <p className="text-xs text-purple-700">
                 <span className="font-semibold">"{mergeSource.name}"</span> will be closed and all its
-                orders, stock and history moved to the product you pick below. Old orders keep their
-                original details.
+                orders, stock and history moved to the product you pick below. Past orders adopt the
+                official product name, and its cost price applies to order lines without a confirmed
+                historical cost. Audit history is preserved.
               </p>
             </div>
           )}
