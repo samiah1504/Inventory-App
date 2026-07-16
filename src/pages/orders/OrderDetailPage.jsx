@@ -16,6 +16,7 @@ import { useAppStore } from '../../stores/appStore'
 import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from '../../lib/pdf'
 import { supabase } from '../../lib/supabase'
 import { recordReturnDecision, sendReturnToAnotherState } from '../../lib/stockOps'
+import { ProductCorrectionModal } from '../../components/orders/ProductCorrectionModal'
 
 const STATUS_TRANSITIONS = {
   ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned', 'customer_rescheduled'],
@@ -100,6 +101,7 @@ export function OrderDetailPage() {
   const [showOverride, setShowOverride] = useState(false)
   const [showBusinessModal, setShowBusinessModal] = useState(false)
   const [businessForm, setBusinessForm] = useState({ business_id: '', reason: '' })
+  const [showCorrectionModal, setShowCorrectionModal] = useState(false)
   const [showRescheduleModal, setShowRescheduleModal] = useState(false)
   const [rescheduleForm, setRescheduleForm] = useState({ date: '', time: '', reason: 'customer_requested_another_date', custom: '', notes: '' })
   const [overrideForm, setOverrideForm] = useState({ status: '', reason: '', notes: '' })
@@ -777,7 +779,17 @@ export function OrderDetailPage() {
 
           {/* Order Details */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-2">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Order Details</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Order Details</h3>
+              {/* Product correction is CEO-only — invisible to every other role */}
+              {['ceo', 'super_admin'].includes(user?.role) && !user?._preview && (
+                <button
+                  onClick={() => setShowCorrectionModal(true)}
+                  className="text-xs font-semibold text-blue-700 underline active:opacity-70">
+                  Correct Product
+                </button>
+              )}
+            </div>
             {/* Business is read-only for every role; only the CEO can correct it */}
             <div className="flex items-start justify-between gap-3">
               <span className="text-xs text-gray-500 shrink-0">Business</span>
@@ -1264,6 +1276,13 @@ export function OrderDetailPage() {
             onChange={e => setRescheduleForm({ ...rescheduleForm, notes: e.target.value })} />
         </div>
       </Modal>
+
+      {/* CEO-only: correct the product line(s) on this order at any status */}
+      <ProductCorrectionModal
+        order={order}
+        isOpen={showCorrectionModal}
+        onClose={() => setShowCorrectionModal(false)}
+      />
 
       {/* CEO-only: move the order (and every linked record) to another business */}
       <Modal
