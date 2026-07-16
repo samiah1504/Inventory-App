@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Phone, MessageCircle, Copy, FileText, Plus, Pencil, Calendar } from 'lucide-react'
-import { useOrder, useUpdateOrderStatus } from '../../hooks/useOrders'
+import { useOrder, useUpdateOrderStatus, useReassignOrderBusiness } from '../../hooks/useOrders'
+import { useBusinesses } from '../../hooks/useBusinesses'
 import { useAuthStore } from '../../stores/authStore'
 import { TopBar } from '../../components/layout/TopBar'
 import { StatusBadge } from '../../components/ui/Badge'
@@ -79,6 +80,8 @@ export function OrderDetailPage() {
   const { showToast } = useAppStore()
   const { data: order, isLoading, refetch } = useOrder(id)
   const updateStatus = useUpdateOrderStatus()
+  const reassignBusiness = useReassignOrderBusiness()
+  const businessesQ = useBusinesses()
 
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [showPaymentModal, setShowPaymentModal] = useState(false)
@@ -95,6 +98,8 @@ export function OrderDetailPage() {
   const [cancelReason, setCancelReason] = useState('')
   const [cancelNotes, setCancelNotes] = useState('')
   const [showOverride, setShowOverride] = useState(false)
+  const [showBusinessModal, setShowBusinessModal] = useState(false)
+  const [businessForm, setBusinessForm] = useState({ business_id: '', reason: '' })
   const [showRescheduleModal, setShowRescheduleModal] = useState(false)
   const [rescheduleForm, setRescheduleForm] = useState({ date: '', time: '', reason: 'customer_requested_another_date', custom: '', notes: '' })
   const [overrideForm, setOverrideForm] = useState({ status: '', reason: '', notes: '' })
@@ -773,7 +778,20 @@ export function OrderDetailPage() {
           {/* Order Details */}
           <div className="bg-white rounded-2xl p-4 border border-gray-100 space-y-2">
             <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Order Details</h3>
-            <Row label="Business" value={order.business?.name} />
+            {/* Business is read-only for every role; only the CEO can correct it */}
+            <div className="flex items-start justify-between gap-3">
+              <span className="text-xs text-gray-500 shrink-0">Business</span>
+              <span className="text-xs text-right text-gray-900 font-medium">
+                {order.business?.name || '—'}
+                {['ceo', 'super_admin'].includes(user?.role) && !user?._preview && (
+                  <button
+                    onClick={() => { setBusinessForm({ business_id: '', reason: '' }); setShowBusinessModal(true) }}
+                    className="ml-2 text-xs font-semibold text-blue-700 underline active:opacity-70">
+                    Change
+                  </button>
+                )}
+              </span>
+            </div>
 
             {/* Items display — uses items array when available, falls back to order summary */}
             {order.items && order.items.length > 0 ? (
@@ -1244,6 +1262,67 @@ export function OrderDetailPage() {
             placeholder="Anything the team should know — not shown to the customer"
             value={rescheduleForm.notes}
             onChange={e => setRescheduleForm({ ...rescheduleForm, notes: e.target.value })} />
+        </div>
+      </Modal>
+
+      {/* CEO-only: move the order (and every linked record) to another business */}
+      <Modal
+        isOpen={showBusinessModal}
+        onClose={() => setShowBusinessModal(false)}
+        title="Change Business — CEO Correction"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowBusinessModal(false)}>Cancel</Button>
+            <Button variant="danger" className="flex-1"
+              disabled={!businessForm.business_id || !businessForm.reason.trim()}
+              loading={reassignBusiness.isPending}
+              onClick={async () => {
+                const newBiz = (businessesQ.data || []).find(b => b.id === businessForm.business_id)
+                if (!newBiz) return
+                if (!window.confirm(`Move order ${order.order_number} and all its linked records from ${order.business?.name || 'Unknown'} to ${newBiz.name}?`)) return
+                await reassignBusiness.mutateAsync({
+                  order,
+                  newBusinessId: newBiz.id,
+                  newBusinessName: newBiz.name,
+                  reason: businessForm.reason,
+                })
+                setShowBusinessModal(false)
+              }}>
+              Confirm Change
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+            <p className="text-xs text-amber-800">
+              <span className="font-semibold">Warning:</span> Changing the business for this order
+              will move all linked operational and financial records — expenses, returns, holding
+              queue entries and inventory movements — from the current business to the selected
+              business. Reports, sales, expenses and profit calculations update automatically.
+              Invoices and receipts generated afterwards use the new business's branding and
+              bank details.
+            </p>
+          </div>
+          <div className="bg-gray-50 rounded-xl px-3 py-2.5">
+            <p className="text-xs text-gray-500">Current Business</p>
+            <p className="text-sm font-semibold text-gray-900">{order.business?.name || 'Unknown'}</p>
+          </div>
+          <Select label="New Business" required value={businessForm.business_id}
+            onChange={e => setBusinessForm({ ...businessForm, business_id: e.target.value })}>
+            <option value="">Select business...</option>
+            {(businessesQ.data || []).filter(b => b.id !== order.business_id).map(b => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </Select>
+          <Textarea label="Reason for Change" required rows={2}
+            placeholder="e.g. Customer Support selected the wrong business during order creation"
+            value={businessForm.reason}
+            onChange={e => setBusinessForm({ ...businessForm, reason: e.target.value })} />
+          <p className="text-[11px] text-gray-400">
+            The change is recorded permanently in the order timeline with your name, the reason,
+            and the date and time.
+          </p>
         </div>
       </Modal>
 

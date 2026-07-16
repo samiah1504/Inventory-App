@@ -246,6 +246,102 @@ export function useCreateOrder() {
   })
 }
 
+// CEO-only correction tool: move an order — and every operational and
+// financial record linked to it — to a different business. Reports,
+// dashboards, P&L and documents all derive from business_id at query
+// time, so once the rows move the numbers follow automatically.
+export function useReassignOrderBusiness() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+
+  return useMutation({
+    mutationFn: async ({ order, newBusinessId, newBusinessName, reason }) => {
+      if (!['ceo', 'super_admin'].includes(user?.role) || user?._preview) {
+        throw new Error('Only the CEO can change the business on an order')
+      }
+      if (!newBusinessId || newBusinessId === order.business_id) {
+        throw new Error('Select a different business')
+      }
+      const oldName = order.business?.name || 'Unknown'
+
+      // 1. The order itself — verified after write: a silently-blocked
+      //    update (0 rows) must never be reported as success
+      const { error } = await supabase.from('orders')
+        .update({ business_id: newBusinessId, updated_at: new Date().toISOString() })
+        .eq('id', order.id)
+      if (error) throw new Error(error.message)
+      const { data: check } = await supabase.from('orders')
+        .select('business_id').eq('id', order.id).single()
+      if (check?.business_id !== newBusinessId) {
+        throw new Error('The database did not accept the business change. Nothing was moved.')
+      }
+
+      // 2. Financial + operational records linked to this order.
+      //    Each is best-effort (table/column may predate a migration) —
+      //    the counts are reported back for transparency.
+      const moved = {}
+      async function move(table, column) {
+        try {
+          const { data, error: e } = await supabase.from(table)
+            .update({ business_id: newBusinessId })
+            .eq(column, order.id)
+            .select('id')
+          if (e) throw e
+          moved[table] = (data || []).length
+        } catch { moved[table] = 0 }
+      }
+      await move('expenses', 'order_id')            // delivery, waybill, installation, offloading…
+      await move('returns', 'order_id')
+      await move('holding_queue', 'source_order_id')
+      try {
+        const { data } = await supabase.from('inventory_movements')
+          .update({ business_id: newBusinessId })
+          .eq('reference_id', order.id)
+          .eq('reference_type', 'order')
+          .select('id')
+        moved.inventory_movements = (data || []).length
+      } catch { moved.inventory_movements = 0 }
+
+      // 3. Waybill batches: a batch is retagged only when every order in
+      //    it now belongs to the new business — shared batches stay put.
+      try {
+        const { data: links } = await supabase.from('waybill_batch_orders')
+          .select('batch_id').eq('order_id', order.id)
+        const batchIds = Array.from(new Set((links || []).map(l => l.batch_id)))
+        for (const batchId of batchIds) {
+          const { data: siblings } = await supabase.from('waybill_batch_orders')
+            .select('order:orders(business_id)').eq('batch_id', batchId)
+          const allNew = (siblings || []).every(s => s.order?.business_id === newBusinessId)
+          if (allNew) {
+            await supabase.from('waybill_batches')
+              .update({ business_id: newBusinessId }).eq('id', batchId)
+          }
+        }
+      } catch { /* batches table variations — non-fatal */ }
+
+      // 4. Permanent record in the order timeline
+      await supabase.from('order_timeline').insert({
+        order_id: order.id,
+        action: 'business_changed',
+        description: `Business changed from ${oldName} to ${newBusinessName} — Reason: ${reason.trim()} — by ${user?.name} (${user?.role})`,
+        staff_id: user?.id,
+        staff_name: user?.name,
+      })
+
+      return { moved }
+    },
+    onSuccess: (_res, { order }) => {
+      // Every dashboard, report and analytics screen recalculates from
+      // business_id — flush the entire cache so nothing shows stale totals
+      queryClient.invalidateQueries()
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] })
+      showToast('Order moved to the new business', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error'),
+  })
+}
+
 export function useUpdateOrderStatus() {
   const queryClient = useQueryClient()
   const { showToast } = useAppStore()
