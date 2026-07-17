@@ -90,6 +90,9 @@ export function OrderDetailPage() {
   const [showNoteModal, setShowNoteModal] = useState(false)
   const [paymentData, setPaymentData] = useState({ amount_paid: '', type: 'full', balance_due_date: '', balance_notes: '' })
   const [expense, setExpense] = useState({ delivery_fee: '', installation_fee: '', offloading_fee: '', misc: '', notes: '' })
+  // Why the expense modal opened: 'payment' (after marking paid) or
+  // 'failed' (after a failed delivery — costs were still incurred)
+  const [expenseContext, setExpenseContext] = useState('payment')
   const [note, setNote] = useState('')
   const [showFailedModal, setShowFailedModal] = useState(false)
   const [failedForm, setFailedForm] = useState({
@@ -354,15 +357,17 @@ export function OrderDetailPage() {
       timelineDesc: isPaid ? `Fully paid ₦${amtPaid.toLocaleString()} by ${user?.name}` : `Partial payment ₦${amtPaid.toLocaleString()} received, balance ₦${balance.toLocaleString()} by ${user?.name}`
     })
     setShowPaymentModal(false)
+    setExpenseContext('payment')
     setShowExpenseModal(true)
   }
 
   async function handleExpenseSubmit() {
+    const failed = expenseContext === 'failed'
     const entries = [
-      { type: 'delivery', amount: expense.delivery_fee, label: 'Delivery fee' },
-      { type: 'installation', amount: expense.installation_fee, label: 'Installation fee' },
-      { type: 'offloading', amount: expense.offloading_fee, label: 'Offloading fee' },
-      { type: 'misc', amount: expense.misc, label: 'Misc expense' },
+      { type: 'delivery', amount: expense.delivery_fee, label: failed ? 'Delivery attempt (failed delivery)' : 'Delivery fee' },
+      { type: 'installation', amount: expense.installation_fee, label: failed ? 'Installation fee (failed delivery)' : 'Installation fee' },
+      { type: 'offloading', amount: expense.offloading_fee, label: failed ? 'Offloading fee (failed delivery)' : 'Offloading fee' },
+      { type: 'misc', amount: expense.misc, label: failed ? 'Misc expense (failed delivery)' : 'Misc expense' },
     ].filter(e => Number(e.amount) > 0)
 
     for (const entry of entries) {
@@ -567,6 +572,11 @@ export function OrderDetailPage() {
       timelineDesc: `Failed Delivery: ${reasonText} — stock: ${stockText} — by ${user?.name}`,
     })
     setShowFailedModal(false)
+    // A failed attempt still costs money (transport, rider, offloading) —
+    // capture it immediately while it's fresh
+    setExpense({ delivery_fee: '', installation_fee: '', offloading_fee: '', misc: '', notes: '' })
+    setExpenseContext('failed')
+    setShowExpenseModal(true)
   }
 
   async function handleAddNote() {
@@ -1138,16 +1148,21 @@ export function OrderDetailPage() {
       <Modal
         isOpen={showExpenseModal}
         onClose={() => setShowExpenseModal(false)}
-        title="Add Fulfillment Expenses"
+        title={expenseContext === 'failed' ? 'Failed Delivery Expenses' : 'Add Fulfillment Expenses'}
         footer={
           <Button onClick={handleExpenseSubmit} className="w-full">Save Expenses</Button>
         }
       >
-        <p className="text-xs text-gray-500 mb-4">Enter any fulfillment expenses for this order (leave blank if none)</p>
+        <p className="text-xs text-gray-500 mb-4">
+          {expenseContext === 'failed'
+            ? 'The delivery failed, but costs may still have been incurred — transport, rider fee, offloading, park charges. Record them here so they count against this order (leave blank if none).'
+            : 'Enter any fulfillment expenses for this order (leave blank if none)'}
+        </p>
         <div className="space-y-3">
-          <Input label="Delivery Fee (₦)" type="number" inputMode="decimal" placeholder="0"
+          <Input label={expenseContext === 'failed' ? 'Transport / Delivery Attempt Cost (₦)' : 'Delivery Fee (₦)'}
+            type="number" inputMode="decimal" placeholder="0"
             value={expense.delivery_fee} onChange={e => setExpense({ ...expense, delivery_fee: e.target.value })} />
-          {!order.delivery_fee_pending && !Number(expense.delivery_fee) && (
+          {expenseContext !== 'failed' && !order.delivery_fee_pending && !Number(expense.delivery_fee) && (
             <button
               type="button"
               onClick={handleFeePending}
