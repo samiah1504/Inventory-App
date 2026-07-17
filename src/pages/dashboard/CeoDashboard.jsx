@@ -21,7 +21,6 @@ function greeting() {
   return 'Good evening'
 }
 
-const REVENUE = ['paid', 'partially_paid']
 
 export function CeoDashboard() {
   const { user } = useAuthStore()
@@ -66,7 +65,7 @@ export function CeoDashboard() {
         rows(supabase.from('orders').select('id, business_id, total_amount, amount_paid').eq('status', 'partially_paid')),
         count(supabase.from('orders').select('*', { count: 'exact', head: true }).eq('delivery_fee_pending', true).then(r => r, () => ({ count: 0 }))),
         rows(supabase.from('orders').select('id, return_decision').eq('status', 'returned')),
-        rows(supabase.from('orders').select('id, amount_paid').gte('paid_at', `${today}T00:00:00`)),
+        rows(supabase.from('orders').select('id, amount_paid, total_amount').gte('paid_at', `${today}T00:00:00`)),
         count(supabase.from('warehouse_transfers').select('*', { count: 'exact', head: true }).eq('status', 'in_transit').then(r => r, () => ({ count: 0 }))),
         count(supabase.from('staff_leave').select('*', { count: 'exact', head: true }).eq('status', 'pending').then(r => r, () => ({ count: 0 }))),
         count(supabase.from('staff_users').select('*', { count: 'exact', head: true }).eq('is_active', true)),
@@ -79,6 +78,8 @@ export function CeoDashboard() {
         feePendingC,
         returnsAwaiting: returnedRows.filter(r => !r.return_decision).length,
         cashToday: cashRows.reduce((s, o) => s + Number(o.amount_paid || 0), 0),
+        // Orders whose full payment was recorded today (any order age)
+        paidTodayC: cashRows.length,
         transfersC, pendingLeaveC, activeStaffC,
         onLeaveC: onLeaveRows.length,
         unverifiedC,
@@ -147,13 +148,13 @@ export function CeoDashboard() {
   // ── Derived figures ───────────────────────────────────────────────────────
   const todayRows = todayOrdersQ.data || []
   const ordersToday = todayRows.length
-  // Revenue = money actually received, never the listed product price
-  const salesToday = todayRows
-    .filter(o => REVENUE.includes(o.status))
-    .reduce((s, o) => {
-      const paid = Number(o.amount_paid) || 0
-      return s + (paid > 0 ? paid : (o.status === 'paid' ? Number(o.total_amount || 0) : 0))
-    }, 0)
+  // Revenue = money actually received, attributed to the day the payment
+  // was RECORDED (cash basis, same rule as the Reports page): full
+  // payments with paid_at today — whatever day the order was created —
+  // plus part-payments on today's orders (partials carry no timestamp)
+  const salesToday = (a?.cashToday || 0) + todayRows
+    .filter(o => o.status === 'partially_paid')
+    .reduce((s, o) => s + (Number(o.amount_paid) || 0), 0)
   const cashToday = a?.cashToday || 0
   const expensesToday = exp?.today || 0
   const netToday = cashToday - expensesToday
@@ -211,6 +212,7 @@ export function CeoDashboard() {
 
   const overviewRows = [
     { label: 'Orders Today',        value: String(ordersToday), to: '/orders' },
+    { label: 'Orders Paid Today',   value: String(a?.paidTodayC || 0), to: '/orders?status=paid', color: 'text-green-600' },
     { label: 'Revenue Today (from payments)', value: formatCurrency(salesToday), to: '/reports' },
     { label: 'Cash Collected Today', value: formatCurrency(cashToday), to: '/orders?status=paid', color: 'text-green-600' },
     { label: 'Expenses Today',      value: formatCurrency(expensesToday), to: '/accounting?today=1', color: 'text-red-600' },
