@@ -360,11 +360,13 @@ export function ReportsPage() {
     queryKey: ['report_orders', dateFrom, dateTo, businessId],
     queryFn: async () => {
       try {
+        // An order belongs to the period if it was CREATED in it (volume
+        // metrics) OR PAID in it (revenue is cash-basis: a payment recorded
+        // today counts today, even on an order created weeks ago)
         let q = supabase
           .from('orders')
-          .select('id, order_number, customer_name, customer_phone, status, state, source, product_id, product_name, quantity, total_amount, amount_paid, balance_amount, created_by, created_at, business_id, items_data')
-          .gte('created_at', `${dateFrom}T00:00:00`)
-          .lte('created_at', `${dateTo}T23:59:59`)
+          .select('id, order_number, customer_name, customer_phone, status, state, source, product_id, product_name, quantity, total_amount, amount_paid, balance_amount, created_by, created_at, paid_at, business_id, items_data')
+          .or(`and(created_at.gte.${dateFrom}T00:00:00,created_at.lte.${dateTo}T23:59:59),and(paid_at.gte.${dateFrom}T00:00:00,paid_at.lte.${dateTo}T23:59:59)`)
           .order('created_at', { ascending: false })
         if (businessId) q = q.eq('business_id', businessId)
         q = scopeToBusinesses(q, user)
@@ -595,13 +597,25 @@ export function ReportsPage() {
 
   // ── Derived stats ─────────────────────────────────────────────────────────
 
-  const orders       = ordersReport.data || []
+  const fetchedOrders = ordersReport.data || []
+  const tsInRange = (ts) => !!ts && ts >= `${dateFrom}T00:00:00` && ts.slice(0, 10) <= dateTo
+  // Volume/status metrics: orders CREATED in the period (as before)
+  const orders = useMemo(() => fetchedOrders.filter(o => tsInRange(o.created_at)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchedOrders, dateFrom, dateTo])
+  // Revenue metrics: cash basis — attributed to the payment date when one
+  // is recorded, falling back to the creation date (partial payments and
+  // legacy orders have no paid_at)
+  const revenueOrders = useMemo(() => fetchedOrders.filter(o =>
+    REVENUE_STATUSES.includes(o.status) && tsInRange(o.paid_at || o.created_at)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fetchedOrders, dateFrom, dateTo])
   const expenses     = expensesReport.data || []
   const staffOrders  = staffReport.data || []
   const inventoryItems = inventoryReport.data || []
 
   const totalOrders   = orders.length
-  const totalSales    = salesFromOrders(orders)
+  const totalSales    = salesFromOrders(revenueOrders)
   const totalExpenses = expenses.reduce((s, e) => s + Number(e.amount), 0)
   const netProfit     = totalSales - totalExpenses
 
@@ -673,14 +687,14 @@ export function ReportsPage() {
   const expSummary = useMemo(() => {
     const orderTotal = expenseGroups.order.reduce((s, g) => s + g.total, 0)
     const bizTotal   = expenseGroups.business.reduce((s, g) => s + g.total, 0)
-    const paidOrderCount = orders.filter(o => REVENUE_STATUSES.includes(o.status)).length
+    const paidOrderCount = revenueOrders.length
     return {
       total: orderTotal + bizTotal,
       orderTotal,
       bizTotal,
       avgPerPaidOrder: paidOrderCount > 0 ? orderTotal / paidOrderCount : 0,
     }
-  }, [expenseGroups, orders])
+  }, [expenseGroups, revenueOrders])
 
   // Combined per-category totals (order + business) for widget + chart
   const expenseCats = useMemo(() => {
@@ -707,14 +721,22 @@ export function ReportsPage() {
 
   // ── Product analytics ─────────────────────────────────────────────────────
 
+  // Sold set = orders created in the period with a sold status, plus
+  // revenue-attributed orders paid in the period (cash basis) — so a
+  // payment recorded today shows in today's product revenue too
+  const soldOrders = useMemo(() => {
+    const m = new Map()
+    orders.filter(o => SOLD_STATUSES.includes(o.status)).forEach(o => m.set(o.id, o))
+    revenueOrders.forEach(o => m.set(o.id, o))
+    return Array.from(m.values())
+  }, [orders, revenueOrders])
+
   const productStats = useMemo(() => {
-    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status))
     return buildProductStats(soldOrders, productsReport.data || [], expenses)
-  }, [orders, productsReport.data, expenses])
+  }, [soldOrders, productsReport.data, expenses])
 
   // Product performance (units / orders / stock — no financials)
   const productPerf = useMemo(() => {
-    const soldOrders = orders.filter(o => SOLD_STATUSES.includes(o.status))
     const catalog  = catalogProducts || []
     const byId     = new Map(catalog.map(p => [p.id, p]))
     const byName   = new Map(catalog.map(p => [p.name.trim().toLowerCase(), p]))
@@ -754,7 +776,7 @@ export function ReportsPage() {
         opening: available - received + p.qty,
       }
     })
-  }, [orders, productsReport.data, catalogProducts, businesses, inventoryItems, inventoryMovements.data, productWarehouseFilter])
+  }, [soldOrders, productsReport.data, catalogProducts, businesses, inventoryItems, inventoryMovements.data, productWarehouseFilter])
 
   const productCategories = useMemo(() =>
     Array.from(new Set(productPerf.map(p => p.category).filter(Boolean))).sort()
@@ -810,20 +832,20 @@ export function ReportsPage() {
   }, [catalogProducts])
 
   const plData = useMemo(() =>
-    computePL(orders, expenses, plCatalog.byId, plCatalog.byName, itemRowsByOrder)
-  , [orders, expenses, plCatalog, itemRowsByOrder])
+    computePL(revenueOrders, expenses, plCatalog.byId, plCatalog.byName, itemRowsByOrder)
+  , [revenueOrders, expenses, plCatalog, itemRowsByOrder])
 
   const perBusinessPL = useMemo(() => {
     if (businessId || !businesses || businesses.length <= 1) return []
     return businesses.map(b => ({
       business: b,
       pl: computePL(
-        orders.filter(o => o.business_id === b.id),
+        revenueOrders.filter(o => o.business_id === b.id),
         expenses.filter(e => e.business_id === b.id),
         plCatalog.byId, plCatalog.byName, itemRowsByOrder,
       ),
     }))
-  }, [orders, expenses, businesses, businessId, plCatalog, itemRowsByOrder])
+  }, [revenueOrders, expenses, businesses, businessId, plCatalog, itemRowsByOrder])
 
   // Monthly trend (last 6 months) — independent of the selected date range
   const plTrend = useQuery({
@@ -834,8 +856,8 @@ export function ReportsPage() {
         const start = new Date(); start.setDate(1); start.setMonth(start.getMonth() - 5)
         const startISO = start.toISOString().split('T')[0]
         let oq = supabase.from('orders')
-          .select('id, status, total_amount, amount_paid, created_at, business_id, product_id, product_name, quantity, items_data')
-          .gte('created_at', `${startISO}T00:00:00`)
+          .select('id, status, total_amount, amount_paid, created_at, paid_at, business_id, product_id, product_name, quantity, items_data')
+          .or(`created_at.gte.${startISO}T00:00:00,paid_at.gte.${startISO}T00:00:00`)
           .in('status', ['paid', 'partially_paid'])
         if (businessId) oq = oq.eq('business_id', businessId)
         oq = scopeToBusinesses(oq, user)
@@ -860,7 +882,8 @@ export function ReportsPage() {
       const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i)
       const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
       const pl = computePL(
-        t.orders.filter(o => (o.created_at || '').startsWith(ym)),
+        // Revenue lands in the month the payment was recorded (cash basis)
+        t.orders.filter(o => ((o.paid_at || o.created_at) || '').startsWith(ym)),
         t.expenses.filter(e => (e.date || '').startsWith(ym)),
         plCatalog.byId, plCatalog.byName, null,
       )
@@ -876,7 +899,8 @@ export function ReportsPage() {
     return businesses.map(biz => {
       const bizOrders   = orders.filter(o => o.business_id === biz.id)
       const bizExpenses = expenses.filter(e => e.business_id === biz.id)
-      const revOrds     = bizOrders.filter(o => REVENUE_STATUSES.includes(o.status))
+      // Cash-basis revenue set (payments recorded in the period)
+      const revOrds     = revenueOrders.filter(o => o.business_id === biz.id)
       const grossSales  = revOrds.reduce((s, o) => s + orderRevenue(o), 0)
       const totalExp    = bizExpenses.reduce((s, e) => s + Number(e.amount || 0), 0)
       const netPrft     = grossSales - totalExp
@@ -908,7 +932,7 @@ export function ReportsPage() {
         bestProduct: topProduct ? { name: topProduct[0], count: topProduct[1] } : null,
       }
     })
-  }, [businesses, orders, expenses])
+  }, [businesses, orders, revenueOrders, expenses])
 
   // ── Visible tabs ──────────────────────────────────────────────────────────
 
@@ -1496,7 +1520,7 @@ export function ReportsPage() {
             {/* Revenue by state */}
             {(() => {
               const byStateRev = {}
-              orders.filter(o => REVENUE_STATUSES.includes(o.status)).forEach(o => {
+              revenueOrders.forEach(o => {
                 const s = o.state || 'Unknown'
                 byStateRev[s] = (byStateRev[s] || 0) + orderRevenue(o)
               })
