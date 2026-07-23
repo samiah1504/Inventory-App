@@ -19,6 +19,7 @@ export const HOLDING_STATUSES = {
   waybilled:     { label: 'Waybilled / In Transit', color: 'bg-purple-50 text-purple-700' },
   park_transfer: { label: 'Transferred from Park', color: 'bg-indigo-50 text-indigo-700' },
   transferred:   { label: 'Used in Waybill Batch', color: 'bg-purple-50 text-purple-700' },
+  delivered_other: { label: 'Delivered to Another Customer', color: 'bg-emerald-50 text-emerald-700' },
   damaged:       { label: 'Damaged',              color: 'bg-red-50 text-red-700' },
 }
 
@@ -88,6 +89,8 @@ function useHoldingMutation(fn, successMsg) {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
       queryClient.invalidateQueries({ queryKey: ['expenses'] })
+      queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['order'] })
       if (successMsg) showToast(successMsg, 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
@@ -279,6 +282,57 @@ export function useHoldingParkTransfer() {
     } catch { /* movement log is best-effort */ }
     await holdingHistory(item.id, 'park_transfer', summary, user)
   }, 'Recorded — the item left the active queue')
+}
+
+// The held product ended up fulfilling a DIFFERENT customer's order.
+// Records which order received it, stamps both the holding history and the
+// receiving order's timeline, and the item leaves the active queue.
+export function useHoldingDelivered() {
+  return useHoldingMutation(async ({ item, order, notes }, user) => {
+    const summary = `Delivered to another customer — order ${order.order_number}` +
+      `${order.customer_name ? ` (${order.customer_name})` : ''}` +
+      `${notes ? ` · ${notes}` : ''}`
+    const { error } = await supabase.from('holding_queue')
+      .update({
+        status: 'delivered_other',
+        custodian_id: user?.id || null,
+        custodian_name: user?.name || null,
+        updated_at: new Date().toISOString(),
+        notes: [item.notes, summary].filter(Boolean).join(' · '),
+      })
+      .eq('id', item.id)
+    if (error) throw error
+
+    // Movement log, linked back to the holding item
+    try {
+      await supabase.from('inventory_movements').insert({
+        product_id: item.product_id || null,
+        warehouse_id: null,
+        business_id: item.business_id || null,
+        movement_type: 'holding_delivered',
+        quantity: 0,
+        reference_id: item.id,
+        reference_type: 'holding',
+        notes: `${item.quantity} × ${item.product_name} — ${summary} (originally ${item.source_order_number || 'failed order'})`,
+        staff_id: user?.id || null,
+      })
+    } catch { /* movement log is best-effort */ }
+
+    // The receiving order's timeline shows where its product came from
+    try {
+      await supabase.from('order_timeline').insert({
+        order_id: order.id,
+        action: 'holding_delivered',
+        description: `Fulfilled with ${item.quantity} × ${item.product_name} from the Holding Queue` +
+          ` (originally ${item.source_order_number || 'a failed order'}, held at ${item.park_name || item.state || 'park'})` +
+          `${notes ? ` · ${notes}` : ''} — by ${user?.name}`,
+        staff_id: user?.id || null,
+        staff_name: user?.name || null,
+      })
+    } catch { /* timeline is best-effort */ }
+
+    await holdingHistory(item.id, 'delivered_other', summary, user)
+  }, 'Recorded — delivered to that order and left the active queue')
 }
 
 export function useHoldingDamaged() {

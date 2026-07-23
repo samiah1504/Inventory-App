@@ -14,9 +14,12 @@ import { formatDate, NIGERIAN_STATES } from '../../utils/format'
 import { openDialer } from '../../utils/whatsapp'
 import {
   useHoldingQueue, useUpdateHolding, useCollectHolding, useHoldingToWarehouse, useHoldingDamaged,
-  useHoldingWaybilled, useHoldingParkTransfer, useHoldingHistory,
+  useHoldingWaybilled, useHoldingParkTransfer, useHoldingHistory, useHoldingDelivered,
   CONTACT_ROLES, HOLDING_STATUSES, ACTIVE_HOLDING,
 } from '../../hooks/useHolding'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
+import { scopeToBusinesses } from '../../lib/businessScope'
 
 const ageDays = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000)
 
@@ -62,6 +65,11 @@ export function HoldingQueuePage() {
   const [wbForm, setWbForm] = useState({})
   const [ptItem, setPtItem] = useState(null)
   const [ptForm, setPtForm] = useState({})
+  // "Delivered to Another Customer" — pick the order that received it
+  const [dlItem, setDlItem] = useState(null)
+  const [dlSearch, setDlSearch] = useState('')
+  const [dlOrder, setDlOrder] = useState(null)
+  const [dlNotes, setDlNotes] = useState('')
 
   const { data: items, isLoading } = useHoldingQueue(showClosed)
   const updateHolding = useUpdateHolding()
@@ -70,6 +78,27 @@ export function HoldingQueuePage() {
   const markDamaged = useHoldingDamaged()
   const waybillHolding = useHoldingWaybilled()
   const parkTransfer = useHoldingParkTransfer()
+  const deliveredToOrder = useHoldingDelivered()
+
+  // Orders matching the picker search (business-scoped; cancelled excluded)
+  const dlOrdersQ = useQuery({
+    queryKey: ['holding_order_pick', dlSearch, user?.id],
+    enabled: !!dlItem && dlSearch.trim().length >= 2,
+    queryFn: async () => {
+      const q = dlSearch.trim().replace(/([%_\\])/g, '\\$1')
+      let query = supabase.from('orders')
+        .select('id, order_number, customer_name, customer_phone, state, city, status, product_name')
+        .or(`order_number.ilike.%${q}%,customer_name.ilike.%${q}%,customer_phone.ilike.%${q}%`)
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(10)
+      query = scopeToBusinesses(query, user)
+      const { data, error } = await query
+      if (error) throw error
+      return data || []
+    },
+    staleTime: 15000,
+  })
 
   const isFulfillment = user?.role === 'fulfillment'
   const isWaybill = user?.role === 'waybill'
@@ -271,6 +300,13 @@ export function HoldingQueuePage() {
                         }}>
                         Transferred from Park
                       </Button>
+                      <Button size="sm" className="col-span-2"
+                        onClick={() => {
+                          setDlSearch(''); setDlOrder(null); setDlNotes('')
+                          setDlItem(item)
+                        }}>
+                        Delivered to Another Customer
+                      </Button>
                       <Button size="sm" variant="danger" className="col-span-2"
                         loading={markDamaged.isPending}
                         onClick={() => {
@@ -323,6 +359,73 @@ export function HoldingQueuePage() {
           )
         })}
       </div>
+
+      {/* Delivered to another customer — record which order received it */}
+      <Modal isOpen={!!dlItem} onClose={() => setDlItem(null)} title="Delivered to Another Customer"
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" className="flex-1" onClick={() => setDlItem(null)}>Cancel</Button>
+            <Button className="flex-1"
+              disabled={!dlOrder}
+              loading={deliveredToOrder.isPending}
+              onClick={async () => {
+                await deliveredToOrder.mutateAsync({ item: dlItem, order: dlOrder, notes: dlNotes.trim() })
+                setDlItem(null)
+              }}>
+              Confirm
+            </Button>
+          </div>
+        }>
+        <div className="space-y-3">
+          {dlItem && (
+            <div className="bg-emerald-50 rounded-xl p-3">
+              <p className="text-xs text-emerald-800">
+                <span className="font-semibold">{dlItem.quantity} × {dlItem.product_name}</span>
+                {' '}was used to fulfil a different customer's order. Pick that order below —
+                the item leaves the active queue and the delivery is recorded on both histories.
+              </p>
+            </div>
+          )}
+          <Input label="Which order was it delivered to?" required
+            placeholder="Search order number, customer name or phone..."
+            value={dlSearch}
+            onChange={e => { setDlSearch(e.target.value); setDlOrder(null) }} />
+          {dlOrder ? (
+            <div className="bg-white border border-emerald-300 rounded-xl p-3">
+              <p className="text-sm font-semibold text-gray-900">{dlOrder.order_number} · {dlOrder.customer_name}</p>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {[dlOrder.product_name, [dlOrder.city, dlOrder.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
+              </p>
+              <button className="text-xs text-blue-700 underline mt-1"
+                onClick={() => { setDlOrder(null); setDlSearch('') }}>
+                Change order
+              </button>
+            </div>
+          ) : dlSearch.trim().length >= 2 ? (
+            <div className="space-y-1.5 max-h-56 overflow-y-auto">
+              {(dlOrdersQ.data || []).map(o => (
+                <button key={o.id} type="button"
+                  onClick={() => setDlOrder(o)}
+                  className="w-full text-left bg-white border border-gray-100 rounded-xl p-3 active:bg-gray-50">
+                  <p className="text-sm font-semibold text-gray-900">{o.order_number} · {o.customer_name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {[o.product_name, [o.city, o.state].filter(Boolean).join(', ')].filter(Boolean).join(' · ')}
+                  </p>
+                </button>
+              ))}
+              {dlOrdersQ.isLoading && <p className="text-xs text-gray-400 px-1">Searching...</p>}
+              {!dlOrdersQ.isLoading && (dlOrdersQ.data || []).length === 0 && (
+                <p className="text-xs text-gray-400 px-1">No orders match — check the order number</p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-400">Type at least 2 characters to search orders</p>
+          )}
+          <Textarea label="Notes (optional)" rows={2}
+            placeholder="e.g. delivered by rider from the park"
+            value={dlNotes} onChange={e => setDlNotes(e.target.value)} />
+        </div>
+      </Modal>
 
       {/* Update details modal */}
       <Modal isOpen={!!editItem} onClose={() => setEditItem(null)} title="Update Holding Details"
