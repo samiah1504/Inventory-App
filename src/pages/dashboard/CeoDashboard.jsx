@@ -192,7 +192,7 @@ export function CeoDashboard() {
     { label: 'Returns awaiting decision', count: a?.returnsAwaiting || 0, to: '/orders?status=returned' },
     { label: 'Delivery fees pending',    count: a?.feePendingC || 0,     to: '/orders?status=fee_pending' },
     { label: 'Pending expense approvals', count: exp?.pending || 0,      to: '/accounting' },
-    { label: 'Leave requests pending',   count: a?.pendingLeaveC || 0,   to: '/settings/staff' },
+    { label: 'Leave requests pending',   count: a?.pendingLeaveC || 0,   to: '/settings/leave-requests' },
     { label: 'Low stock products',       count: inv?.low || 0,           to: '/inventory?filter=low_stock' },
     { label: 'Unverified products',      count: a?.unverifiedC || 0,     to: '/settings/products?tab=unverified' },
     { label: 'Products in holding queue', count: a?.holdingC || 0,       to: '/holding' },

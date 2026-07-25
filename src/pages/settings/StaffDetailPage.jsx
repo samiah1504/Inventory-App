@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Pencil, KeyRound, FileText, Download, Trash2, ExternalLink, Plus, Check } from 'lucide-react'
 import { TopBar } from '../../components/layout/TopBar'
 import { Modal } from '../../components/ui/Modal'
@@ -55,7 +55,10 @@ export function StaffDetailPage() {
   const { showToast } = useAppStore()
   const { data: businesses } = useBusinesses()
 
-  const [tab, setTab] = useState('profile')
+  const [searchParams] = useSearchParams()
+  // Deep links (e.g. a leave request card) can open a specific tab directly
+  const initialTab = TABS.some(t => t.key === searchParams.get('tab')) ? searchParams.get('tab') : 'profile'
+  const [tab, setTab] = useState(initialTab)
   const [showEdit, setShowEdit] = useState(false)
   const [showReset, setShowReset] = useState(false)
   const [newPassword, setNewPassword] = useState('')

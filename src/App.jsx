@@ -21,6 +21,7 @@ import { ReportsPage } from './pages/reports/ReportsPage'
 import { SettingsPage } from './pages/settings/SettingsPage'
 import { StaffPage } from './pages/settings/StaffPage'
 import { StaffDetailPage } from './pages/settings/StaffDetailPage'
+import { LeaveRequestsPage } from './pages/settings/LeaveRequestsPage'
 import { MyLeavePage } from './pages/settings/MyLeavePage'
 import { MyProfilePage } from './pages/settings/MyProfilePage'
 import { MyDisciplinaryPage } from './pages/settings/MyDisciplinaryPage'
@@ -141,6 +142,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/staff" element={<StaffPage />} />
             <Route path="/settings/staff/:id" element={<StaffDetailPage />} />
+            <Route path="/settings/leave-requests" element={<LeaveRequestsPage />} />
             <Route path="/settings/leave" element={<MyLeavePage />} />
             <Route path="/settings/profile" element={<MyProfilePage />} />
             <Route path="/my-warnings" element={<MyDisciplinaryPage />} />

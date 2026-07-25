@@ -244,7 +244,7 @@ export function useReviewLeave() {
     if (decision === 'approved') {
       await supabase.from('staff_users').update({ status: 'on_leave' }).eq('id', leave.staff_id).eq('status', 'active')
     }
-  }, ['staff_leave', 'staff', 'staff_member'], 'Leave request updated')
+  }, ['staff_leave', 'staff', 'staff_member', 'all_leave_requests'], 'Leave request updated')
 }
 
 export function useCancelLeave() {
