@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, DollarSign, Pencil, Ban, ExternalLink } from 'lucide-react'
+import { Plus, DollarSign, Ban, ExternalLink } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
@@ -51,7 +51,6 @@ export function MyBusinessExpensesPage() {
   const [dateFrom, setDateFrom] = useState(monthStart)
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0])
   const [showAdd, setShowAdd] = useState(searchParams.get('add') === '1')
-  const [editItem, setEditItem] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
 
   // Role preview keeps the CEO's identity, so their own entries would
@@ -115,31 +114,8 @@ export function MyBusinessExpensesPage() {
     onError: (err) => showToast(err.message, 'error'),
   })
 
-  const editExpense = useMutation({
-    mutationFn: async ({ id, f }) => {
-      const { error } = await supabase.from('expenses').update({
-        expense_type: f.expense_type,
-        amount: Number(f.amount),
-        description: f.description || null,
-        date: f.date,
-      }).eq('id', id).eq('staff_id', user.id)
-      if (error) throw error
-      // Audit trail + newer columns, best-effort pre-migration
-      await supabase.from('expenses').update({
-        paid_to: f.paid_to || null,
-        receipt_url: f.receipt_url || null,
-        last_edited_by: user?.name || null,
-        last_edited_at: new Date().toISOString(),
-      }).eq('id', id)
-    },
-    onSuccess: () => {
-      invalidate()
-      showToast('Expense updated', 'success')
-      setEditItem(null)
-    },
-    onError: (err) => showToast(err.message, 'error'),
-  })
-
+  // No edits — once recorded, an expense can only be changed by the CEO
+  // (from Accounting). A mistaken entry is voided and re-added.
   // No deletes — a mistaken entry is voided and kept for audit.
   // Permanent removal is CEO-only, from the Accounting module.
   const voidExpense = useMutation({
@@ -179,7 +155,7 @@ export function MyBusinessExpensesPage() {
       </Select>
       <Input label="Amount (₦)" type="number" inputMode="decimal" required
         value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} />
-      <Select label="Business" required disabled={!!editItem} value={form.business_id}
+      <Select label="Business" required value={form.business_id}
         onChange={e => setForm({ ...form, business_id: e.target.value })}>
         <option value="">Select business...</option>
         {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -300,21 +276,6 @@ export function MyBusinessExpensesPage() {
                   </div>
                   {!voided && (
                     <div className="flex gap-2 mt-3">
-                      <Button size="sm" variant="secondary" className="flex-1"
-                        onClick={() => {
-                          setForm({
-                            business_id: exp.business_id || '',
-                            expense_type: exp.expense_type || 'logistics_misc',
-                            amount: String(exp.amount ?? ''),
-                            date: exp.date || new Date().toISOString().split('T')[0],
-                            description: exp.description || '',
-                            paid_to: exp.paid_to || '',
-                            receipt_url: exp.receipt_url || '',
-                          })
-                          setEditItem(exp)
-                        }}>
-                        <span className="flex items-center justify-center gap-1.5"><Pencil size={13} /> Edit</span>
-                      </Button>
                       <Button size="sm" variant="danger" className="flex-1"
                         loading={voidExpense.isPending}
                         onClick={() => {
@@ -329,7 +290,8 @@ export function MyBusinessExpensesPage() {
               )
             })}
             <p className="text-[11px] text-gray-400">
-              Voided expenses stay on record for audit. Only the CEO can permanently remove an expense.
+              Recorded expenses can't be edited — only the CEO can amend an expense. Made a mistake?
+              Void the entry (it stays on record for audit) and add it again correctly.
             </p>
           </div>
         )}
@@ -350,20 +312,6 @@ export function MyBusinessExpensesPage() {
         {expenseForm}
       </Modal>
 
-      {/* Edit modal */}
-      <Modal isOpen={!!editItem} onClose={() => setEditItem(null)} title="Edit Business Expense"
-        footer={
-          <div className="flex gap-3">
-            <Button variant="secondary" onClick={() => setEditItem(null)} className="flex-1">Cancel</Button>
-            <Button className="flex-1" disabled={!formValid}
-              loading={editExpense.isPending}
-              onClick={() => editExpense.mutate({ id: editItem.id, f: form })}>
-              Save Changes
-            </Button>
-          </div>
-        }>
-        {expenseForm}
-      </Modal>
     </div>
   )
 }

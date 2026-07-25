@@ -175,6 +175,9 @@ export function AccountingPage() {
         category: isAdminType ? 'admin' : 'operational',
       }
       if (editingExp) {
+        // Editing an existing expense — ANY staff's record — is CEO-only,
+        // even for roles granted access to this page
+        if (!isCeo) throw new Error('Only the CEO can edit expenses')
         const { error } = await supabase.from('expenses').update(core).eq('id', editingExp.id)
         if (error) throw error
         await supabase.from('expenses').update({
@@ -209,6 +212,7 @@ export function AccountingPage() {
 
   const deleteExpense = useMutation({
     mutationFn: async (id) => {
+      if (!isCeo) throw new Error('Only the CEO can delete expenses')
       const { error } = await supabase.from('expenses').delete().eq('id', id)
       if (error) throw error
       const { data: still } = await supabase.from('expenses').select('id').eq('id', id).limit(1)
