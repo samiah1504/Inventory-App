@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 import { scopeToBusinesses } from '../../lib/businessScope'
+import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
 
 function today() { return new Date().toISOString().split('T')[0] }
 
@@ -47,6 +48,9 @@ export function OperationsManagerDashboard() {
         <p className="text-gray-400 text-sm mt-0.5">{user?.staff_code}</p>
       </div>
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Unread disciplinary notice for this employee */}
+        <DisciplinaryBanner />
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             label="Orders Today"

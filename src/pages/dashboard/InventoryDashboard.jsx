@@ -3,6 +3,7 @@ import { Package, AlertTriangle, TrendingUp } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { useInventory } from '../../hooks/useInventory'
 import { StatCard } from '../../components/ui/Card'
+import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
 
 export function InventoryDashboard() {
   const { user } = useAuthStore()
@@ -21,6 +22,9 @@ export function InventoryDashboard() {
         <p className="text-gray-400 text-sm mt-0.5">{user?.staff_code}</p>
       </div>
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Unread disciplinary notice for this employee */}
+        <DisciplinaryBanner />
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             label="Stock Lines"

@@ -6,6 +6,7 @@ import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 import { formatDate } from '../../utils/format'
 import { scopeToBusinesses } from '../../lib/businessScope'
+import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
 
 const BATCH_STATUS = {
   created:  { label: 'To Pack',    color: 'bg-blue-100 text-blue-700' },
@@ -54,6 +55,9 @@ export function WaybillDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Unread disciplinary notice for this employee */}
+        <DisciplinaryBanner />
         {/* Waybill batches by stage */}
         <div className="grid grid-cols-2 gap-3">
           <StatCard

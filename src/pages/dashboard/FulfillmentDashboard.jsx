@@ -8,6 +8,7 @@ import { Button } from '../../components/ui/Button'
 import { formatDate } from '../../utils/format'
 import { useReceiveTransfer, useTransferAtPark } from '../../hooks/useInventory'
 import { scopeToBusinesses } from '../../lib/businessScope'
+import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
 
 export function FulfillmentDashboard() {
   const { user } = useAuthStore()
@@ -171,6 +172,9 @@ export function FulfillmentDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Unread disciplinary notice for this employee */}
+        <DisciplinaryBanner />
 
         {/* Rescheduled deliveries due today or overdue — the morning reminder */}
         {rescheduledDue.length > 0 && (

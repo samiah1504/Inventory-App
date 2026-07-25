@@ -7,6 +7,7 @@ import { StatusBadge } from '../../components/ui/Badge'
 import { formatCurrency } from '../../utils/format'
 import { Button } from '../../components/ui/Button'
 import { openDialer, openWhatsApp } from '../../utils/whatsapp'
+import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
 
 export function CustomerSupportDashboard() {
   const { user } = useAuthStore()
@@ -24,6 +25,9 @@ export function CustomerSupportDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-6">
+
+        {/* Unread disciplinary notice for this employee */}
+        <DisciplinaryBanner />
         {/* Stats */}
         <div className="grid grid-cols-2 gap-3">
           <StatCard

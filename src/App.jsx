@@ -23,6 +23,7 @@ import { StaffPage } from './pages/settings/StaffPage'
 import { StaffDetailPage } from './pages/settings/StaffDetailPage'
 import { MyLeavePage } from './pages/settings/MyLeavePage'
 import { MyProfilePage } from './pages/settings/MyProfilePage'
+import { MyDisciplinaryPage } from './pages/settings/MyDisciplinaryPage'
 import { BusinessesPage } from './pages/settings/BusinessesPage'
 import { WarehousesPage } from './pages/settings/WarehousesPage'
 import { ProductsPage } from './pages/settings/ProductsPage'
@@ -142,6 +143,7 @@ export default function App() {
             <Route path="/settings/staff/:id" element={<StaffDetailPage />} />
             <Route path="/settings/leave" element={<MyLeavePage />} />
             <Route path="/settings/profile" element={<MyProfilePage />} />
+            <Route path="/my-warnings" element={<MyDisciplinaryPage />} />
             <Route path="/settings/businesses" element={<BusinessesPage />} />
             <Route path="/settings/warehouses" element={<WarehousesPage />} />
             <Route path="/settings/products" element={<ProductsPage />} />

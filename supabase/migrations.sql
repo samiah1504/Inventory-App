@@ -654,3 +654,116 @@ $$;
 -- that already carry a confirmed cost are never overwritten, so past
 -- orders keep the cost that was true when they were sold.
 ALTER TABLE order_items ADD COLUMN IF NOT EXISTS cost_price DECIMAL(15,2);
+
+-- ===================================================
+-- Warning & Disciplinary Action module
+-- ===================================================
+-- Expands the simple staff_warnings feature (kept untouched, shown as
+-- legacy records) into full disciplinary actions with sanctions,
+-- month-scoped salary deductions (the base salary record is NEVER
+-- edited), employee acknowledgement/response, approval workflow and an
+-- insert-only audit trail.
+
+CREATE TABLE IF NOT EXISTS disciplinary_actions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  employee_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  action_type TEXT NOT NULL DEFAULT 'warning_only',  -- warning_only / warning_with_sanction / sanction_only
+  warning_category TEXT,           -- key from the category list, or 'custom'
+  custom_category TEXT,
+  incident_title TEXT,
+  incident_description TEXT,
+  incident_date DATE,
+  business_impact TEXT,
+  previous_discussions TEXT,
+  expected_improvement TEXT,
+  sanction_type TEXT,              -- percent_deduction / fixed_deduction / suspension_unpaid / suspension_paid / loss_bonus / loss_commission / loss_allowance / written_caution / pip / duty_restriction / demotion / other
+  sanction_details TEXT,
+  management_note TEXT,
+  status TEXT NOT NULL DEFAULT 'issued',  -- draft / pending_approval / issued / rejected / withdrawn / resolved / escalated
+  review_date DATE,
+  effective_date DATE,
+  issued_by UUID REFERENCES staff_users(id),
+  issued_by_name TEXT,
+  approved_by UUID REFERENCES staff_users(id),
+  approved_by_name TEXT,
+  issued_at TIMESTAMPTZ,
+  approved_at TIMESTAMPTZ,
+  rejected_reason TEXT,
+  withdrawn_by_name TEXT,
+  withdrawn_at TIMESTAMPTZ,
+  withdrawal_reason TEXT,
+  employee_opened_at TIMESTAMPTZ,
+  employee_acknowledged_at TIMESTAMPTZ,
+  employee_response TEXT,
+  employee_response_at TIMESTAMPTZ,
+  employee_attachment_url TEXT,
+  review_requested BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_disc_actions_employee ON disciplinary_actions(employee_id);
+CREATE INDEX IF NOT EXISTS idx_disc_actions_status ON disciplinary_actions(status);
+
+-- One deduction record per sanctioned action. base_salary_snapshot is
+-- captured at issue time so later salary changes never rewrite history.
+CREATE TABLE IF NOT EXISTS disciplinary_deductions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  disciplinary_action_id UUID REFERENCES disciplinary_actions(id) ON DELETE CASCADE,
+  employee_id UUID REFERENCES staff_users(id) ON DELETE CASCADE,
+  salary_month TEXT NOT NULL,         -- 'YYYY-MM' of the (first) affected payroll month
+  deduction_type TEXT NOT NULL,       -- percent / fixed
+  percentage DECIMAL(6,3),
+  fixed_amount DECIMAL(15,2),
+  base_salary_snapshot DECIMAL(15,2),
+  calculated_deduction_amount DECIMAL(15,2),
+  expected_net_salary DECIMAL(15,2),
+  duration_type TEXT NOT NULL DEFAULT 'one_month',  -- one_month / multi_month / until_stopped
+  number_of_months INT DEFAULT 1,
+  start_month TEXT,
+  end_month TEXT,                     -- null while an until_stopped deduction is running
+  payroll_status TEXT NOT NULL DEFAULT 'scheduled', -- scheduled / completed / reversed / stopped
+  reason TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(disciplinary_action_id)
+);
+CREATE INDEX IF NOT EXISTS idx_disc_deductions_employee ON disciplinary_deductions(employee_id);
+CREATE INDEX IF NOT EXISTS idx_disc_deductions_month ON disciplinary_deductions(salary_month);
+
+CREATE TABLE IF NOT EXISTS disciplinary_attachments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  disciplinary_action_id UUID REFERENCES disciplinary_actions(id) ON DELETE CASCADE,
+  uploaded_by UUID REFERENCES staff_users(id),
+  uploaded_by_name TEXT,
+  file_url TEXT NOT NULL,
+  file_name TEXT,
+  file_type TEXT,                     -- screenshot / image / pdf / document / voice_note / other
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_disc_attach_action ON disciplinary_attachments(disciplinary_action_id);
+
+-- Insert-only from the app; never edited
+CREATE TABLE IF NOT EXISTS disciplinary_audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  disciplinary_action_id UUID REFERENCES disciplinary_actions(id) ON DELETE CASCADE,
+  performed_by UUID REFERENCES staff_users(id),
+  performed_by_name TEXT,
+  action TEXT NOT NULL,
+  previous_value TEXT,
+  new_value TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_disc_audit_action ON disciplinary_audit_logs(disciplinary_action_id);
+
+-- Single-row configuration (id fixed to 1)
+CREATE TABLE IF NOT EXISTS disciplinary_settings (
+  id INT PRIMARY KEY DEFAULT 1,
+  max_deduction_percent DECIMAL(6,3) DEFAULT 20,
+  deductions_require_approval BOOLEAN DEFAULT true,
+  employees_can_appeal BOOLEAN DEFAULT true,
+  appeal_days INT DEFAULT 7,
+  default_review_days INT DEFAULT 30,
+  payslip_show_reason BOOLEAN DEFAULT false,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO disciplinary_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;

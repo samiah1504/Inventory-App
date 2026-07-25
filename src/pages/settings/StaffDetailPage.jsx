@@ -22,6 +22,8 @@ import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
 import { savePdf } from '../../lib/pdf'
 import { EmploymentTab, ContractTab } from './StaffHrTabs'
+import { DisciplinaryModal } from '../../components/staff/DisciplinaryModal'
+import { DisciplinaryHistory, DisciplinarySettingsModal } from '../../components/staff/DisciplinaryHistory'
 
 const TABS = [
   { key: 'profile',     label: 'Profile' },
@@ -59,6 +61,8 @@ export function StaffDetailPage() {
   const [newPassword, setNewPassword] = useState('')
   const [showLeaveForm, setShowLeaveForm] = useState(false)
   const [showWarningForm, setShowWarningForm] = useState(false)
+  const [showDiscModal, setShowDiscModal] = useState(false)
+  const [showDiscSettings, setShowDiscSettings] = useState(false)
   const [docModal, setDocModal] = useState(null) // { doc? } — null closed, {} new
   const [noteText, setNoteText] = useState('')
 
@@ -414,18 +418,31 @@ export function StaffDetailPage() {
           )
         )}
 
-        {/* ── DISCIPLINE ── */}
+        {/* ── DISCIPLINE — Warning & Disciplinary Action module ── */}
         {tab === 'discipline' && (
           warningsQ.data === null ? <MigrationNotice /> : (
             <>
               {isManager && (
-                <Button variant="secondary" className="w-full" onClick={() => setShowWarningForm(true)}>
-                  <Plus size={16} className="mr-1" /> Issue Warning
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="secondary" className="flex-1" onClick={() => setShowDiscModal(true)}>
+                    <Plus size={16} className="mr-1" /> Warning & Disciplinary Action
+                  </Button>
+                  {isCeo && (
+                    <Button variant="secondary" className="shrink-0 px-3" onClick={() => setShowDiscSettings(true)}>
+                      Settings
+                    </Button>
+                  )}
+                </div>
               )}
-              {(warningsQ.data || []).length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-8">No warnings on record</p>
-              ) : (warningsQ.data || []).map(w => (
+
+              {/* New disciplinary records: stats, timeline, approvals, audit */}
+              <DisciplinaryHistory staff={staff} />
+
+              {/* Legacy quick warnings (kept — history is never lost) */}
+              {(warningsQ.data || []).length > 0 && (
+                <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide pt-2">Legacy Warnings</p>
+              )}
+              {(warningsQ.data || []).map(w => (
                 <div key={w.id} className="bg-white rounded-2xl p-4 border border-gray-100">
                   <div className="flex items-center justify-between gap-2 mb-1">
                     <p className="text-sm font-semibold text-red-700">{labelOf(WARNING_TYPES, w.warning_type)}</p>
@@ -637,6 +654,11 @@ export function StaffDetailPage() {
         </div>
       </Modal>
 
+      {/* Warning & Disciplinary Action wizard + CEO settings */}
+      <DisciplinaryModal staff={staff} isOpen={showDiscModal} onClose={() => setShowDiscModal(false)} />
+      <DisciplinarySettingsModal isOpen={showDiscSettings} onClose={() => setShowDiscSettings(false)} />
+
+      {/* Legacy quick-warning modal (superseded by the wizard, kept for compatibility) */}
       <Modal isOpen={showWarningForm} onClose={() => setShowWarningForm(false)} title={`Issue Warning — ${staff.name}`}
         footer={
           <div className="flex gap-3">

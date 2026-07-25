@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays, Eye } from 'lucide-react'
+import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays, Eye, ShieldAlert } from 'lucide-react'
+import { useMyDisciplinaryUnread } from '../../hooks/useDisciplinary'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -253,6 +254,7 @@ function NonAdminSettings({ user, logout }) {
           </div>
           <ChevronRight size={18} className="text-gray-400 shrink-0" />
         </button>
+        <MyWarningsRow />
 
         {/* Ops Manager gets access to alert config and accounting */}
         {isOpsManager && (
@@ -313,5 +315,31 @@ function NonAdminSettings({ user, logout }) {
         )}
       </div>
     </div>
+  )
+}
+
+// Self-service row: the employee's own disciplinary notices, with an
+// unread badge that doubles as the in-app notification indicator
+function MyWarningsRow() {
+  const navigate = useNavigate()
+  const unreadQ = useMyDisciplinaryUnread()
+  const unread = unreadQ.data || 0
+  return (
+    <button
+      onClick={() => navigate('/my-warnings')}
+      className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
+    >
+      <div className="w-10 h-10 bg-red-50 rounded-xl flex items-center justify-center text-red-600 shrink-0">
+        <ShieldAlert size={20} />
+      </div>
+      <div className="flex-1 text-left min-w-0">
+        <p className="text-sm font-semibold text-gray-900">My Warnings &amp; Disciplinary Actions</p>
+        <p className="text-xs text-gray-500">Notices issued to you, responses and acknowledgements</p>
+      </div>
+      {unread > 0 && (
+        <span className="text-[10px] font-bold bg-red-600 text-white rounded-full px-2 py-0.5 shrink-0">{unread}</span>
+      )}
+      <ChevronRight size={18} className="text-gray-400 shrink-0" />
+    </button>
   )
 }
