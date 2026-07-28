@@ -363,9 +363,10 @@ export const ROLE_DEFAULT_ACCESS = {
   // No 'accounting': ops managers record their own expenses on
   // /my-expenses; company-wide financials stay CEO-only unless the
   // CEO explicitly ticks accounting access
-  // 'products' / 'warehouses' are on by default but the CEO can switch
-  // either off from the staff member's App Access grid
-  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'documents', 'products', 'warehouses'],
+  // No 'reports': company-wide reporting is CEO-only unless the CEO ticks
+  // it. 'products' / 'warehouses' are on by default but switchable off.
+  // Every area here is a default only — the App Access grid always wins.
+  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'documents', 'products', 'warehouses'],
   customer_support:   ['orders', 'new_order', 'customers'],
   fulfillment:        ['fulfillment', 'orders'],
   waybill:            ['waybill', 'orders'],

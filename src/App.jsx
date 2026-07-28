@@ -38,6 +38,7 @@ import { DeleteOrdersPage } from './pages/settings/DeleteOrdersPage'
 import { DeleteStaffPage } from './pages/settings/DeleteStaffPage'
 import { DeletedOrderAuditPage } from './pages/settings/DeletedOrderAuditPage'
 import { useAuthStore } from './stores/authStore'
+import { accessFor } from './hooks/useStaff'
 import { useAppStore } from './stores/appStore'
 import { getQueuedActions, removeQueuedAction } from './lib/offline'
 import { supabase } from './lib/supabase'
@@ -62,6 +63,14 @@ function ProtectedRoute({ children }) {
   if (!user) return <Navigate to="/login" replace />
   // Temporary-password logins must set a real password first
   if (user.must_change_password) return <Navigate to="/change-password" replace />
+  return children
+}
+
+// Areas the CEO can switch on/off per staff member (App Access grid).
+// Gating the route means a hidden area stays unreachable by direct URL.
+function RequireAccess({ area, children }) {
+  const { user } = useAuthStore()
+  if (!accessFor(user).includes(area)) return <Navigate to="/" replace />
   return children
 }
 
@@ -126,19 +135,19 @@ export default function App() {
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/orders/new" element={<NewOrderPage />} />
             <Route path="/orders/:id" element={<OrderDetailPage />} />
-            <Route path="/fulfillment" element={<FulfillmentPage />} />
-            <Route path="/waybill" element={<WaybillPage />} />
-            <Route path="/waybill/batches/:id" element={<WaybillBatchDetailPage />} />
-            <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/fulfillment" element={<RequireAccess area="fulfillment"><FulfillmentPage /></RequireAccess>} />
+            <Route path="/waybill" element={<RequireAccess area="waybill"><WaybillPage /></RequireAccess>} />
+            <Route path="/waybill/batches/:id" element={<RequireAccess area="waybill"><WaybillBatchDetailPage /></RequireAccess>} />
+            <Route path="/inventory" element={<RequireAccess area="inventory"><InventoryPage /></RequireAccess>} />
             <Route path="/my-stock" element={<MyWarehouseStockPage />} />
             <Route path="/holding" element={<HoldingQueuePage />} />
-            <Route path="/customers" element={<CustomersPage />} />
-            <Route path="/customers/:id" element={<CustomerDetailPage />} />
-            <Route path="/reports" element={<ReportsPage />} />
-            <Route path="/documents" element={<DocumentsPage />} />
+            <Route path="/customers" element={<RequireAccess area="customers"><CustomersPage /></RequireAccess>} />
+            <Route path="/customers/:id" element={<RequireAccess area="customers"><CustomerDetailPage /></RequireAccess>} />
+            <Route path="/reports" element={<RequireAccess area="reports"><ReportsPage /></RequireAccess>} />
+            <Route path="/documents" element={<RequireAccess area="documents"><DocumentsPage /></RequireAccess>} />
             <Route path="/accounting" element={<AccountingPage />} />
             <Route path="/my-expenses" element={<MyBusinessExpensesPage />} />
-            <Route path="/analytics" element={<SalesAnalyticsPage />} />
+            <Route path="/analytics" element={<RequireAccess area="analytics"><SalesAnalyticsPage /></RequireAccess>} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/staff" element={<StaffPage />} />
             <Route path="/settings/staff/:id" element={<StaffDetailPage />} />

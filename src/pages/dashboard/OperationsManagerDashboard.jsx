@@ -106,17 +106,18 @@ export function OperationsManagerDashboard() {
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Quick Actions</h3>
           <div className="grid grid-cols-3 gap-2">
+            {/* Every tile follows the CEO's App Access ticks for this manager */}
             {[
-              { label: 'Orders', icon: ShoppingCart, action: () => navigate('/orders'), color: 'bg-blue-50 text-blue-600' },
-              { label: 'Reports', icon: BarChart3, action: () => navigate('/reports'), color: 'bg-purple-50 text-purple-600' },
-              { label: 'Documents', icon: FileText, action: () => navigate('/documents'), color: 'bg-blue-50 text-blue-700' },
-              { label: 'Customers', icon: Users, action: () => navigate('/customers'), color: 'bg-green-50 text-green-600' },
-              { label: 'Fulfillment', icon: Truck, action: () => navigate('/fulfillment'), color: 'bg-amber-50 text-amber-600' },
+              { label: 'Orders', area: 'orders', icon: ShoppingCart, action: () => navigate('/orders'), color: 'bg-blue-50 text-blue-600' },
+              { label: 'Reports', area: 'reports', icon: BarChart3, action: () => navigate('/reports'), color: 'bg-purple-50 text-purple-600' },
+              { label: 'Documents', area: 'documents', icon: FileText, action: () => navigate('/documents'), color: 'bg-blue-50 text-blue-700' },
+              { label: 'Customers', area: 'customers', icon: Users, action: () => navigate('/customers'), color: 'bg-green-50 text-green-600' },
+              { label: 'Fulfillment', area: 'fulfillment', icon: Truck, action: () => navigate('/fulfillment'), color: 'bg-amber-50 text-amber-600' },
               { label: 'My Expenses', icon: DollarSign, action: () => navigate('/my-expenses'), color: 'bg-teal-50 text-teal-600' },
               { label: 'Holding', icon: Inbox, action: () => navigate('/holding'), color: 'bg-cyan-50 text-cyan-600' },
-              ...(access.includes('products') ? [{ label: 'Products', icon: Package, action: () => navigate('/settings/products'), color: 'bg-indigo-50 text-indigo-600' }] : []),
-              ...(access.includes('warehouses') ? [{ label: 'Warehouses', icon: Warehouse, action: () => navigate('/settings/warehouses'), color: 'bg-orange-50 text-orange-600' }] : []),
-            ].map(({ label, icon: Icon, action, color }) => (
+              { label: 'Products', area: 'products', icon: Package, action: () => navigate('/settings/products'), color: 'bg-indigo-50 text-indigo-600' },
+              { label: 'Warehouses', area: 'warehouses', icon: Warehouse, action: () => navigate('/settings/warehouses'), color: 'bg-orange-50 text-orange-600' },
+            ].filter(t => !t.area || access.includes(t.area)).map(({ label, icon: Icon, action, color }) => (
               <button key={label} onClick={action}
                 className={`flex flex-col items-center gap-1.5 p-3 rounded-xl ${color} active:scale-95 transition-all`}>
                 <Icon size={20} />
