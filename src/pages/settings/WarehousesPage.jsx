@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { Plus, Edit, Package } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -9,14 +9,21 @@ import { Button } from '../../components/ui/Button'
 import { Input, Select } from '../../components/ui/Input'
 import { useAppStore } from '../../stores/appStore'
 import { NIGERIAN_STATES } from '../../utils/format'
+import { useAuthStore } from '../../stores/authStore'
+import { accessFor } from '../../hooks/useStaff'
 
 export function WarehousesPage() {
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [showModal, setShowModal] = useState(false)
   const [editing, setEditing] = useState(null)
   const [form, setForm] = useState({ name: '', state: '', city: '', address: '', contact_person: '', contact_phone: '', whatsapp_group: '' })
   const { showToast } = useAppStore()
   const queryClient = useQueryClient()
+
+  // Warehouse management is switchable per staff member by the CEO —
+  // a direct URL must respect the toggle too
+  const allowed = accessFor(user).includes('warehouses')
 
   // Management view includes deactivated warehouses (operational
   // pickers elsewhere only ever see active ones)
@@ -88,6 +95,8 @@ export function WarehousesPage() {
       contact_person: w.contact_person || '', contact_phone: w.contact_phone || '', whatsapp_group: w.whatsapp_group || '' })
     setShowModal(true)
   }
+
+  if (!allowed) return <Navigate to="/settings" replace />
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">

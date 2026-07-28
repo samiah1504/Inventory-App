@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Building2, Users, Package, Warehouse, ChevronRight, LogOut, AlertCircle, Bell, DollarSign, CalendarDays, Eye, ShieldAlert } from 'lucide-react'
 import { useMyDisciplinaryUnread } from '../../hooks/useDisciplinary'
+import { accessFor } from '../../hooks/useStaff'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
@@ -200,6 +201,8 @@ export function SettingsPage() {
 function NonAdminSettings({ user, logout }) {
   const navigate = useNavigate()
   const isOpsManager = user?.role === 'operations_manager'
+  // Product / warehouse management are switchable per staff member
+  const access = accessFor(user)
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
@@ -259,6 +262,7 @@ function NonAdminSettings({ user, logout }) {
         {/* Ops Manager gets access to alert config and accounting */}
         {isOpsManager && (
           <>
+            {access.includes('products') && (
             <button
               onClick={() => navigate('/settings/products')}
               className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
@@ -272,6 +276,8 @@ function NonAdminSettings({ user, logout }) {
               </div>
               <ChevronRight size={18} className="text-gray-400 shrink-0" />
             </button>
+            )}
+            {access.includes('warehouses') && (
             <button
               onClick={() => navigate('/settings/warehouses')}
               className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"
@@ -285,6 +291,7 @@ function NonAdminSettings({ user, logout }) {
               </div>
               <ChevronRight size={18} className="text-gray-400 shrink-0" />
             </button>
+            )}
             <button
               onClick={() => navigate('/my-expenses')}
               className="w-full flex items-center gap-3 bg-white rounded-2xl p-4 border border-gray-100 active:scale-[0.99] transition-all"

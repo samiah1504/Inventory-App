@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Navigate } from 'react-router-dom'
 import { Plus, Edit, CheckCircle, AlertCircle, Tag, GitMerge } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -14,6 +14,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { findLinkedOrders, applyProductToOrders } from '../../lib/productLinkUpdates'
+import { accessFor } from '../../hooks/useStaff'
 
 const EMPTY_FORM = {
   name: '', business_id: '', category_id: '', selling_price: '', cost_price: '',
@@ -303,6 +304,10 @@ export function ProductsPage() {
     setCatForm({ name: '', description: '' })
     setShowCatModal(true)
   }
+
+  // Product management is switchable per staff member by the CEO —
+  // a direct URL must respect the toggle too
+  if (!accessFor(user).includes('products')) return <Navigate to="/settings" replace />
 
   const allProducts = products || []
   const unverified = allProducts.filter(p => !p.is_verified)

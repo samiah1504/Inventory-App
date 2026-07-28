@@ -353,6 +353,8 @@ export const ACCESS_AREAS = [
   { key: 'accounting',  label: 'Accounting / Expenses' },
   { key: 'documents',   label: 'Documents' },
   { key: 'analytics',   label: 'Sales Analytics' },
+  { key: 'products',    label: 'Product Management' },
+  { key: 'warehouses',  label: 'Warehouse Management' },
 ]
 
 export const ROLE_DEFAULT_ACCESS = {
@@ -361,7 +363,9 @@ export const ROLE_DEFAULT_ACCESS = {
   // No 'accounting': ops managers record their own expenses on
   // /my-expenses; company-wide financials stay CEO-only unless the
   // CEO explicitly ticks accounting access
-  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'documents'],
+  // 'products' / 'warehouses' are on by default but the CEO can switch
+  // either off from the staff member's App Access grid
+  operations_manager: ['orders', 'new_order', 'fulfillment', 'waybill', 'inventory', 'customers', 'reports', 'documents', 'products', 'warehouses'],
   customer_support:   ['orders', 'new_order', 'customers'],
   fulfillment:        ['fulfillment', 'orders'],
   waybill:            ['waybill', 'orders'],
@@ -369,18 +373,29 @@ export const ROLE_DEFAULT_ACCESS = {
   accountant:         ['accounting', 'reports'],
 }
 
+// Marker written whenever the App Access grid is saved. Tick lists saved
+// before an area existed can't distinguish "denied" from "not yet asked",
+// so those areas fall back to the role default until the grid is saved again.
+const ACL_VERSION = '_acl_v2'
+const VERSIONED_AREAS = ['products', 'warehouses']
+
 // Effective access for a staff row: explicit ticks when set, else role defaults
 export function accessFor(staff) {
   if (!staff) return []
   if (['ceo', 'super_admin'].includes(staff.role)) return ACCESS_AREAS.map(a => a.key)
   const explicit = Array.isArray(staff.extra_permissions) ? staff.extra_permissions.filter(p => typeof p === 'string') : []
-  return explicit.length > 0 ? explicit : (ROLE_DEFAULT_ACCESS[staff.role] || [])
+  if (explicit.length === 0) return ROLE_DEFAULT_ACCESS[staff.role] || []
+  const ticked = explicit.filter(p => p !== ACL_VERSION)
+  if (explicit.includes(ACL_VERSION)) return ticked
+  const defaults = ROLE_DEFAULT_ACCESS[staff.role] || []
+  return [...ticked, ...VERSIONED_AREAS.filter(k => defaults.includes(k) && !ticked.includes(k))]
 }
 
 export function useSetStaffAccess() {
   return useHrMutation(async ({ staff_id, access }) => {
+    const ticks = (access || []).filter(a => a !== ACL_VERSION)
     const { error } = await supabase.from('staff_users')
-      .update({ extra_permissions: access, updated_at: new Date().toISOString() })
+      .update({ extra_permissions: [...ticks, ACL_VERSION], updated_at: new Date().toISOString() })
       .eq('id', staff_id)
     if (error) throw error
   }, ['staff', 'staff_member'], 'Access updated — applies at their next login')

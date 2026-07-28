@@ -6,12 +6,15 @@ import { supabase } from '../../lib/supabase'
 import { StatCard } from '../../components/ui/Card'
 import { scopeToBusinesses } from '../../lib/businessScope'
 import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
+import { accessFor } from '../../hooks/useStaff'
 
 function today() { return new Date().toISOString().split('T')[0] }
 
 export function OperationsManagerDashboard() {
   const { user } = useAuthStore()
   const navigate = useNavigate()
+  // Product / warehouse management can be switched off by the CEO
+  const access = accessFor(user)
 
   const counts = useQuery({
     queryKey: ['ops_counts', today()],
@@ -88,14 +91,16 @@ export function OperationsManagerDashboard() {
             sub="products at state parks"
             onClick={() => navigate('/holding')}
           />
-          <StatCard
-            label="Unverified Products"
-            value={loading ? '...' : c.unverified}
-            icon={<ShieldQuestion size={20} />}
-            color={c?.unverified > 0 ? 'amber' : 'gray'}
-            sub="need your review"
-            onClick={() => navigate('/settings/products?tab=unverified')}
-          />
+          {access.includes('products') && (
+            <StatCard
+              label="Unverified Products"
+              value={loading ? '...' : c.unverified}
+              icon={<ShieldQuestion size={20} />}
+              color={c?.unverified > 0 ? 'amber' : 'gray'}
+              sub="need your review"
+              onClick={() => navigate('/settings/products?tab=unverified')}
+            />
+          )}
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-gray-100">
@@ -109,8 +114,8 @@ export function OperationsManagerDashboard() {
               { label: 'Fulfillment', icon: Truck, action: () => navigate('/fulfillment'), color: 'bg-amber-50 text-amber-600' },
               { label: 'My Expenses', icon: DollarSign, action: () => navigate('/my-expenses'), color: 'bg-teal-50 text-teal-600' },
               { label: 'Holding', icon: Inbox, action: () => navigate('/holding'), color: 'bg-cyan-50 text-cyan-600' },
-              { label: 'Products', icon: Package, action: () => navigate('/settings/products'), color: 'bg-indigo-50 text-indigo-600' },
-              { label: 'Warehouses', icon: Warehouse, action: () => navigate('/settings/warehouses'), color: 'bg-orange-50 text-orange-600' },
+              ...(access.includes('products') ? [{ label: 'Products', icon: Package, action: () => navigate('/settings/products'), color: 'bg-indigo-50 text-indigo-600' }] : []),
+              ...(access.includes('warehouses') ? [{ label: 'Warehouses', icon: Warehouse, action: () => navigate('/settings/warehouses'), color: 'bg-orange-50 text-orange-600' }] : []),
             ].map(({ label, icon: Icon, action, color }) => (
               <button key={label} onClick={action}
                 className={`flex flex-col items-center gap-1.5 p-3 rounded-xl ${color} active:scale-95 transition-all`}>
