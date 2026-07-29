@@ -16,6 +16,16 @@ import { formatCurrency, formatDate } from '../../utils/format'
 import { findLinkedOrders, applyProductToOrders } from '../../lib/productLinkUpdates'
 import { accessFor } from '../../hooks/useStaff'
 
+// Database errors never reach the user raw — this says what to fix
+function saveErrorMessage(error) {
+  const m = error?.message || ''
+  if (/duplicate key/i.test(m)) return 'A product with this name or SKU already exists.'
+  if (/invalid input syntax for type uuid/i.test(m)) return 'Select a valid business and category, then save again.'
+  if (/violates not-null/i.test(m)) return 'Product name and business are required.'
+  if (/does not exist|schema cache/i.test(m)) return 'Some product fields are missing in the database — run the latest migration.'
+  return 'Could not save the product. Check the details and try again.'
+}
+
 const EMPTY_FORM = {
   name: '', business_id: '', category_id: '', selling_price: '', cost_price: '',
   sku: '', image_url: '', description: '', is_verified: true,
@@ -92,10 +102,19 @@ export function ProductsPage() {
   const saveMutation = useMutation({
     mutationFn: async (data) => {
       const { sku, image_url, description, ...core } = data
+      const num = (v) => {
+        if (v === '' || v === null || v === undefined) return null
+        const n = Number(v)
+        return Number.isFinite(n) ? n : null
+      }
       const payload = {
         ...core,
-        selling_price: data.selling_price ? Number(data.selling_price) : null,
-        cost_price: data.cost_price ? Number(data.cost_price) : null,
+        // Empty selects must be stored as NULL — the database rejects ''
+        // for a uuid column ("No category" / no business selected)
+        business_id: core.business_id || null,
+        category_id: core.category_id || null,
+        selling_price: num(data.selling_price),
+        cost_price: num(data.cost_price),
       }
       // Only the CEO may set or amend cost price — an edit by anyone
       // else never touches the stored cost
@@ -105,12 +124,12 @@ export function ProductsPage() {
       const extras = { sku: sku || null, image_url: image_url || null, description: description || null }
       if (editing) {
         const { error } = await supabase.from('products').update(payload).eq('id', editing.id)
-        if (error) throw error
+        if (error) throw new Error(saveErrorMessage(error))
         await supabase.from('products').update(extras).eq('id', editing.id)
         await audit(editing.id, 'edited', `Edited by ${user?.name}`)
       } else {
         const { data: created, error } = await supabase.from('products').insert(payload).select('id').single()
-        if (error) throw error
+        if (error) throw new Error(saveErrorMessage(error))
         if (created) {
           await supabase.from('products').update(extras).eq('id', created.id)
           await audit(created.id, 'created', `Added by ${user?.name}`)
