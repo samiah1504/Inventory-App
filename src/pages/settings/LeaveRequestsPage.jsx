@@ -26,19 +26,32 @@ export function LeaveRequestsPage() {
 
   const isManager = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
 
+  // staff_leave links to staff_users twice (staff_id and reviewed_by), so an
+  // embedded join is ambiguous — the rows and the staff list are fetched
+  // separately and matched here.
   const leaveQ = useQuery({
     queryKey: ['all_leave_requests'],
     enabled: isManager,
     retry: false,
     queryFn: async () => {
-      try {
-        const { data, error } = await supabase.from('staff_leave')
-          .select('*, staff:staff_users(id, name, staff_code, role, department)')
-          .order('created_at', { ascending: false })
-          .limit(200)
-        if (error) throw error
-        return data || []
-      } catch { return null }
+      const { data, error } = await supabase.from('staff_leave')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (error) {
+        // Only a genuinely missing table means "not migrated yet"
+        if (/does not exist|schema cache/i.test(error.message || '')) return null
+        throw error
+      }
+      const rows = data || []
+      const ids = Array.from(new Set(rows.map(l => l.staff_id).filter(Boolean)))
+      let byId = new Map()
+      if (ids.length > 0) {
+        const { data: staff } = await supabase.from('staff_users')
+          .select('id, name, staff_code, role, department').in('id', ids)
+        byId = new Map((staff || []).map(s => [s.id, s]))
+      }
+      return rows.map(l => ({ ...l, staff: byId.get(l.staff_id) || null }))
     },
     staleTime: 30000,
   })
@@ -67,7 +80,12 @@ export function LeaveRequestsPage() {
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
         {leaveQ.isLoading ? <SkeletonList count={4} /> :
-         leaveQ.data === null ? (
+         leaveQ.isError ? (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+            <p className="text-sm font-semibold text-red-800 mb-1">Could not load leave requests</p>
+            <p className="text-xs text-red-700">{leaveQ.error?.message || 'Unknown error'}</p>
+          </div>
+        ) : leaveQ.data === null ? (
           <p className="text-sm text-gray-400 text-center py-8">
             Leave tables not found — run the Staff Management migration first.
           </p>
