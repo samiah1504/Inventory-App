@@ -414,8 +414,15 @@ export function formerName(staff) {
 // Businesses a staff member can access (empty = all businesses)
 export function useSetStaffBusinesses() {
   return useHrMutation(async ({ staff_id, business_ids }) => {
+    const ids = (business_ids || []).filter(Boolean)
     const { error } = await supabase.from('staff_users')
-      .update({ business_ids, updated_at: new Date().toISOString() })
+      .update({
+        business_ids: ids,
+        // Keep the legacy single-business column in step so the staff
+        // form and this grid never disagree
+        business_id: ids[0] || null,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', staff_id)
     if (error) throw error
   }, ['staff', 'staff_member'], 'Business access updated — applies at their next login')

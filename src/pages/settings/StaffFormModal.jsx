@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import { supabase } from '../../lib/supabase'
 import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
@@ -29,7 +30,7 @@ const emptyForm = {
   name: '', username: '', password: '', phone: '', staff_code: '',
   role: 'customer_support', email: '', address: '', department: '',
   position: '', employment_type: 'full_time', date_joined: '',
-  status: 'active', business_id: '',
+  status: 'active', business_id: '', business_ids: [],
 }
 
 // Legacy columns that always exist even before the HR migration runs
@@ -43,11 +44,16 @@ export function StaffFormModal({ isOpen, onClose, staff }) {
 
   useEffect(() => {
     if (!isOpen) return
-    setForm(staff ? {
+    if (!staff) { setForm(emptyForm); return }
+    // Staff assigned to a single business before multi-business existed
+    // start with that one ticked
+    const ids = Array.isArray(staff.business_ids) ? staff.business_ids.filter(Boolean) : []
+    setForm({
       ...emptyForm,
       ...Object.fromEntries(Object.keys(emptyForm).map(k => [k, staff[k] ?? emptyForm[k]])),
+      business_ids: ids.length > 0 ? ids : (staff.business_id ? [staff.business_id] : []),
       password: '',
-    } : emptyForm)
+    })
   }, [isOpen, staff])
 
   const save = useMutation({
@@ -56,6 +62,11 @@ export function StaffFormModal({ isOpen, onClose, staff }) {
       if (staff && !payload.password) delete payload.password
       Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null })
       if (!payload.role) payload.role = 'customer_support'
+      // business_ids is the real assignment; business_id stays in sync with
+      // the first ticked business for anything still reading the old column
+      const ids = Array.isArray(form.business_ids) ? form.business_ids.filter(Boolean) : []
+      payload.business_ids = ids
+      payload.business_id = ids[0] || null
 
       const run = async (p) => staff
         ? supabase.from('staff_users').update(p).eq('id', staff.id).select('id').single()
@@ -132,12 +143,48 @@ export function StaffFormModal({ isOpen, onClose, staff }) {
         <Select label="Role" required value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>
           {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
         </Select>
-        {businesses && businesses.length > 0 && (
-          <Select label="Assigned Business (optional)" value={form.business_id || ''} onChange={e => setForm({ ...form, business_id: e.target.value })}>
-            <option value="">All / Not specific</option>
-            {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </Select>
-        )}
+        {businesses && businesses.length > 0 && form.role !== 'ceo' && (() => {
+          const ids = Array.isArray(form.business_ids) ? form.business_ids : []
+          const toggle = (id) => setForm({
+            ...form,
+            business_ids: ids.includes(id) ? ids.filter(x => x !== id) : [...ids, id],
+          })
+          return (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Assigned Businesses (optional)
+              </label>
+              <p className="text-[11px] text-gray-400 mb-2">
+                Tick every business this person works for. They only see orders, inventory,
+                waybills and expenses for the ticked businesses. No ticks = all businesses.
+              </p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {businesses.map(b => {
+                  const on = ids.includes(b.id)
+                  return (
+                    <button key={b.id} type="button" onClick={() => toggle(b.id)}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-xl border text-left transition-all active:scale-[0.99] ${
+                        on ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'
+                      }`}>
+                      <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 ${
+                        on ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-transparent'
+                      }`}>
+                        <Check size={12} />
+                      </span>
+                      <span className="text-xs text-gray-800 truncate">{b.name}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                {ids.length === 0
+                  ? 'All businesses'
+                  : `${ids.length} business${ids.length !== 1 ? 'es' : ''} selected`}
+                {' '}· applies at their next login
+              </p>
+            </div>
+          )
+        })()}
         <div className="grid grid-cols-2 gap-3">
           <Select label="Employment Type" value={form.employment_type || 'full_time'} onChange={e => setForm({ ...form, employment_type: e.target.value })}>
             {EMPLOYMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
