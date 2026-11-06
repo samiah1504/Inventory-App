@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { scopeToBusinesses } from '../lib/businessScope'
+import { applyStock } from '../lib/inventoryCore'
 
 export function useInventory(filters = {}) {
   const { user } = useAuthStore()
@@ -59,48 +60,14 @@ export function useAddStock() {
   return useMutation({
     mutationFn: async (stockData) => {
       const { product_id, warehouse_id, business_id, quantity, unit_cost, supplier, notes, date } = stockData
-
-      // Upsert inventory record
-      const { data: existing } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('product_id', product_id)
-        .eq('warehouse_id', warehouse_id)
-        .single()
-
-      if (existing) {
-        await supabase
-          .from('inventory')
-          .update({
-            quantity_physical: existing.quantity_physical + quantity,
-            quantity_available: existing.quantity_available + quantity,
-          })
-          .eq('id', existing.id)
-      } else {
-        await supabase.from('inventory').insert({
-          product_id, warehouse_id, business_id,
-          quantity_physical: quantity,
-          quantity_available: quantity,
-        })
-      }
-
-      // Movement record
-      const movement = {
-        product_id, warehouse_id, business_id,
-        movement_type: 'purchase',
-        quantity,
-        unit_cost,
-        total_cost: quantity * unit_cost,
-        supplier,
-        notes,
-        staff_id: user?.id,
-      }
-      if (date) movement.created_at = `${date}T12:00:00`
-
-      const { data, error } = await supabase.from('inventory_movements').insert(movement).select().single()
-
-      if (error) throw error
-      return data
+      const qty = Math.trunc(Number(quantity) || 0)
+      if (qty <= 0) throw new Error('Enter a quantity greater than zero')
+      // Stock row + purchase log in one atomic step
+      return applyStock({
+        productId: product_id, warehouseId: warehouse_id, businessId: business_id,
+        qty, type: 'purchase', unitCost: unit_cost, supplier, notes,
+        staffId: user?.id, movementAt: date ? `${date}T12:00:00` : null,
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
@@ -117,35 +84,14 @@ export function useAdjustStock() {
   const { user } = useAuthStore()
 
   return useMutation({
-    mutationFn: async ({ inventory_id, product_id, warehouse_id, business_id, adjustment, reason }) => {
-      const { data: existing, error: fetchErr } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('id', inventory_id)
-        .single()
-      if (fetchErr) throw fetchErr
-
-      const newAvailable = existing.quantity_available + adjustment
-      const newPhysical = existing.quantity_physical + adjustment
-      if (newAvailable < 0) throw new Error('Adjustment would result in negative stock')
-
-      const { error: updateErr } = await supabase
-        .from('inventory')
-        .update({
-          quantity_available: newAvailable,
-          quantity_physical: newPhysical,
-        })
-        .eq('id', inventory_id)
-      if (updateErr) throw updateErr
-
-      const { error: movErr } = await supabase.from('inventory_movements').insert({
-        product_id, warehouse_id, business_id,
-        movement_type: adjustment > 0 ? 'adjustment_in' : 'adjustment_out',
-        quantity: adjustment,
-        notes: reason,
-        staff_id: user?.id,
+    mutationFn: async ({ product_id, warehouse_id, business_id, adjustment, reason }) => {
+      const qty = Math.trunc(Number(adjustment) || 0)
+      if (qty === 0) throw new Error('Enter an adjustment other than zero')
+      // Refuses (with the real available figure) if it would go negative
+      await applyStock({
+        productId: product_id, warehouseId: warehouse_id, businessId: business_id,
+        qty, type: qty > 0 ? 'adjustment_in' : 'adjustment_out', notes: reason, staffId: user?.id,
       })
-      if (movErr) throw movErr
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
@@ -211,23 +157,26 @@ export function useTransferStock() {
     mutationFn: async ({ product_id, product_name, from_warehouse_id, to_warehouse_id, quantity, date, notes }) => {
       if (from_warehouse_id === to_warehouse_id) throw new Error('Source and destination must differ')
 
-      const { data: source, error: srcErr } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('product_id', product_id)
-        .eq('warehouse_id', from_warehouse_id)
-        .single()
-      if (srcErr || !source) throw new Error('No stock record in the source warehouse')
-      if (source.quantity_available < quantity) {
-        throw new Error(`Only ${source.quantity_available} available in source warehouse`)
-      }
-
       const transfer_number = `TRF-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
+      const transferId = crypto.randomUUID()
+      const qty = Math.trunc(Number(quantity) || 0)
+      if (qty <= 0) throw new Error('Enter a quantity greater than zero')
+
+      // Stock leaves the source first — atomically, and refused if there
+      // isn't enough — so a transfer can never exist without its stock
+      const { data: srcRow } = await supabase.from('inventory').select('business_id')
+        .eq('product_id', product_id).eq('warehouse_id', from_warehouse_id).limit(1)
+      await applyStock({
+        productId: product_id, warehouseId: from_warehouse_id, businessId: srcRow?.[0]?.business_id,
+        qty: -qty, type: 'transfer_out', refId: transferId, refType: 'transfer',
+        notes: `${transfer_number} → destination warehouse`, staffId: user?.id,
+      })
 
       const { data: transfer, error: trfErr } = await supabase
         .from('warehouse_transfers')
         .insert({
-          transfer_number, product_id, product_name, quantity,
+          id: transferId,
+          transfer_number, product_id, product_name, quantity: qty,
           from_warehouse_id, to_warehouse_id,
           date_transferred: date || new Date().toISOString().split('T')[0],
           status: 'in_transit',
@@ -236,23 +185,15 @@ export function useTransferStock() {
         })
         .select()
         .single()
-      if (trfErr) throw trfErr
-
-      // Stock leaves the source immediately
-      await supabase.from('inventory').update({
-        quantity_physical: source.quantity_physical - quantity,
-        quantity_available: source.quantity_available - quantity,
-      }).eq('id', source.id)
-
-      await supabase.from('inventory_movements').insert({
-        product_id, warehouse_id: from_warehouse_id, business_id: source.business_id,
-        movement_type: 'transfer_out',
-        quantity: -quantity,
-        reference_id: transfer.id,
-        reference_type: 'transfer',
-        notes: `${transfer_number} → destination warehouse`,
-        staff_id: user?.id,
-      })
+      if (trfErr) {
+        // Put the stock back so nothing disappears
+        await applyStock({
+          productId: product_id, warehouseId: from_warehouse_id, qty,
+          type: 'transfer_cancelled', refId: transferId, refType: 'transfer',
+          notes: `${transfer_number} could not be created — stock returned`, staffId: user?.id,
+        })
+        throw trfErr
+      }
 
       return transfer
     },
@@ -275,56 +216,30 @@ export function useReceiveTransfer() {
 
   return useMutation({
     mutationFn: async (transfer) => {
-      const { error: updErr } = await supabase
+      // Claim it first: two people tapping Receive can't add it twice
+      const { data: claimed, error: updErr } = await supabase
         .from('warehouse_transfers')
         .update({ status: 'received', received_by: user?.id, received_at: new Date().toISOString() })
         .eq('id', transfer.id)
         .in('status', ['in_transit', 'at_park'])
+        .select('id')
       if (updErr) throw updErr
+      if (!claimed || claimed.length === 0) throw new Error('This transfer was already received')
 
-      // Upsert destination inventory row
-      const { data: dest } = await supabase
-        .from('inventory')
-        .select('*')
-        .eq('product_id', transfer.product_id)
-        .eq('warehouse_id', transfer.to_warehouse_id)
-        .single()
-
-      let business_id = dest?.business_id
-      if (dest) {
-        await supabase.from('inventory').update({
-          quantity_physical: dest.quantity_physical + transfer.quantity,
-          quantity_available: dest.quantity_available + transfer.quantity,
-        }).eq('id', dest.id)
-      } else {
-        // Carry the business over from the source row
-        const { data: src } = await supabase
-          .from('inventory')
-          .select('business_id')
-          .eq('product_id', transfer.product_id)
-          .eq('warehouse_id', transfer.from_warehouse_id)
-          .single()
-        business_id = src?.business_id || null
-        await supabase.from('inventory').insert({
-          product_id: transfer.product_id,
-          warehouse_id: transfer.to_warehouse_id,
-          business_id,
-          quantity_physical: transfer.quantity,
-          quantity_available: transfer.quantity,
+      const { data: src } = await supabase.from('inventory').select('business_id')
+        .eq('product_id', transfer.product_id).eq('warehouse_id', transfer.from_warehouse_id).limit(1)
+      try {
+        await applyStock({
+          productId: transfer.product_id, warehouseId: transfer.to_warehouse_id,
+          businessId: src?.[0]?.business_id || null,
+          qty: transfer.quantity, type: 'transfer_in',
+          refId: transfer.id, refType: 'transfer', notes: `${transfer.transfer_number} received`, staffId: user?.id,
         })
+      } catch (e) {
+        await supabase.from('warehouse_transfers')
+          .update({ status: transfer.status, received_by: null, received_at: null }).eq('id', transfer.id)
+        throw new Error(`Stock not updated — ${e.message}`)
       }
-
-      await supabase.from('inventory_movements').insert({
-        product_id: transfer.product_id,
-        warehouse_id: transfer.to_warehouse_id,
-        business_id,
-        movement_type: 'transfer_in',
-        quantity: transfer.quantity,
-        reference_id: transfer.id,
-        reference_type: 'transfer',
-        notes: `${transfer.transfer_number} received`,
-        staff_id: user?.id,
-      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
@@ -454,8 +369,9 @@ export function useProcessReturn() {
         `Inspected — reason: ${REASON_LABELS[form.reason] || form.reason}${form.reason_note ? ` (${form.reason_note})` : ''}`, user)
 
       // Inventory action (skipped for 'inspection' — stock stays in the inspection bucket)
+      let stockWarnings = []
       if (form.outcome !== 'inspection') {
-        await applyReturnOutcome(ret, form.outcome, user)
+        stockWarnings = await applyReturnOutcome(ret, form.outcome, user)
       } else {
         await addReturnTimeline(ret.id, 'inspection_hold', 'Kept in inspection — stock unchanged', user)
       }
@@ -467,12 +383,15 @@ export function useProcessReturn() {
           ? ` — replacement: ${form.replacement_product_name} ×${form.replacement_quantity || 1}${form.replacement_order_number ? ` (${form.replacement_order_number})` : ''}`
           : ''), user)
       await addReturnTimeline(ret.id, 'completed', `Return processed: ${OUTCOME_LABELS[form.outcome] || form.outcome}`, user)
+      return { stockWarnings }
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ['returns'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
-      showToast('Return processed', 'success')
+      queryClient.invalidateQueries({ queryKey: ['damaged_goods'] })
+      if (res?.stockWarnings?.length) showToast(`Return processed, but: ${res.stockWarnings.join(' · ')}`, 'warning', 9000)
+      else showToast('Return processed', 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
   })

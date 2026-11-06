@@ -175,7 +175,7 @@ export function MyWarehouseStockPage() {
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       { label: 'Available', value: row.quantity_available || 0 },
-                      { label: 'Reserved',  value: row.quantity_reserved || 0 },
+                      { label: 'Inspection', value: row.quantity_inspection || 0 },
                       { label: 'Warehouse', value: row.warehouse?.name || '—' },
                       { label: 'State',     value: row.warehouse?.state || '—' },
                     ].map(({ label, value }) => (

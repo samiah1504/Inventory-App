@@ -3,6 +3,7 @@ import { StatusBadge } from '../../components/ui/Badge'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { openDialer, openWhatsApp, buildOrderMessage } from '../../utils/whatsapp'
 import { useAppStore } from '../../stores/appStore'
+import { OrderStockBadge } from '../../components/orders/OrderStockBadge'
 
 export function OrderCard({ order, onClick, showActions = true }) {
   const { showToast } = useAppStore()
@@ -50,6 +51,7 @@ export function OrderCard({ order, onClick, showActions = true }) {
             </div>
             <h3 className="text-sm font-semibold text-gray-900">{order.customer_name}</h3>
             <p className="text-xs text-gray-500">{order.customer_phone}</p>
+            <OrderStockBadge order={order} className="mt-1" />
           </div>
           <div className="text-right shrink-0">
             <p className="text-base font-bold text-gray-900">{formatCurrency(order.total_amount)}</p>

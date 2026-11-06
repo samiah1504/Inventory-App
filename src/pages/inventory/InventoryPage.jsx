@@ -1,12 +1,18 @@
 import { useState, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Package, Sliders, ChevronDown, ChevronUp, ArrowLeftRight, Bell } from 'lucide-react'
+import { Plus, Package, Sliders, ChevronDown, ChevronUp, ArrowLeftRight, Bell, AlertTriangle } from 'lucide-react'
 import {
   useInventory, useAddStock, useAdjustStock, useSetMinStock,
   useWarehouseTransfers, useTransferStock, useReceiveTransfer, useTransferAtPark, useProductMovements,
   useReturns,
 } from '../../hooks/useInventory'
 import { ReturnsTab } from './ReturnsTab'
+import { TransitTab } from './TransitTab'
+import { DamagedTab } from './DamagedTab'
+import { StockTakeTab } from './StockTakeTab'
+import { HoldingQueueContent } from '../holding/HoldingQueuePage'
+import { useInTransit, useDamagedGoods, useMarkDamagedFromStock, useWeeklyCountStatus } from '../../hooks/useStockFlow'
+import { useHoldingQueue } from '../../hooks/useHolding'
 import { useBusinesses, useProducts, useWarehouses } from '../../hooks/useBusinesses'
 import { TopBar } from '../../components/layout/TopBar'
 import { SearchBar } from '../../components/ui/SearchBar'
@@ -23,7 +29,6 @@ const STATUS_FILTERS = [
   { key: '',         label: 'All Stock' },
   { key: 'low',      label: 'Low Stock' },
   { key: 'out',      label: 'Out of Stock' },
-  { key: 'reserved', label: 'Reserved' },
   { key: 'damaged',  label: 'Damaged' },
   { key: 'returned', label: 'Returned' },
 ]
@@ -31,7 +36,15 @@ const STATUS_FILTERS = [
 const MOVEMENT_LABELS = {
   purchase:          { label: 'Stock received',      color: 'text-blue-600' },
   sale:              { label: 'Sold',                color: 'text-green-600' },
-  reserve:           { label: 'Reserved',            color: 'text-amber-600' },
+  reserve:           { label: 'Reserved (old system)', color: 'text-amber-600' },
+  waybill_out:       { label: 'Waybilled out → in transit', color: 'text-purple-600' },
+  transit_in:        { label: 'Received from transit', color: 'text-blue-600' },
+  sale_transit:      { label: 'Sold from transit',   color: 'text-green-600' },
+  sale_reversed:     { label: 'Sale reversed',       color: 'text-gray-600' },
+  correction_in:     { label: 'Correction (+)',      color: 'text-gray-600' },
+  repaired_in:       { label: 'Repaired → restocked', color: 'text-green-600' },
+  stock_count_adjustment: { label: 'Stock count adjustment', color: 'text-indigo-600' },
+  transfer_cancelled: { label: 'Transfer cancelled', color: 'text-gray-600' },
   reserve_out:       { label: 'Moved with order',    color: 'text-purple-600' },
   left_at_park:      { label: 'Left at State Park',  color: 'text-cyan-700' },
   holding_waybilled: { label: 'Waybilled from holding', color: 'text-purple-700' },
@@ -55,7 +68,7 @@ const MOVEMENT_LABELS = {
 
 export function InventoryPage() {
   const [searchParams] = useSearchParams()
-  const [tab, setTab] = useState('stock')
+  const [tab, setTab] = useState(searchParams.get('tab') || 'stock')
   const [statusFilter, setStatusFilter] = useState(searchParams.get('filter') === 'low_stock' ? 'low' : '')
   const [search, setSearch] = useState('')
   const [selectedWarehouse, setSelectedWarehouse] = useState('')
@@ -70,6 +83,8 @@ export function InventoryPage() {
   const [showMinModal, setShowMinModal] = useState(false)
   const [adjustingItem, setAdjustingItem] = useState(null)
   const [minStockGroup, setMinStockGroup] = useState(null)
+  const [damageItem, setDamageItem] = useState(null)
+  const [damageForm, setDamageForm] = useState({ quantity: '', reason: '' })
 
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
@@ -87,6 +102,11 @@ export function InventoryPage() {
   const receiveTransfer = useReceiveTransfer()
   const transferAtPark = useTransferAtPark()
   const movementsQ = useProductMovements(expandedProduct)
+  const transitQ = useInTransit(false)
+  const damagedQ = useDamagedGoods(false)
+  const parkQ = useHoldingQueue(false)
+  const markDamaged = useMarkDamagedFromStock()
+  const countStatus = useWeeklyCountStatus()
 
   const [adjustForm, setAdjustForm] = useState({ adjustment: '', reason: '' })
   const [minForm, setMinForm] = useState('')
@@ -157,7 +177,6 @@ export function InventoryPage() {
     if (selectedWarehouse) list = list.filter(g => g.rows.some(r => r.warehouse_id === selectedWarehouse && r.quantity_physical > 0))
     if (statusFilter === 'low')      list = list.filter(g => g.isLow)
     if (statusFilter === 'out')      list = list.filter(g => g.isOut)
-    if (statusFilter === 'reserved') list = list.filter(g => g.reserved > 0)
     if (statusFilter === 'damaged')  list = list.filter(g => g.damaged > 0)
     if (statusFilter === 'returned') list = list.filter(g => g.returned > 0)
     return list
@@ -203,9 +222,11 @@ export function InventoryPage() {
     const inTransit = (transfers || [])
       .filter(t => t.status === 'in_transit')
       .reduce((s, t) => s + Number(t.quantity || 0), 0)
+      + (transitQ.data || []).reduce((s, t) => s + Number(t.quantity || 0), 0)
     return {
       available: rows.reduce((s, r) => s + Number(r.quantity_available || 0), 0),
-      reserved:  rows.reduce((s, r) => s + Number(r.quantity_reserved || 0), 0),
+      atPark: (parkQ.data || []).reduce((s, h) => s + Number(h.quantity || 0), 0),
+      damagedOpen: (damagedQ.data || []).reduce((s, d) => s + Number(d.quantity || 0), 0),
       lowCount:  productGroups.filter(g => g.isLow).length,
       outCount:  productGroups.filter(g => g.isOut).length,
       emptyWarehouses: Math.max(0, (warehouses || []).length - stockedWarehouses.size),
@@ -217,7 +238,7 @@ export function InventoryPage() {
       inspection: rows.reduce((s, r) => s + Number(r.quantity_inspection || 0), 0),
       repair:     rows.reduce((s, r) => s + Number(r.quantity_repair || 0), 0),
     }
-  }, [allInventory, productGroups, warehouses, transfers])
+  }, [allInventory, productGroups, warehouses, transfers, transitQ.data, parkQ.data, damagedQ.data])
 
   const awaitingReturns = (returnsList || []).filter(r => r.status === 'awaiting_inspection').length
 
@@ -268,6 +289,18 @@ export function InventoryPage() {
     setTransferForm({ product_id: '', from_warehouse_id: '', to_warehouse_id: '', quantity: '', notes: '', date: new Date().toISOString().split('T')[0] })
   }
 
+  async function handleMarkDamaged() {
+    const qty = Number(damageForm.quantity)
+    if (!qty || qty <= 0 || !damageForm.reason.trim()) {
+      showToast('Enter how many are damaged and why', 'error'); return
+    }
+    try {
+      await markDamaged.mutateAsync({ row: damageItem, quantity: qty, reason: damageForm.reason.trim() })
+      setDamageItem(null)
+      setDamageForm({ quantity: '', reason: '' })
+    } catch { /* toast already shown */ }
+  }
+
   async function handleSetMin() {
     const threshold = Number(minForm)
     if (!minStockGroup || isNaN(threshold) || threshold < 0) {
@@ -310,8 +343,12 @@ export function InventoryPage() {
           {[
             { key: 'stock',      label: 'Stock' },
             { key: 'warehouses', label: 'By Warehouse' },
-            { key: 'transfers',  label: `Transfers${inTransitTransfers.length > 0 ? ` (${inTransitTransfers.length})` : ''}` },
+            { key: 'transit',    label: `Goods in Transit${(transitQ.data || []).length > 0 ? ` (${transitQ.data.length})` : ''}` },
+            { key: 'park',       label: `Goods at Park${(parkQ.data || []).length > 0 ? ` (${parkQ.data.length})` : ''}` },
+            { key: 'damaged',    label: `Damaged${(damagedQ.data || []).length > 0 ? ` (${damagedQ.data.length})` : ''}` },
             { key: 'returns',    label: `Returns${awaitingReturns > 0 ? ` (${awaitingReturns})` : ''}` },
+            { key: 'transfers',  label: `Transfers${inTransitTransfers.length > 0 ? ` (${inTransitTransfers.length})` : ''}` },
+            { key: 'count',      label: `Stock Take${countStatus.ready && !countStatus.doneThisWeek ? ' • due' : ''}` },
           ].map(({ key, label }) => (
             <button key={key} onClick={() => setTab(key)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium ${tab === key ? 'bg-blue-600 text-black' : 'bg-gray-100 text-gray-600'}`}
@@ -371,10 +408,11 @@ export function InventoryPage() {
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { icon: '🟢', label: 'Available Units',    value: health.available,       color: 'text-green-400' },
-                    { icon: '🟡', label: 'Reserved Units',     value: health.reserved,        color: 'text-yellow-400' },
+                    { icon: '🅿️', label: 'Units at Parks',     value: health.atPark,          color: 'text-cyan-300' },
                     { icon: '🔴', label: 'Low Stock Products', value: health.lowCount,        color: 'text-red-400' },
                     { icon: '📦', label: 'Empty Warehouses',   value: health.emptyWarehouses, color: 'text-gray-300' },
                     { icon: '🚚', label: 'Units in Transit',   value: health.inTransit,       color: 'text-blue-400' },
+                    { icon: '⚠️', label: 'Damaged (open)',     value: health.damagedOpen,     color: 'text-red-400' },
                   ].map(({ icon, label, value, color }) => (
                     <div key={label}>
                       <p className="text-xs text-gray-400 mb-0.5">{icon} {label}</p>
@@ -434,7 +472,6 @@ export function InventoryPage() {
                                   {g.available}
                                 </span>
                                 <span className="text-gray-400"> available</span>
-                                {g.reserved > 0 && <span className="text-amber-600 font-medium"> · {g.reserved} reserved</span>}
                                 {g.isLow && <span className="ml-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded-full">LOW</span>}
                                 {g.isOut && <span className="ml-1 text-[10px] font-semibold text-red-700 bg-red-50 px-1.5 py-0.5 rounded-full">OUT</span>}
                               </p>
@@ -451,7 +488,6 @@ export function InventoryPage() {
                             <div className="grid grid-cols-3 gap-2">
                               {[
                                 { label: 'Available', value: g.available, color: g.isOut ? 'text-red-600' : g.isLow ? 'text-amber-600' : 'text-green-600' },
-                                { label: 'Reserved',  value: g.reserved,  color: 'text-amber-600' },
                                 { label: 'Physical',  value: g.physical },
                                 { label: 'Sold',      value: g.sold },
                                 { label: 'Returned',  value: g.returned,  color: 'text-orange-500' },
@@ -496,12 +532,20 @@ export function InventoryPage() {
                                       {r.warehouse?.name}{r.warehouse?.state ? ` · ${r.warehouse.state}` : ''}
                                     </span>
                                     {canManage && (
-                                      <button
-                                        onClick={() => { setAdjustingItem(r); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
-                                        className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
-                                        title="Adjust stock">
-                                        <Sliders size={13} className="text-gray-600" />
-                                      </button>
+                                      <>
+                                        <button
+                                          onClick={() => { setDamageItem(r); setDamageForm({ quantity: '', reason: '' }) }}
+                                          className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
+                                          title="Mark damaged">
+                                          <AlertTriangle size={13} className="text-red-500" />
+                                        </button>
+                                        <button
+                                          onClick={() => { setAdjustingItem(r); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
+                                          className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
+                                          title="Adjust stock">
+                                          <Sliders size={13} className="text-gray-600" />
+                                        </button>
+                                      </>
                                     )}
                                   </div>
                                 ))}
@@ -579,7 +623,6 @@ export function InventoryPage() {
                               <span className={`text-base font-bold ${w.available <= 0 ? 'text-red-600' : 'text-green-600'}`}>{w.available}</span>
                               <span className="text-gray-400"> available · </span>
                               <span className="text-gray-600 font-medium">{w.productCount} product{w.productCount !== 1 ? 's' : ''}</span>
-                              {w.reserved > 0 && <span className="text-amber-600 font-medium"> · {w.reserved} reserved</span>}
                             </p>
                           </div>
                           {isOpen
@@ -603,17 +646,25 @@ export function InventoryPage() {
                                   </span>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm text-gray-800 truncate">{r.product?.name || 'Unknown product'}</p>
-                                    {r.quantity_reserved > 0 && (
-                                      <p className="text-[11px] text-amber-600">{r.quantity_reserved} reserved</p>
+                                    {r.quantity_inspection > 0 && (
+                                      <p className="text-[11px] text-amber-600">{r.quantity_inspection} awaiting inspection</p>
                                     )}
                                   </div>
                                   {canManage && (
-                                    <button
-                                      onClick={() => { setAdjustingItem(r); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
-                                      className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
-                                      title="Adjust stock">
-                                      <Sliders size={13} className="text-gray-600" />
-                                    </button>
+                                    <>
+                                      <button
+                                        onClick={() => { setDamageItem(r); setDamageForm({ quantity: '', reason: '' }) }}
+                                        className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
+                                        title="Mark damaged">
+                                        <AlertTriangle size={13} className="text-red-500" />
+                                      </button>
+                                      <button
+                                        onClick={() => { setAdjustingItem(r); setAdjustForm({ adjustment: '', reason: '' }); setShowAdjustModal(true) }}
+                                        className="p-1.5 bg-white rounded-lg border border-gray-200 active:scale-95 transition-all shrink-0"
+                                        title="Adjust stock">
+                                        <Sliders size={13} className="text-gray-600" />
+                                      </button>
+                                    </>
                                   )}
                                 </div>
                               ))}
@@ -628,6 +679,12 @@ export function InventoryPage() {
             )
           )
         )}
+
+        {/* ── Goods in Transit / at Park / Damaged / Stock Take ── */}
+        {tab === 'transit' && <TransitTab canManage={canManage} />}
+        {tab === 'park' && <HoldingQueueContent embedded />}
+        {tab === 'damaged' && <DamagedTab canManage={canManage} />}
+        {tab === 'count' && <StockTakeTab canCount={canManage} />}
 
         {/* ── Returns tab ── */}
         {tab === 'returns' && <ReturnsTab canManage={canManage} />}
@@ -695,6 +752,33 @@ export function InventoryPage() {
           </div>
         )}
       </div>
+
+      {/* ── Mark damaged modal ── */}
+      <Modal
+        isOpen={!!damageItem}
+        onClose={() => setDamageItem(null)}
+        title={damageItem ? `Mark Damaged — ${damageItem.product?.name}` : 'Mark Damaged'}
+        footer={
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={() => setDamageItem(null)} className="flex-1">Cancel</Button>
+            <Button variant="danger" onClick={handleMarkDamaged} loading={markDamaged.isPending} className="flex-1">Move to Damaged</Button>
+          </div>
+        }
+      >
+        {damageItem && (
+          <div className="space-y-4">
+            <div className="bg-gray-50 rounded-xl p-3 text-sm">
+              <p className="text-gray-500 text-xs">Available in {damageItem.warehouse?.name}</p>
+              <p className="text-2xl font-bold text-gray-900">{damageItem.quantity_available}</p>
+            </div>
+            <Input label="How many are damaged?" type="number" inputMode="numeric" required
+              value={damageForm.quantity} onChange={e => setDamageForm({ ...damageForm, quantity: e.target.value })} />
+            <Input label="What happened?" required placeholder="e.g. Broken leg, water damage"
+              value={damageForm.reason} onChange={e => setDamageForm({ ...damageForm, reason: e.target.value })} />
+            <p className="text-xs text-gray-500">They leave sellable stock and appear under the Damaged tab, where they can be repaired, written off or returned to the supplier.</p>
+          </div>
+        )}
+      </Modal>
 
       {/* ── Adjust modal ── */}
       <Modal

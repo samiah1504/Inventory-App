@@ -12,6 +12,7 @@ import { NIGERIAN_STATES } from '../../utils/format'
 import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { supabase } from '../../lib/supabase'
+import { StockSourceModal } from '../../components/orders/StockSourceModal'
 
 const TABS = [
   { key: 'new', label: 'New / Review' },
@@ -66,16 +67,28 @@ export function FulfillmentPage() {
 
   const showQuickActions = QUICK_ACTION_TABS.includes(tab)
 
-  async function quickDeliver(order) {
+  // Delivered asks for the stock source first (our warehouse / supplier)
+  const [deliverOrder, setDeliverOrder] = useState(null)
+  function quickDeliver(order) {
     if (actingOrder === order.id) return
+    setDeliverOrder(order)
+  }
+  async function confirmDeliver(choice) {
+    const order = deliverOrder
+    if (!order) return
     setActingOrder(order.id)
     try {
       await updateStatus.mutateAsync({
         id: order.id,
         status: 'delivered',
         extra: { delivered_at: new Date().toISOString() },
-        timelineDesc: `Marked delivered by ${user?.name}`,
+        extraSafe: choice.fromTransit ? undefined : {
+          stock_source: choice.stock_source,
+          stock_warehouse_id: choice.stock_warehouse_id,
+        },
+        timelineDesc: `Marked delivered by ${user?.name} — stock source: ${choice.label}`,
       })
+      setDeliverOrder(null)
     } finally {
       setActingOrder(null)
     }
@@ -249,6 +262,13 @@ export function FulfillmentPage() {
           </div>
         )}
       </div>
+      <StockSourceModal
+        order={deliverOrder}
+        isOpen={!!deliverOrder}
+        onClose={() => setDeliverOrder(null)}
+        onConfirm={confirmDeliver}
+        loading={updateStatus.isPending}
+      />
     </div>
   )
 }

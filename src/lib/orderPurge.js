@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { resolveOrderStock } from './stockOps'
+import { applyStock } from './inventoryCore'
 import { verifyStaffPassword } from './passwords'
 
 // ═══════════════════════════════════════════════════════════════════
@@ -61,11 +61,11 @@ export async function collectDeletionReview(orders) {
   return out
 }
 
-// Undo the order's inventory effects before its records disappear:
-// 1) release any outstanding reservation (idempotent netting engine)
-// 2) put sold stock back (paid orders deducted physical via 'sale')
-// Stock that physically left with the order (reserve_out — parks,
-// transfers, holding) is NOT re-added; those are real-world moves.
+// Undo the order's inventory effects before its records disappear.
+// Orders never reserve stock, so only a recorded SALE from a warehouse
+// shelf is put back. Goods that physically left with the order
+// (waybilled, parks, holding) are real-world moves and are NOT re-added:
+// they stay listed in Goods in Transit / Goods at Park, detached.
 async function reverseInventoryEffects(order, staffId) {
   const warnings = []
   let movements = []
@@ -74,8 +74,6 @@ async function reverseInventoryEffects(order, staffId) {
       .select('*').eq('reference_id', order.id)
     movements = data || []
   } catch { return warnings }
-
-  try { await resolveOrderStock(order, 'release', staffId) } catch { /* best-effort */ }
 
   const soldByKey = {}
   for (const m of movements) {
@@ -88,20 +86,23 @@ async function reverseInventoryEffects(order, staffId) {
     if (!qty) continue
     const [product_id, warehouse_id] = key.split('|')
     try {
-      const { data: rows } = await supabase.from('inventory').select('*')
-        .eq('product_id', product_id).eq('warehouse_id', warehouse_id).limit(1)
-      const inv = rows?.[0]
-      if (inv) {
-        await supabase.from('inventory').update({
-          quantity_physical: (inv.quantity_physical || 0) + qty,
-          quantity_available: (inv.quantity_available || 0) + qty,
-        }).eq('id', inv.id)
-      }
-    } catch { warnings.push(`Could not restore ${qty} sold unit(s) for a product in ${order.order_number}`) }
+      await applyStock({
+        productId: product_id, warehouseId: warehouse_id, qty, sold: -qty,
+        type: 'sale_reversed', refType: 'order', staffId,
+        notes: `Order ${order.order_number} deleted — sale reversed`,
+      })
+    } catch (e) { warnings.push(`Could not restore ${qty} sold unit(s) for a product in ${order.order_number} — ${e.message}`) }
   }
 
-  if (movements.some(m => m.movement_type === 'reserve_out')) {
-    warnings.push(`${order.order_number}: some stock physically left with this order (park/transfer/holding) and was not re-added to any warehouse.`)
+  try {
+    const { data: open } = await supabase.from('stock_in_transit').select('id')
+      .eq('order_id', order.id).eq('status', 'in_transit')
+    if (open && open.length > 0) {
+      warnings.push(`${order.order_number}: ${open.length} item(s) still in Goods in Transit — kept there, detached from the deleted order.`)
+    }
+  } catch { /* table not migrated */ }
+  if (movements.some(m => ['reserve_out', 'waybill_out', 'left_at_park'].includes(m.movement_type))) {
+    warnings.push(`${order.order_number}: some stock physically left with this order (waybill/park/holding) and was not re-added to any warehouse.`)
   }
   return warnings
 }

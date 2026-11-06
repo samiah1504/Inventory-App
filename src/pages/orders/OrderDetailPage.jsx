@@ -17,6 +17,8 @@ import { generateInvoice, generateDeliveryNote, generateReceipt, savePdf } from 
 import { supabase } from '../../lib/supabase'
 import { recordReturnDecision, sendReturnToAnotherState } from '../../lib/stockOps'
 import { ProductCorrectionModal } from '../../components/orders/ProductCorrectionModal'
+import { StockSourceModal } from '../../components/orders/StockSourceModal'
+import { OrderStockBadge } from '../../components/orders/OrderStockBadge'
 
 const STATUS_TRANSITIONS = {
   ceo: ['awaiting_waybill', 'waybilled', 'arrived_at_park', 'picked_up_from_park', 'received_at_warehouse', 'processing', 'delivered', 'partially_paid', 'paid', 'failed_delivery', 'cancelled', 'returned', 'customer_rescheduled'],
@@ -121,6 +123,7 @@ export function OrderDetailPage() {
   const [showParkPickupModal, setShowParkPickupModal] = useState(false)
   const [parkForm, setParkForm] = useState({ rider_phone: '', pickup_time: '', notes: '' })
   const [showWhReceiptModal, setShowWhReceiptModal] = useState(false)
+  const [showStockSource, setShowStockSource] = useState(false)
   const [whForm, setWhForm] = useState({ qty: '', time: '', condition: 'good', notes: '' })
 
   // Destination-state stock check for the procurement review (new orders)
@@ -228,6 +231,11 @@ export function OrderDetailPage() {
       setShowStatusModal(false)
       return
     }
+    if (newStatus === 'delivered') {
+      setShowStockSource(true)
+      setShowStatusModal(false)
+      return
+    }
     if (newStatus === 'processing') {
       setShowProcessingModal(true)
       setShowStatusModal(false)
@@ -258,6 +266,20 @@ export function OrderDetailPage() {
       timelineDesc,
     })
     setShowStatusModal(false)
+  }
+
+  // Delivered: record where the goods came from (deducted on payment)
+  async function handleDeliveredSubmit(choice) {
+    await updateStatus.mutateAsync({
+      id: order.id,
+      status: 'delivered',
+      extraSafe: choice.fromTransit ? undefined : {
+        stock_source: choice.stock_source,
+        stock_warehouse_id: choice.stock_warehouse_id,
+      },
+      timelineDesc: `Marked Delivered by ${user?.name} — stock source: ${choice.label}`,
+    })
+    setShowStockSource(false)
   }
 
   async function handleParkPickupSubmit() {
@@ -470,9 +492,10 @@ export function OrderDetailPage() {
       staff_id: user?.id,
       staff_name: user?.name,
     })
-    await recordReturnDecision(order, d.decision, d.notes.trim(), user)
+    const decisionWarnings = await recordReturnDecision(order, d.decision, d.notes.trim(), user)
     setShowDecisionModal(false)
-    showToast('Decision recorded', 'success')
+    if (decisionWarnings.length) showToast(`Decision recorded, but: ${decisionWarnings.join(' · ')}`, 'warning', 9000)
+    else showToast('Decision recorded', 'success')
     if (d.decision === 'send_another_state') {
       const now = new Date()
       setParkSendForm({
@@ -505,7 +528,8 @@ export function OrderDetailPage() {
       },
       timelineDesc: `Sent to State Park (${f.park_name.trim()}) — ${order.state} → ${f.destination} · sent by ${f.person.trim()}${f.notes.trim() ? ` · ${f.notes.trim()}` : ''} — by ${user?.name} (${user?.role})`,
     })
-    await sendReturnToAnotherState(order, f.destination, user)
+    const sendWarnings = await sendReturnToAnotherState(order, f.destination, user)
+    if (sendWarnings.length) showToast(`Sent, but: ${sendWarnings.join(' · ')}`, 'warning', 9000)
     setShowParkSendModal(false)
   }
 
@@ -519,14 +543,14 @@ export function OrderDetailPage() {
   ]
 
   const STOCK_DISPOSITIONS = [
-    { value: 'returned_warehouse', label: 'Returned to State Warehouse',
-      desc: 'Back in the warehouse and available for future orders' },
+    { value: 'returned_warehouse', label: 'Moved to the State Warehouse',
+      desc: "Added to this state's warehouse stock and available for future orders" },
     { value: 'left_at_park', label: 'Left at State Park',
-      desc: 'At the transport park, awaiting further instruction' },
+      desc: 'Listed under Goods at Park with the park details, awaiting the next move' },
     { value: 'transferred_state', label: 'Transferred to Another State',
-      desc: 'Sent to another state — creates an incoming transfer' },
+      desc: 'Listed under Goods in Transit to the new state' },
     { value: 'damaged', label: 'Damaged',
-      desc: 'Can no longer be sold — written off as damaged' },
+      desc: 'Moved to the Damaged goods list' },
   ]
 
   const TRANSFER_REASONS = [
@@ -646,6 +670,13 @@ export function OrderDetailPage() {
               <StatusBadge status={order.status} />
               <span className="text-xs text-gray-400">{formatDateTime(order.updated_at)}</span>
             </div>
+            <OrderStockBadge order={order} className="mb-2" />
+            {order.stock_source && ['delivered', 'partially_paid', 'paid'].includes(order.status) && (
+              <p className="text-[11px] text-gray-500 mb-2">
+                Stock source: <span className="font-semibold">{order.stock_source === 'supplier_direct' ? 'Supplier direct' : 'Our warehouse'}</span>
+                {order.stock_deducted_at ? ' · deducted' : order.stock_source === 'warehouse' ? ' · deducted on payment' : ''}
+              </p>
+            )}
             {(orderOfficersQ.data || []).length > 0 && (
               <p className="text-[11px] text-gray-400 mb-2 -mt-1">
                 Fulfillment officer{orderOfficersQ.data.length !== 1 ? 's' : ''} ({order.state}):{' '}
@@ -1293,6 +1324,14 @@ export function OrderDetailPage() {
       </Modal>
 
       {/* CEO-only: correct the product line(s) on this order at any status */}
+      <StockSourceModal
+        order={order}
+        isOpen={showStockSource}
+        onClose={() => setShowStockSource(false)}
+        onConfirm={handleDeliveredSubmit}
+        loading={updateStatus.isPending}
+      />
+
       <ProductCorrectionModal
         order={order}
         isOpen={showCorrectionModal}

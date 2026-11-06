@@ -46,6 +46,11 @@ function HistoryTrail({ holdingId }) {
 }
 
 export function HoldingQueuePage() {
+  return <HoldingQueueContent />
+}
+
+// Goods at Park — also shown as a tab on the Inventory page (embedded)
+export function HoldingQueueContent({ embedded = false }) {
   const { user } = useAuthStore()
   const navigate = useNavigate()
   const { data: warehouses } = useWarehouses()
@@ -102,7 +107,7 @@ export function HoldingQueuePage() {
 
   const isFulfillment = user?.role === 'fulfillment'
   const isWaybill = user?.role === 'waybill'
-  const isManager = ['ceo', 'super_admin', 'operations_manager'].includes(user?.role)
+  const isManager = ['ceo', 'super_admin', 'operations_manager', 'inventory'].includes(user?.role)
   const canAct = isFulfillment || isManager
 
   const list = useMemo(() => {
@@ -138,7 +143,7 @@ export function HoldingQueuePage() {
   if (items === null && !isLoading) {
     return (
       <div className="flex flex-col h-full overflow-x-hidden w-full">
-        <TopBar title="Holding Queue" />
+        {!embedded && <TopBar title="Goods at Park" />}
         <div className="px-4 py-4">
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
             <p className="font-semibold mb-1">Holding queue not set up yet</p>
@@ -151,9 +156,9 @@ export function HoldingQueuePage() {
 
   return (
     <div className="flex flex-col h-full overflow-x-hidden w-full">
-      <TopBar title="Holding Queue" />
+      {!embedded && <TopBar title="Goods at Park" />}
 
-      <div className="bg-white border-b border-gray-100 sticky top-[57px] z-20 px-4 pt-3 pb-2 space-y-2 w-full overflow-x-hidden">
+      <div className={embedded ? 'space-y-2 mb-3' : 'bg-white border-b border-gray-100 sticky top-[57px] z-20 px-4 pt-3 pb-2 space-y-2 w-full overflow-x-hidden'}>
         <SearchBar value={search} onChange={setSearch} placeholder="Search product, order #, park, contact..." />
         <div className="flex gap-2">
           <div className="flex-1 min-w-0">
@@ -184,9 +189,10 @@ export function HoldingQueuePage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3">
+      <div className={embedded ? 'space-y-3' : 'flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-3'}>
         <p className="text-xs text-gray-500">
-          Products from failed deliveries awaiting their next move — not part of an order or warehouse yet.
+          Goods sitting at a state park (mostly after a failed delivery). Use the buttons on each item to
+          waybill it to a customer or a state warehouse, move it into this state's warehouse, or mark it damaged.
         </p>
 
         {isLoading ? <SkeletonList count={4} /> :
@@ -321,6 +327,7 @@ export function HoldingQueuePage() {
                     <Button size="sm" className="w-full"
                       onClick={() => {
                         setWbForm({
+                          dest_type: 'customer', dest_warehouse_id: '',
                           dest_state: '', dest_city: '', dest_location: '', courier: '',
                           waybill_number: '', date_shipped: new Date().toISOString().split('T')[0],
                           expense: '', dest_contact: '', dest_contact_phone: '', notes: '',
@@ -328,7 +335,7 @@ export function HoldingQueuePage() {
                         setWbItem(item)
                       }}>
                       <span className="flex items-center justify-center gap-1.5">
-                        <Truck size={14} /> Waybilled to Another Location
+                        <Truck size={14} /> Waybill to a Customer or State Warehouse
                       </span>
                     </Button>
                   )}
@@ -513,15 +520,18 @@ export function HoldingQueuePage() {
       </Modal>
 
       {/* Waybilled to another location */}
-      <Modal isOpen={!!wbItem} onClose={() => setWbItem(null)} title="Waybilled to Another Location"
+      <Modal isOpen={!!wbItem} onClose={() => setWbItem(null)} title="Waybill from Park"
         footer={
           <div className="flex gap-3">
             <Button variant="secondary" onClick={() => setWbItem(null)} className="flex-1">Cancel</Button>
             <Button className="flex-1" loading={waybillHolding.isPending}
-              disabled={!wbForm.dest_state || !wbForm.courier || !wbForm.date_shipped}
+              disabled={!wbForm.dest_state || !wbForm.courier || !wbForm.date_shipped ||
+                (wbForm.dest_type === 'warehouse' && !wbForm.dest_warehouse_id)}
               onClick={async () => {
-                await waybillHolding.mutateAsync({ item: wbItem, form: wbForm })
-                setWbItem(null)
+                try {
+                  await waybillHolding.mutateAsync({ item: wbItem, form: wbForm })
+                  setWbItem(null)
+                } catch { /* toast already shown */ }
               }}>
               Confirm Waybill
             </Button>
@@ -531,8 +541,30 @@ export function HoldingQueuePage() {
           {wbItem && (
             <p className="text-xs text-gray-500">
               {wbItem.quantity} × {wbItem.product_name} leaves {wbItem.park_name || `${wbItem.state} State Park`} and
-              moves in transit to the destination. The record leaves the active queue.
+              is listed under Goods in Transit until it is delivered or received into the warehouse.
             </p>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { v: 'customer', l: 'Direct to a customer' },
+              { v: 'warehouse', l: 'To a state warehouse' },
+            ].map(o => (
+              <button key={o.v} type="button"
+                onClick={() => setWbForm({ ...wbForm, dest_type: o.v, dest_warehouse_id: '' })}
+                className={`py-2.5 rounded-xl text-xs font-semibold border-2 ${wbForm.dest_type === o.v ? 'border-blue-600 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-600'}`}>
+                {o.l}
+              </button>
+            ))}
+          </div>
+          {wbForm.dest_type === 'warehouse' && (
+            <Select label="Destination Warehouse" required value={wbForm.dest_warehouse_id || ''}
+              onChange={e => {
+                const w = (warehouses || []).find(x => x.id === e.target.value)
+                setWbForm({ ...wbForm, dest_warehouse_id: e.target.value, dest_state: w?.state || wbForm.dest_state, dest_location: w?.name || wbForm.dest_location })
+              }}>
+              <option value="">Select warehouse...</option>
+              {(warehouses || []).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
+            </Select>
           )}
           <div className="grid grid-cols-2 gap-3">
             <Select label="Destination State" required value={wbForm.dest_state || ''}
