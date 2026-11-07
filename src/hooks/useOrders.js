@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { queueAction, isOnline } from '../lib/offline'
-import { reserveStockForOrder, resolveOrderStock, startReturnProcess, receiveOrderStockAtWarehouse, resolveFailedDeliveryStock } from '../lib/stockOps'
+import { deductSoldStock, cancelOrderStock, dispatchOrderStock, startReturnProcess, receiveOrderStockAtWarehouse, resolveFailedDeliveryStock } from '../lib/stockOps'
 import { scopeToBusinesses, businessAllowed } from '../lib/businessScope'
 
 export function useOrders(filters = {}) {
@@ -232,9 +232,8 @@ export function useCreateOrder() {
         } catch (e) { console.warn('unverified product create failed', e) }
       }
 
-      // Auto-reserve stock for products tracked in inventory
-      await reserveStockForOrder(data, user?.id)
-
+      // No stock is reserved: goods are deducted only when they physically
+      // leave (waybilled) or are sold (paid) — see lib/stockOps.js
       return data
     },
     onSuccess: () => {
@@ -392,26 +391,45 @@ export function useUpdateOrderStatus() {
         })
       }
 
-      // Inventory side-effects: reserved stock becomes sold on payment,
-      // releases on cancel, and on failed delivery the officer's choice
-      // (returned / damaged / missing) decides. A returned order starts the
-      // return-assessment process (stock goes to awaiting-inspection) —
-      // inventory is only finalized when the return is processed.
-      if (status === 'paid') await resolveOrderStock(data, 'sold', user?.id)
-      else if (status === 'cancelled') await resolveOrderStock(data, 'release', user?.id)
-      else if (status === 'returned') await startReturnProcess(data, user)
-      else if (status === 'failed_delivery' && stockOutcome) await resolveFailedDeliveryStock(data, stockOutcome, user)
-      else if (status === 'received_at_warehouse') await receiveOrderStockAtWarehouse(data, user)
+      // Inventory side-effects (no reservations): sold stock is deducted
+      // on payment, received goods join the state warehouse, and on a
+      // failed delivery the officer's choice decides where goods go. A
+      // returned order starts the return-assessment process.
+      // These never block the status change, but every problem comes back
+      // as a warning (shown as a toast and written on the order timeline).
+      // Re-read the order so extraSafe fields (stock source) are included.
+      const { data: fresh } = await supabase.from('orders').select('*').eq('id', id).single()
+      const o = fresh || data
+      let stockWarnings = []
+      try {
+        if (status === 'paid' || status === 'partially_paid') stockWarnings = await deductSoldStock(o, user)
+        else if (status === 'cancelled') stockWarnings = await cancelOrderStock(o, user)
+        else if (status === 'returned') stockWarnings = await startReturnProcess(o, user)
+        else if (status === 'failed_delivery' && stockOutcome) stockWarnings = await resolveFailedDeliveryStock(o, stockOutcome, user)
+        else if (status === 'received_at_warehouse') stockWarnings = await receiveOrderStockAtWarehouse(o, user)
+        // Marked waybilled by hand (outside a batch): goods leave the main warehouse
+        else if (status === 'waybilled') stockWarnings = await dispatchOrderStock(o, {}, user)
+      } catch (e) {
+        stockWarnings = [`Stock update failed — ${e.message}. Check this order's stock in Inventory.`]
+      }
 
-      return data
+      return { ...o, stockWarnings }
     },
     onSuccess: (data, { id }) => {
       if (!data?.offline) {
         queryClient.invalidateQueries({ queryKey: ['orders'] })
         queryClient.invalidateQueries({ queryKey: ['order', id] })
+        queryClient.invalidateQueries({ queryKey: ['order_timeline'] })
         queryClient.invalidateQueries({ queryKey: ['inventory'] })
+        queryClient.invalidateQueries({ queryKey: ['stock_in_transit'] })
+        queryClient.invalidateQueries({ queryKey: ['damaged_goods'] })
+        queryClient.invalidateQueries({ queryKey: ['holding_queue'] })
         queryClient.invalidateQueries({ queryKey: ['returns'] })
-        showToast('Order updated', 'success')
+        if (data?.stockWarnings?.length) {
+          showToast(`Order updated, but: ${data.stockWarnings.join(' · ')}`, 'warning', 9000)
+        } else {
+          showToast('Order updated', 'success')
+        }
       }
     },
     onError: (err) => showToast(err.message, 'error'),

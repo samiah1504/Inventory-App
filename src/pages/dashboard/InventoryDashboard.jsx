@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { useInventory } from '../../hooks/useInventory'
 import { StatCard } from '../../components/ui/Card'
 import { DisciplinaryBanner } from '../../components/staff/DisciplinaryBanner'
+import { StockCountBanner } from '../../components/ui/StockCountBanner'
 
 export function InventoryDashboard() {
   const { user } = useAuthStore()
@@ -25,6 +26,7 @@ export function InventoryDashboard() {
 
         {/* Unread disciplinary notice for this employee */}
         <DisciplinaryBanner />
+        <StockCountBanner />
         <div className="grid grid-cols-2 gap-3">
           <StatCard
             label="Stock Lines"

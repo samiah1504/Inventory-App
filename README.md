@@ -94,6 +94,31 @@ New Order
   → (or) Failed Delivery / Cancelled / Returned
 ```
 
+## Inventory — how stock moves
+
+Orders never reserve stock. Stock changes only when goods physically move:
+
+| Event | Stock effect |
+|-------|--------------|
+| Order created | Nothing. The order shows **Stock available in {state}** or **Stock not in {state} — waybill needed** |
+| Waybill batch marked Waybilled | Goods leave the source warehouse (default: Lagos) → **Goods in Transit** for that order |
+| Received at Warehouse | In-transit goods join that state warehouse's stock |
+| Delivered | Staff record the **Stock Source**: our warehouse or supplier direct |
+| Paid / Partially Paid | Deducted from transit or the chosen warehouse; supplier direct deducts nothing |
+| Failed delivery | Goods go to **Goods at Park**, a state warehouse, another state (in transit) or **Damaged** |
+
+Every stock change runs through the `inventory_apply()` database function: one locked,
+atomic step that refuses to go below zero and writes the movement log. Stock problems
+never block an order but are shown as a warning and written on the order timeline.
+
+**Weekly stock take:** the inventory manager counts each warehouse and the goods at parks
+(blind — the app's numbers are hidden). Differences go to the CEO, and only the CEO can
+approve a correction (logged as a *stock count adjustment*).
+
+Run the **Inventory v2** section at the end of `supabase/migrations.sql` once. It converts
+open orders: waybilled ones move into Goods in Transit, part-paid ones are deducted, and
+all other reservations are released.
+
 ## Role Permissions Summary
 
 | Feature | CEO | Ops Mgr | Support | Fulfillment | Waybill | Inventory |

@@ -8,6 +8,7 @@ import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../stores/authStore'
 import { useBusinesses } from '../../hooks/useBusinesses'
 import { Modal } from '../../components/ui/Modal'
+import { StockCountBanner } from '../../components/ui/StockCountBanner'
 import { formatCurrency, formatDateTime } from '../../utils/format'
 
 const iso = (d) => d.toISOString().split('T')[0]
@@ -229,6 +230,8 @@ export function CeoDashboard() {
       </div>
 
       <div className="px-4 -mt-4 space-y-4 pb-8">
+
+        <StockCountBanner mode="approve" />
 
         {/* ── 10 → first: CEO Inbox ── */}
         <button onClick={() => setShowInbox(v => !v)}

@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
+import { applyStock } from '../lib/inventoryCore'
+import { recordDamaged } from '../lib/stockOps'
 
 export const CONTACT_ROLES = [
   { value: 'driver',       label: 'Driver' },
@@ -21,6 +23,7 @@ export const HOLDING_STATUSES = {
   transferred:   { label: 'Used in Waybill Batch', color: 'bg-purple-50 text-purple-700' },
   delivered_other: { label: 'Delivered to Another Customer', color: 'bg-emerald-50 text-emerald-700' },
   damaged:       { label: 'Damaged',              color: 'bg-red-50 text-red-700' },
+  missing:       { label: 'Missing (stock count)', color: 'bg-gray-100 text-gray-600' },
 }
 
 export const ACTIVE_HOLDING = ['holding', 'collected']
@@ -88,6 +91,8 @@ function useHoldingMutation(fn, successMsg) {
       queryClient.invalidateQueries({ queryKey: ['holding_history'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      queryClient.invalidateQueries({ queryKey: ['stock_in_transit'] })
+      queryClient.invalidateQueries({ queryKey: ['damaged_goods'] })
       queryClient.invalidateQueries({ queryKey: ['expenses'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['order'] })
@@ -130,40 +135,11 @@ export function useCollectHolding() {
 // becomes available inventory
 export function useHoldingToWarehouse() {
   return useHoldingMutation(async ({ item, warehouse, dateReceived, timeReceived, receivedBy, condition, notes }, user) => {
-    if (item.product_id) {
-      const { data: inv } = await supabase.from('inventory').select('*')
-        .eq('product_id', item.product_id).eq('warehouse_id', warehouse.id).single()
-      if (inv) {
-        await supabase.from('inventory').update({
-          quantity_physical: (inv.quantity_physical || 0) + item.quantity,
-          quantity_available: (inv.quantity_available || 0) + item.quantity,
-        }).eq('id', inv.id)
-      } else {
-        await supabase.from('inventory').insert({
-          product_id: item.product_id,
-          warehouse_id: warehouse.id,
-          business_id: item.business_id || null,
-          quantity_physical: item.quantity,
-          quantity_available: item.quantity,
-        })
-      }
-      await supabase.from('inventory_movements').insert({
-        product_id: item.product_id,
-        warehouse_id: warehouse.id,
-        business_id: item.business_id || null,
-        movement_type: 'return',
-        quantity: item.quantity,
-        reference_id: item.id,
-        reference_type: 'holding',
-        notes: `From holding queue (${item.source_order_number || 'failed order'}) into ${warehouse.name}` +
-          `${condition ? ` · condition: ${condition}` : ''}${receivedBy ? ` · received by ${receivedBy}` : ''}`,
-        staff_id: user?.id || null,
-      })
-    }
     const summary = `Received into ${warehouse.name}${dateReceived ? ` on ${dateReceived}` : ''}` +
       `${timeReceived ? ` at ${timeReceived}` : ''}${receivedBy ? ` by ${receivedBy}` : ''}` +
       `${condition ? ` · condition: ${condition}` : ''}${notes ? ` · ${notes}` : ''}`
-    const { error } = await supabase.from('holding_queue')
+    // Claim the item first: if two people tap at once, only one moves it
+    const { data: claimed, error } = await supabase.from('holding_queue')
       .update({
         status: 'warehouse',
         custodian_id: user?.id || null,
@@ -172,9 +148,30 @@ export function useHoldingToWarehouse() {
         notes: [item.notes, summary].filter(Boolean).join(' · '),
       })
       .eq('id', item.id)
+      .in('status', ACTIVE_HOLDING)
+      .select('id')
     if (error) throw error
+    if (!claimed || claimed.length === 0) throw new Error('This item was already moved by someone else')
+
+    if (item.product_id) {
+      try {
+        await applyStock({
+          productId: item.product_id, warehouseId: warehouse.id, businessId: item.business_id,
+          qty: item.quantity, returned: item.quantity,
+          type: 'return', refId: item.id, refType: 'holding', staffId: user?.id,
+          notes: `From Goods at Park (${item.source_order_number || 'failed order'}) into ${warehouse.name}` +
+            `${condition ? ` · condition: ${condition}` : ''}${receivedBy ? ` · received by ${receivedBy}` : ''}`,
+        })
+      } catch (e) {
+        // Put it back on the park list so nothing is lost
+        await supabase.from('holding_queue')
+          .update({ status: item.status, notes: item.notes || null, updated_at: new Date().toISOString() })
+          .eq('id', item.id)
+        throw new Error(`Stock not updated — ${e.message}`)
+      }
+    }
     await holdingHistory(item.id, 'moved_to_warehouse', summary, user)
-  }, 'Moved to warehouse — stock is available and the item left the active queue')
+  }, 'Moved to warehouse — added to that warehouse\'s stock')
 }
 
 // Waybilled from the park to another state/warehouse/destination —
@@ -244,8 +241,34 @@ export function useHoldingWaybilled() {
       } catch { /* expense log is best-effort */ }
     }
 
+    // The goods are on the move again → Goods in Transit, until they are
+    // delivered to a customer or received into the destination warehouse
+    {
+      const { error: trErr } = await supabase.from('stock_in_transit').insert({
+        product_id: item.product_id || null,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        deducted_qty: 0,
+        color: item.color || null,
+        size: item.size || null,
+        order_id: form.order_id || null,
+        order_number: form.order_number || null,
+        business_id: item.business_id || null,
+        from_label: `${item.park_name || 'Park'}, ${item.state}`,
+        holding_id: item.id,
+        destination_state: form.dest_state || null,
+        destination_type: form.dest_type === 'warehouse' ? 'warehouse' : 'customer',
+        destination_warehouse_id: form.dest_type === 'warehouse' ? (form.dest_warehouse_id || null) : null,
+        courier: form.courier || null,
+        waybill_number: form.waybill_number || null,
+        created_by: user?.id || null,
+        created_by_name: user?.name || null,
+      })
+      if (trErr) throw new Error(`Waybill recorded, but Goods in Transit failed: ${trErr.message}`)
+    }
+
     await holdingHistory(item.id, 'waybilled', summary, user)
-  }, 'Waybilled — the item left the active queue')
+  }, 'Waybilled — now listed in Goods in Transit')
 }
 
 // Product physically left the park (handed over / carried onward)
@@ -345,6 +368,13 @@ export function useHoldingDamaged() {
       })
       .eq('id', item.id)
     if (error) throw error
+    await recordDamaged({
+      product_id: item.product_id || null, product_name: item.product_name, quantity: item.quantity,
+      business_id: item.business_id || null, source: 'park', state: item.state,
+      location_note: [item.park_name, item.city].filter(Boolean).join(', ') || null,
+      order_id: item.source_order_id || null, order_number: item.source_order_number || null,
+      reference_id: item.id, reason: reason || 'Damaged at park',
+    }, user)
     await holdingHistory(item.id, 'damaged', reason || 'Marked damaged', user)
-  }, 'Marked damaged')
+  }, 'Moved to Damaged goods')
 }

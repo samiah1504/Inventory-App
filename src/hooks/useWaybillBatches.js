@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
+import { useAppStore } from '../stores/appStore'
+import { dispatchOrderStock } from '../lib/stockOps'
 
 export function useWaybillBatch(id) {
   return useQuery({
@@ -238,6 +240,7 @@ export function useTogglePackingItem() {
 export function useAdvanceBatchStatus() {
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
+  const { showToast } = useAppStore()
   return useMutation({
     mutationFn: async ({ batchId, newStatus, batchNumber, orderIds, notes }) => {
       // The workflow only ever moves forward. A completed batch is
@@ -260,11 +263,31 @@ export function useAdvanceBatchStatus() {
         updated_at: new Date().toISOString(),
       }).eq('id', batchId)
 
+      const stockWarnings = []
       if (newStatus === 'waybilled') {
+        // Where the goods physically leave from: the batch's source
+        // warehouse (default: main Lagos warehouse), or a park product
+        const { data: batchRows } = await supabase.from('waybill_batches')
+          .select('*').eq('id', batchId).limit(1)
+        const batchRow = batchRows?.[0] || {}
+        const fromHolding = batchRow.source_type === 'holding'
         for (const orderId of orderIds) {
-          await supabase.from('orders').update({
+          const { data: dispatched } = await supabase.from('orders').update({
             status: 'waybilled', has_waybill: true, updated_at: new Date().toISOString(),
-          }).eq('id', orderId)
+          }).eq('id', orderId).select().single()
+          // Goods leave the warehouse NOW → Goods in Transit for this order
+          if (dispatched) {
+            try {
+              stockWarnings.push(...await dispatchOrderStock(dispatched, {
+                warehouseId: fromHolding ? null : batchRow.source_warehouse_id,
+                fromHolding,
+                label: fromHolding ? (batchRow.source_details || 'Park') : null,
+                batchId,
+              }, user))
+            } catch (e) {
+              stockWarnings.push(`${dispatched.order_number}: stock not moved to transit — ${e.message}`)
+            }
+          }
           await supabase.from('order_timeline').insert({
             order_id: orderId,
             action: 'waybilled',
@@ -302,13 +325,18 @@ export function useAdvanceBatchStatus() {
         staff_id: user?.id,
         staff_name: user?.name,
       })
+      return { stockWarnings }
     },
-    onSuccess: (_, { batchId }) => {
+    onSuccess: (res, { batchId }) => {
       queryClient.invalidateQueries({ queryKey: ['waybill_batch', batchId] })
       queryClient.invalidateQueries({ queryKey: ['waybill_batches'] })
       queryClient.invalidateQueries({ queryKey: ['orders'] })
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
       queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      queryClient.invalidateQueries({ queryKey: ['stock_in_transit'] })
+      if (res?.stockWarnings?.length) {
+        showToast(`Stock: ${res.stockWarnings.join(' · ')}`, 'warning', 10000)
+      }
     },
   })
 }
