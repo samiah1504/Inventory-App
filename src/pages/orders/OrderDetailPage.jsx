@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Phone, MessageCircle, Copy, FileText, Plus, Pencil, Calendar } from 'lucide-react'
 import { useOrder, useUpdateOrderStatus, useReassignOrderBusiness } from '../../hooks/useOrders'
@@ -79,6 +79,7 @@ const RETURN_DECISIONS = [
 export function OrderDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuthStore()
   const { showToast } = useAppStore()
   const { data: order, isLoading, refetch } = useOrder(id)
@@ -125,6 +126,26 @@ export function OrderDetailPage() {
   const [showWhReceiptModal, setShowWhReceiptModal] = useState(false)
   const [showStockSource, setShowStockSource] = useState(false)
   const [whForm, setWhForm] = useState({ qty: '', time: '', condition: 'good', notes: '' })
+
+  // Arriving from the Fulfillment board's "Failed" button (?action=failed):
+  // open the full Failed Delivery form, so the reason and where the goods
+  // are now (park / warehouse / another state / damaged) are always recorded
+  const failedRequested = searchParams.get('action') === 'failed'
+  useEffect(() => {
+    if (!failedRequested || !order) return
+    setSearchParams({}, { replace: true })
+    const allowed = (STATUS_TRANSITIONS[user?.role] || []).includes('failed_delivery') &&
+      (NEXT_STATUSES[order.status] || []).includes('failed_delivery')
+    if (!allowed) {
+      showToast(`This order can't be marked failed from ${statusLabel(order.status)}`, 'error')
+      return
+    }
+    setFailedForm({
+      reason: '', custom: '', disposition: '', destinationState: '', transferReason: 'customer_relocated',
+      parkName: '', parkLocation: '', contactName: '', contactPhone: '', contactRole: 'driver',
+    })
+    setShowFailedModal(true)
+  }, [failedRequested, order, user?.role, setSearchParams, showToast])
 
   // Destination-state stock check for the procurement review (new orders)
   const destStock = useQuery({

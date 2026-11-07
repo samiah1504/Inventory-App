@@ -94,19 +94,11 @@ export function FulfillmentPage() {
     }
   }
 
-  async function quickFail(order) {
-    if (actingOrder === order.id) return
-    setActingOrder(order.id)
-    try {
-      await updateStatus.mutateAsync({
-        id: order.id,
-        status: 'failed_delivery',
-        extra: { failed_reason: 'Failed delivery (marked from fulfillment board)' },
-        timelineDesc: `Marked failed delivery by ${user?.name}`,
-      })
-    } finally {
-      setActingOrder(null)
-    }
+  // Failed opens the order's full Failed Delivery form: the reason and
+  // where the goods are now (park / warehouse / another state / damaged)
+  // must be recorded, or the stock would be left unaccounted for
+  function quickFail(order) {
+    navigate(`/orders/${order.id}?action=failed`)
   }
 
   async function receiveBatch(order) {

@@ -15,6 +15,7 @@ import { useAppStore } from '../../stores/appStore'
 import { formatCurrency, formatDate } from '../../utils/format'
 import { findLinkedOrders, applyProductToOrders } from '../../lib/productLinkUpdates'
 import { accessFor } from '../../hooks/useStaff'
+import { applyStock } from '../../lib/inventoryCore'
 
 // Database errors never reach the user raw — this says what to fix
 function saveErrorMessage(error) {
@@ -241,24 +242,51 @@ export function ProductsPage() {
         applyCost: true,
         user,
       })
-      try {
-        const { data: srcRows } = await supabase.from('inventory').select('*').eq('product_id', source.id)
-        for (const row of (srcRows || [])) {
-          const { data: tgtRows } = await supabase.from('inventory').select('*')
-            .eq('product_id', target.id).eq('warehouse_id', row.warehouse_id).limit(1)
-          const tgt = tgtRows?.[0]
-          if (tgt) {
-            await supabase.from('inventory').update({
-              quantity_physical: (tgt.quantity_physical || 0) + (row.quantity_physical || 0),
-              quantity_available: (tgt.quantity_available || 0) + (row.quantity_available || 0),
-              quantity_reserved: (tgt.quantity_reserved || 0) + (row.quantity_reserved || 0),
-            }).eq('id', tgt.id)
-            await supabase.from('inventory').delete().eq('id', row.id)
-          } else {
-            await supabase.from('inventory').update({ product_id: target.id }).eq('id', row.id)
-          }
+      // Move each warehouse's stock from the duplicate onto the final
+      // product. Each side is one atomic, locked step: the duplicate is
+      // emptied first (refused if its stock changed under us), then the
+      // same units are added to the final product — nothing is lost or
+      // counted twice, even if someone is selling at the same moment.
+      const stockProblems = []
+      const { data: srcRows } = await supabase.from('inventory').select('*, warehouse:warehouses(name)').eq('product_id', source.id)
+      for (const row of (srcRows || [])) {
+        const physical = Number(row.quantity_physical) || 0
+        const inspection = Number(row.quantity_inspection) || 0
+        const counters = {
+          sold: Number(row.quantity_sold) || 0,
+          damaged: Number(row.quantity_damaged) || 0,
+          returned: Number(row.quantity_returned) || 0,
         }
-      } catch (e) { console.warn('inventory merge', e) }
+        const where = row.warehouse?.name || 'a warehouse'
+        try {
+          await applyStock({
+            productId: source.id, warehouseId: row.warehouse_id,
+            qty: -physical, inspection: -inspection,
+            sold: -counters.sold, damaged: -counters.damaged, returned: -counters.returned,
+          })
+        } catch (e) {
+          stockProblems.push(`${where}: duplicate's stock not moved — ${e.message}`)
+          continue
+        }
+        try {
+          await applyStock({
+            productId: target.id, warehouseId: row.warehouse_id, businessId: row.business_id,
+            qty: physical, inspection, ...counters,
+          })
+          await supabase.from('inventory').delete().eq('id', row.id)
+        } catch (e) {
+          // Put it back on the duplicate so the units are never lost
+          await applyStock({
+            productId: source.id, warehouseId: row.warehouse_id,
+            qty: physical, inspection, ...counters,
+          }).catch(() => {})
+          stockProblems.push(`${where}: stock not moved — ${e.message}`)
+        }
+      }
+      // Goods in transit, damaged list and stock counts follow the product
+      for (const table of ['stock_in_transit', 'damaged_goods', 'stock_count_lines']) {
+        await supabase.from(table).update({ product_id: target.id }).eq('product_id', source.id)
+      }
       await supabase.from('inventory_movements').update({ product_id: target.id }).eq('product_id', source.id)
       await supabase.from('holding_queue').update({ product_id: target.id }).eq('product_id', source.id)
       const { error } = await supabase.from('products')
@@ -268,11 +296,12 @@ export function ProductsPage() {
       await audit(source.id, 'merged',
         `Merged into "${target.name}" by ${user?.name} — ${ordersUpdated} linked order${ordersUpdated !== 1 ? 's' : ''} updated to the official name`)
       await audit(target.id, 'merge_target', `"${source.name}" merged into this product by ${user?.name}`)
-      return { ordersUpdated }
+      return { ordersUpdated, stockProblems }
     },
-    onSuccess: ({ ordersUpdated }) => {
+    onSuccess: ({ ordersUpdated, stockProblems }) => {
       queryClient.invalidateQueries()
-      showToast(
+      if (stockProblems.length) showToast(`Products merged, but stock needs checking: ${stockProblems.join(' · ')}`, 'warning', 10000)
+      else showToast(
         ordersUpdated > 0
           ? `Products merged — ${ordersUpdated} past order${ordersUpdated !== 1 ? 's' : ''} now show the official product`
           : 'Products merged — history moved to the final product',
