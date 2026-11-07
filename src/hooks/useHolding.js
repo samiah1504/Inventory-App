@@ -59,7 +59,7 @@ export function useHoldingHistory(holdingId) {
 export function useHoldingQueue(includeClosed = false) {
   const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['holding_queue', includeClosed, user?.role, user?.assigned_states],
+    queryKey: ['holding_queue', includeClosed, user?.role, user?.assigned_states, user?.assigned_warehouse_ids],
     retry: false,
     queryFn: async () => {
       try {
@@ -71,6 +71,10 @@ export function useHoldingQueue(includeClosed = false) {
         }
         const { scopeToBusinesses } = await import('../lib/businessScope')
         q = scopeToBusinesses(q, user)
+        // Warehouse-limited inventory staff: parks in their warehouses' states
+        const { allowedWarehouseStates } = await import('../lib/inventoryAccess')
+        const states = await allowedWarehouseStates(user)
+        if (states) q = q.in('state', states.length ? states : ['—'])
         const { data, error } = await q
         if (error) throw error
         return data || []

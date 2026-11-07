@@ -32,7 +32,7 @@ export function DamagedTab({ canManage }) {
 
   if (rows === null) {
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
         <p className="font-semibold mb-1">Damaged goods not set up yet</p>
         <p>Run the "Inventory v2" section of <span className="font-mono text-xs">supabase/migrations.sql</span> in the Supabase SQL editor.</p>
       </div>
@@ -66,7 +66,7 @@ export function DamagedTab({ canManage }) {
         const st = DAMAGED_STATUSES[r.status] || { label: r.status, color: 'bg-gray-100 text-gray-600' }
         const open = ['damaged', 'repair'].includes(r.status)
         return (
-          <div key={r.id} className="bg-white rounded-2xl border border-gray-100 p-4 space-y-1.5">
+          <div key={r.id} className="bg-white rounded-lg border border-line p-4 space-y-1.5">
             <div className="flex items-center justify-between gap-2">
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${st.color}`}>{st.label.toUpperCase()}</span>
               <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">

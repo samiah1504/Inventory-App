@@ -9,14 +9,14 @@ import { Badge } from '../../components/ui/Badge'
 import { useAuthStore } from '../../stores/authStore'
 import { useAppStore } from '../../stores/appStore'
 import { formatDate } from '../../utils/format'
-import { useBusinesses } from '../../hooks/useBusinesses'
+import { useBusinesses, useWarehouses } from '../../hooks/useBusinesses'
 import {
   useStaffMember, useStaffLeave, useStaffWarnings, useStaffDocuments, useStaffNotes,
   useStaffPerformance, useResetPassword, useApplyLeave, useReviewLeave, useCancelLeave,
   useIssueWarning, useSaveDocument, useDeleteDocument, useAddStaffNote, useDeleteStaffNote,
   LEAVE_TYPES, WARNING_TYPES, DOCUMENT_CATEGORIES, STAFF_STATUSES, labelOf,
 } from '../../hooks/useStaff'
-import { useSetStaffStatus, useSetStaffAccess, useSetAssignedStates, useSetStaffBusinesses, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
+import { useSetStaffStatus, useSetStaffAccess, useSetAssignedStates, useSetStaffBusinesses, useSetStaffWarehouses, ACCESS_AREAS, accessFor } from '../../hooks/useStaff'
 import { NIGERIAN_STATES } from '../../utils/format'
 import { StaffFormModal, ROLES, EMPLOYMENT_TYPES } from './StaffFormModal'
 import { generateWarningLetter, generateStaffLetter } from '../../lib/staffPdf'
@@ -91,6 +91,9 @@ export function StaffDetailPage() {
   const setStaffBusinesses = useSetStaffBusinesses()
   const [accessDraft, setAccessDraft] = useState(null)
   const [statesDraft, setStatesDraft] = useState(null)
+  const [whDraft, setWhDraft] = useState(null)
+  const { data: allWarehouses } = useWarehouses()
+  const setStaffWarehouses = useSetStaffWarehouses()
   const [bizDraft, setBizDraft] = useState(null)
 
   const staff = staffQ.data
@@ -249,6 +252,51 @@ export function StaffDetailPage() {
                         setStatesDraft(null)
                       }}>
                       Save Assigned States
+                    </Button>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* Warehouse access — which warehouses an Inventory officer /
+                Operations Manager sees in Inventory (CEO only) */}
+            {isCeo && ['inventory', 'operations_manager'].includes(staff.role) && (allWarehouses || []).length > 0 && (() => {
+              const saved = Array.isArray(staff.assigned_warehouse_ids) ? staff.assigned_warehouse_ids : []
+              // Empty list = every warehouse is switched on
+              const current = whDraft ?? (saved.length ? saved : allWarehouses.map(w => w.id))
+              const dirty = whDraft !== null
+              const toggle = (id) => setWhDraft(current.includes(id) ? current.filter(x => x !== id) : [...current, id])
+              const allOn = allWarehouses.every(w => current.includes(w.id))
+              return (
+                <div className="bg-white rounded-2xl p-4 border border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Warehouse Access</p>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    Warehouses {staff.name.split(' ')[0]} can see in Inventory. Switch a warehouse off to hide its stock.
+                    {staff.role === 'operations_manager' ? ' Operations Managers can view stock but not change it.' : ''} Applies at their next login.
+                  </p>
+                  <div className="space-y-1.5">
+                    {allWarehouses.map(w => {
+                      const on = current.includes(w.id)
+                      return (
+                        <button key={w.id} onClick={() => toggle(w.id)}
+                          className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-xl border text-left ${on ? 'border-yellow-400 bg-yellow-50' : 'border-gray-200 bg-white'}`}>
+                          <span className="text-xs text-gray-800 truncate">{w.name} <span className="text-gray-400">· {w.state}</span></span>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${on ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-gray-500'}`}>{on ? 'ON' : 'OFF'}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {dirty && (
+                    <Button className="w-full mt-3" size="sm" loading={setStaffWarehouses.isPending}
+                      disabled={current.length === 0}
+                      onClick={async () => {
+                        try {
+                          // All on is stored as "no restriction"
+                          await setStaffWarehouses.mutateAsync({ staff_id: staff.id, warehouse_ids: allOn ? [] : current })
+                          setWhDraft(null)
+                        } catch { /* toast shown */ }
+                      }}>
+                      {current.length === 0 ? 'Switch on at least one warehouse' : 'Save Warehouse Access'}
                     </Button>
                   )}
                 </div>

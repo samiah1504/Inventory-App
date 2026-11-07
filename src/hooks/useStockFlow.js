@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { scopeToBusinesses, allowedBusinessIds } from '../lib/businessScope'
+import { allowedWarehouseIds, allowedWarehouseStates, pgList } from '../lib/inventoryAccess'
 import { applyStock, weekStart } from '../lib/inventoryCore'
 import { recordDamaged, orderLines } from '../lib/stockOps'
 
@@ -55,6 +56,16 @@ export function useInTransit(includeClosed = false) {
         .limit(includeClosed ? 300 : 1000)
       if (!includeClosed) q = q.eq('status', 'in_transit')
       q = scopeToBusinesses(q, user)
+      // Warehouse-limited staff: goods leaving or heading to their warehouses/states
+      const whIds = allowedWarehouseIds(user)
+      if (whIds) {
+        const states = await allowedWarehouseStates(user)
+        q = q.or([
+          `from_warehouse_id.in.${pgList(whIds)}`,
+          `destination_warehouse_id.in.${pgList(whIds)}`,
+          ...(states.length ? [`destination_state.in.${pgList(states)}`] : []),
+        ].join(','))
+      }
       const { data, error } = await q
       if (error) return null
       return data || []
@@ -171,6 +182,14 @@ export function useDamagedGoods(includeClosed = false) {
         .limit(includeClosed ? 300 : 1000)
       if (!includeClosed) q = q.in('status', ['damaged', 'repair'])
       q = scopeToBusinesses(q, user)
+      const whIds = allowedWarehouseIds(user)
+      if (whIds) {
+        const states = await allowedWarehouseStates(user)
+        q = q.or([
+          `warehouse_id.in.${pgList(whIds)}`,
+          ...(states.length ? [`and(warehouse_id.is.null,state.in.${pgList(states)})`] : []),
+        ].join(','))
+      }
       const { data, error } = await q
       if (error) return null
       return data || []
@@ -301,6 +320,8 @@ export function useStockCounts() {
       // Park counts span businesses (no business_id) — always visible
       const ids = allowedBusinessIds(user)
       if (ids) q = q.or(`business_id.in.(${ids.join(',')}),business_id.is.null`)
+      const whIds = allowedWarehouseIds(user)
+      if (whIds) q = q.or(`warehouse_id.in.${pgList(whIds)},scope.eq.park`)
       const { data, error } = await q
       if (error) return null
       return data || []

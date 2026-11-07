@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../stores/authStore'
 import { accessFor } from '../../hooks/useStaff'
+import { canOpenInventory } from '../../lib/inventoryAccess'
 
 // Access area → nav entry (used when a staff member has custom ticked access)
 const AREA_NAV = {
@@ -54,7 +55,6 @@ const NAV_CONFIG = {
   fulfillment: [
     { to: '/', icon: Home, label: 'Home' },
     { to: '/orders', icon: ShoppingCart, label: 'Orders' },
-    { to: '/my-stock', icon: Package, label: 'My Stock' },
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
   waybill: [
@@ -70,6 +70,9 @@ const NAV_CONFIG = {
     { to: '/settings', icon: Settings, label: 'Settings' },
   ],
 }
+
+// Pages laid out for the full screen width on desktop
+export const isWideRoute = (pathname) => pathname.startsWith('/inventory')
 
 export function BottomNav() {
   const { user } = useAuthStore()
@@ -98,17 +101,25 @@ export function BottomNav() {
     const sIdx = keep.findIndex(i => i.to === '/settings')
     navItems = sIdx >= 0 ? [...keep.slice(0, sIdx), ...extras, ...keep.slice(sIdx)] : [...keep, ...extras]
   }
+  // Stock & inventory is limited to CEO/SA, Ops Manager and Inventory officer
+  if (!canOpenInventory(user)) navItems = navItems.filter(i => i.to !== '/inventory')
+
+  // Wide desktop pages (Inventory) get a left rail on large screens
+  const { pathname } = useLocation()
+  const wide = isWideRoute(pathname)
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 safe-area-bottom">
-      <div className="flex items-center justify-around px-1 pt-1 pb-2 max-w-lg mx-auto overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+    <nav className={`fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40 safe-area-bottom ${
+      wide ? 'lg:top-0 lg:right-auto lg:w-[84px] lg:border-t-0 lg:border-r lg:border-[#ECE7E0]' : ''}`}>
+      <div className={`flex items-center justify-around px-1 pt-1 pb-2 max-w-lg mx-auto overflow-x-auto ${
+        wide ? 'lg:flex-col lg:justify-start lg:max-w-none lg:h-full lg:pt-6 lg:gap-1 lg:overflow-visible' : ''}`} style={{ scrollbarWidth: 'none' }}>
         {navItems.map(({ to, icon: Icon, label, end: endProp }) => (
           <NavLink
             key={to}
             to={to}
             end={endProp ?? to === '/'}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded-xl min-w-[48px] flex-1 shrink-0 max-w-[72px] transition-all ${
+              `flex flex-col items-center gap-0.5 px-1.5 py-1.5 rounded-xl min-w-[48px] flex-1 shrink-0 max-w-[72px] transition-all ${wide ? 'lg:flex-none lg:w-[72px]' : ''} ${
                 isActive
                   ? 'text-blue-600'
                   : 'text-gray-500 hover:text-gray-700'
