@@ -429,6 +429,22 @@ export function useSetStaffBusinesses() {
 }
 
 // States a fulfillment officer covers (36 states + FCT)
+// Warehouses an Inventory officer / Operations Manager may see
+// (empty = all). CEO only; applies at their next login.
+export function useSetStaffWarehouses() {
+  return useHrMutation(async ({ staff_id, warehouse_ids }) => {
+    const { error } = await supabase.from('staff_users')
+      .update({ assigned_warehouse_ids: warehouse_ids, updated_at: new Date().toISOString() })
+      .eq('id', staff_id)
+    if (error) {
+      if (/assigned_warehouse_ids/.test(error.message || '')) {
+        throw new Error('Run supabase/inventory_v3_staff_warehouses.sql in Supabase first')
+      }
+      throw error
+    }
+  }, ['staff', 'staff_member'], 'Warehouse access updated — applies at their next login')
+}
+
 export function useSetAssignedStates() {
   return useHrMutation(async ({ staff_id, states }) => {
     const { error } = await supabase.from('staff_users')

@@ -64,7 +64,7 @@ export function ReturnsTab({ canManage }) {
 
   if (isError) {
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
         <p className="font-semibold mb-1">Returns table not found</p>
         <p>Run the latest migration in <span className="font-mono text-xs">supabase/migrations.sql</span> (Returned Goods Management section) in your Supabase SQL editor to enable return tracking.</p>
       </div>
@@ -127,7 +127,7 @@ export function ReturnsTab({ canManage }) {
       ) : list.map(r => {
         const isOpen = expanded === r.id
         return (
-          <div key={r.id} className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
+          <div key={r.id} className="bg-white rounded-lg border border-line overflow-hidden">
             <button
               onClick={() => setExpanded(isOpen ? null : r.id)}
               className="w-full text-left p-4 active:bg-gray-50 transition-colors"

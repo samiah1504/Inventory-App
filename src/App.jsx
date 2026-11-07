@@ -13,7 +13,6 @@ import { FulfillmentPage } from './pages/orders/FulfillmentPage'
 import { WaybillPage } from './pages/waybill/WaybillPage'
 import { WaybillBatchDetailPage } from './pages/waybill/WaybillBatchDetailPage'
 import { InventoryPage } from './pages/inventory/InventoryPage'
-import { MyWarehouseStockPage } from './pages/inventory/MyWarehouseStockPage'
 import { HoldingQueuePage } from './pages/holding/HoldingQueuePage'
 import { CustomersPage } from './pages/customers/CustomersPage'
 import { CustomerDetailPage } from './pages/customers/CustomerDetailPage'
@@ -39,6 +38,7 @@ import { DeleteStaffPage } from './pages/settings/DeleteStaffPage'
 import { DeletedOrderAuditPage } from './pages/settings/DeletedOrderAuditPage'
 import { useAuthStore } from './stores/authStore'
 import { accessFor } from './hooks/useStaff'
+import { canOpenInventory } from './lib/inventoryAccess'
 import { useAppStore } from './stores/appStore'
 import { getQueuedActions, removeQueuedAction } from './lib/offline'
 import { supabase } from './lib/supabase'
@@ -71,6 +71,9 @@ function ProtectedRoute({ children }) {
 function RequireAccess({ area, children }) {
   const { user } = useAuthStore()
   if (!accessFor(user).includes(area)) return <Navigate to="/" replace />
+  // Stock & inventory: only CEO/Super Admin, Operations Manager and the
+  // Inventory officer, even if the area was ticked for someone else
+  if (area === 'inventory' && !canOpenInventory(user)) return <Navigate to="/" replace />
   return children
 }
 
@@ -139,7 +142,7 @@ export default function App() {
             <Route path="/waybill" element={<RequireAccess area="waybill"><WaybillPage /></RequireAccess>} />
             <Route path="/waybill/batches/:id" element={<RequireAccess area="waybill"><WaybillBatchDetailPage /></RequireAccess>} />
             <Route path="/inventory" element={<RequireAccess area="inventory"><InventoryPage /></RequireAccess>} />
-            <Route path="/my-stock" element={<MyWarehouseStockPage />} />
+            <Route path="/my-stock" element={<RequireAccess area="inventory"><Navigate to="/inventory?tab=products" replace /></RequireAccess>} />
             <Route path="/holding" element={<HoldingQueuePage />} />
             <Route path="/customers" element={<RequireAccess area="customers"><CustomersPage /></RequireAccess>} />
             <Route path="/customers/:id" element={<RequireAccess area="customers"><CustomerDetailPage /></RequireAccess>} />

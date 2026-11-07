@@ -50,7 +50,7 @@ export function HoldingQueuePage() {
 }
 
 // Goods at Park — also shown as a tab on the Inventory page (embedded)
-export function HoldingQueueContent({ embedded = false }) {
+export function HoldingQueueContent({ embedded = false, readOnly = false }) {
   const { user } = useAuthStore()
   const navigate = useNavigate()
   const { data: warehouses } = useWarehouses()
@@ -108,7 +108,8 @@ export function HoldingQueueContent({ embedded = false }) {
   const isFulfillment = user?.role === 'fulfillment'
   const isWaybill = user?.role === 'waybill'
   const isManager = ['ceo', 'super_admin', 'operations_manager', 'inventory'].includes(user?.role)
-  const canAct = isFulfillment || isManager
+  // Operations Managers see Inventory read-only
+  const canAct = (isFulfillment || isManager) && !readOnly && user?.role !== 'operations_manager'
 
   const list = useMemo(() => {
     let l = items || []
@@ -323,7 +324,7 @@ export function HoldingQueueContent({ embedded = false }) {
                       </Button>
                     </div>
                   )}
-                  {active && (isWaybill || isManager) && (
+                  {active && (isWaybill || isManager) && !readOnly && user?.role !== 'operations_manager' && (
                     <Button size="sm" className="w-full"
                       onClick={() => {
                         setWbForm({
@@ -342,7 +343,7 @@ export function HoldingQueueContent({ embedded = false }) {
 
                   {/* Full movement history */}
                   <HistoryTrail holdingId={item.id} />
-                  {active && (isWaybill || isManager) && (
+                  {active && (isWaybill || isManager) && !readOnly && user?.role !== 'operations_manager' && (
                     <div className="space-y-1.5">
                       <Button size="sm" variant="secondary" className="w-full"
                         onClick={() => navigate(`/waybill?tab=awaiting&holding=${item.id}`)}>

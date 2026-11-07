@@ -5,6 +5,7 @@ import {
 } from '../../hooks/useStockFlow'
 import { useWarehouses, useProducts } from '../../hooks/useBusinesses'
 import { useAuthStore } from '../../stores/authStore'
+import { allowedWarehouseIds } from '../../lib/inventoryAccess'
 import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
 import { Select, Textarea } from '../../components/ui/Input'
@@ -34,7 +35,7 @@ export function StockTakeTab({ canCount }) {
 
   if (counts === null) {
     return (
-      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm text-amber-800">
+      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
         <p className="font-semibold mb-1">Stock take not set up yet</p>
         <p>Run the "Inventory v2" section of <span className="font-mono text-xs">supabase/migrations.sql</span> in the Supabase SQL editor.</p>
       </div>
@@ -44,7 +45,7 @@ export function StockTakeTab({ canCount }) {
   const isMonday = new Date().getDay() === 1
   return (
     <div className="space-y-3">
-      <div className={`rounded-2xl p-4 border ${status.doneThisWeek ? 'bg-green-50 border-green-100' : 'bg-amber-50 border-amber-200'}`}>
+      <div className={`rounded-lg p-4 border ${status.doneThisWeek ? 'bg-green-50 border-green-100' : 'bg-amber-50 border-amber-200'}`}>
         <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Week of {formatDate(status.weekStart)}</p>
         {status.doneThisWeek ? (
           <p className="text-sm font-semibold text-green-800 mt-1 flex items-center gap-1.5">
@@ -81,7 +82,7 @@ export function StockTakeTab({ canCount }) {
         const pending = lines.filter(l => l.status === 'pending').length
         return (
           <button key={c.id} onClick={() => setOpenId(c.id)}
-            className="w-full text-left bg-white rounded-2xl border border-gray-100 p-4 active:bg-gray-50">
+            className="w-full text-left bg-white rounded-lg border border-line p-4 active:bg-gray-50">
             <div className="flex items-center justify-between gap-2">
               <p className="text-sm font-semibold text-gray-900">
                 {c.scope === 'park' ? 'Goods at Park' : `${c.warehouse?.name || 'Warehouse'}${c.warehouse?.state ? ` · ${c.warehouse.state}` : ''}`}
@@ -107,7 +108,11 @@ export function StockTakeTab({ canCount }) {
 }
 
 function CountModal({ onClose }) {
-  const { data: warehouses } = useWarehouses()
+  const { user } = useAuthStore()
+  const { data: allWarehouses } = useWarehouses()
+  // Only the warehouses this person is allowed to see
+  const allowedIds = allowedWarehouseIds(user)
+  const warehouses = (allWarehouses || []).filter(w => !allowedIds || allowedIds.includes(w.id))
   const { data: products } = useProducts()
   const submit = useSubmitStockCount()
   const [target, setTarget] = useState('')            // warehouse id or 'park'

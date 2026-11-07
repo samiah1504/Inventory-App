@@ -4,6 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { scopeToBusinesses } from '../lib/businessScope'
 import { applyStock } from '../lib/inventoryCore'
+import { scopeToWarehouses, allowedWarehouseIds, pgList } from '../lib/inventoryAccess'
 
 export function useInventory(filters = {}) {
   const { user } = useAuthStore()
@@ -14,7 +15,7 @@ export function useInventory(filters = {}) {
         .from('inventory')
         .select(`
           *,
-          product:products(id, name, selling_price, cost_price, category:product_categories(name)),
+          product:products(id, name, sku, image_url, selling_price, cost_price, category:product_categories(name)),
           warehouse:warehouses(id, name, state),
           business:businesses(id, name)
         `)
@@ -24,6 +25,7 @@ export function useInventory(filters = {}) {
       if (filters.business_id) query = query.eq('business_id', filters.business_id)
       if (filters.low_stock) query = query.lte('quantity_available', 5)
       query = scopeToBusinesses(query, user)
+      query = scopeToWarehouses(query, user)
 
       const { data, error } = await query
       if (error) throw error
@@ -35,16 +37,20 @@ export function useInventory(filters = {}) {
 
 // Movement history for one product (used by the expanded inventory card)
 export function useProductMovements(productId) {
+  const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['inventory_movements', productId],
+    queryKey: ['inventory_movements', productId, user?.id],
     enabled: !!productId,
     queryFn: async () => {
-      const { data, error } = await supabase
+      let q = supabase
         .from('inventory_movements')
-        .select('*, warehouse:warehouses(name, state), staff:staff_users(*)')
+        .select('*, warehouse:warehouses(name, state), staff:staff_users(id, name, is_deleted)')
         .eq('product_id', productId)
         .order('created_at', { ascending: false })
         .limit(30)
+      q = scopeToBusinesses(q, user)
+      q = scopeToWarehouses(q, user)
+      const { data, error } = await q
       if (error) throw error
       return data || []
     },
@@ -124,20 +130,23 @@ export function useSetMinStock() {
 }
 
 export function useWarehouseTransfers(filters = {}) {
+  const { user } = useAuthStore()
   return useQuery({
-    queryKey: ['warehouse_transfers', filters],
+    queryKey: ['warehouse_transfers', filters, user?.id],
     queryFn: async () => {
       let query = supabase
         .from('warehouse_transfers')
         .select(`
           *,
-          product:products(name),
+          product:products(name, sku, image_url),
           from_warehouse:warehouses!warehouse_transfers_from_warehouse_id_fkey(name, state),
           to_warehouse:warehouses!warehouse_transfers_to_warehouse_id_fkey(name, state)
         `)
         .order('created_at', { ascending: false })
 
       if (filters.status) query = query.eq('status', filters.status)
+      const whIds = allowedWarehouseIds(user)
+      if (whIds) query = query.or(`from_warehouse_id.in.${pgList(whIds)},to_warehouse_id.in.${pgList(whIds)}`)
 
       const { data, error } = await query
       if (error) throw error
@@ -394,5 +403,31 @@ export function useProcessReturn() {
       else showToast('Return processed', 'success')
     },
     onError: (err) => showToast(err.message, 'error'),
+  })
+}
+
+// ─── Stock movement history (read-only log) ─────────────────────────────
+// Every recorded stock change, newest first, limited to the staff
+// member's businesses and warehouses.
+export function useStockMovements({ warehouseId = '', types = null, days = 30 } = {}) {
+  const { user } = useAuthStore()
+  return useQuery({
+    queryKey: ['inventory_movements', 'log', warehouseId, types, days, user?.id],
+    queryFn: async () => {
+      let q = supabase
+        .from('inventory_movements')
+        .select('*, product:products(name, sku, image_url), warehouse:warehouses(name, state), staff:staff_users(id, name, is_deleted)')
+        .order('created_at', { ascending: false })
+        .limit(400)
+      if (days) q = q.gte('created_at', new Date(Date.now() - days * 86400000).toISOString())
+      if (warehouseId) q = q.eq('warehouse_id', warehouseId)
+      if (types && types.length) q = q.in('movement_type', types)
+      q = scopeToBusinesses(q, user)
+      q = scopeToWarehouses(q, user)
+      const { data, error } = await q
+      if (error) throw error
+      return data || []
+    },
+    staleTime: 30000,
   })
 }

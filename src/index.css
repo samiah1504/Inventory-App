@@ -11,6 +11,23 @@
   --color-blue-700: #a16207;
   --color-blue-800: #854d0e;
   --color-blue-900: #713f12;
+
+  /* WOHKAH brand — used by the Inventory module */
+  --color-brand: #D69E00;        /* Deep Yellow — primary accent */
+  --color-brand-ink: #8A6400;    /* yellow dark enough for text on ivory */
+  --color-brand-wash: #FBF3DC;
+  --color-walnut: #2B1D18;       /* Dark Walnut */
+  --color-charcoal: #292929;     /* Deep Charcoal — primary text */
+  --color-ivory: #FAF8F5;        /* Warm Ivory — page background */
+  --color-line: #ECE7E0;         /* hairline borders */
+  --color-line-strong: #DDD5CA;
+  --color-mute: #6E665E;         /* secondary text */
+  --color-faint: #9A918A;        /* tertiary text */
+  --color-good: #2F7D4F;         /* saleable stock */
+  --color-good-wash: #E8F2EC;
+  --color-bad: #C2341F;          /* damaged stock */
+  --color-bad-wash: #FBEAE6;
+  --color-transit: #D69E00;      /* in transit (brand yellow) */
 }
 
 * {
@@ -72,3 +89,8 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 .animate-slide-up { animation: slide-up 0.2s ease-out; }
+
+/* Inventory: aligned numbers in tables */
+.tnum { font-variant-numeric: tabular-nums; }
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

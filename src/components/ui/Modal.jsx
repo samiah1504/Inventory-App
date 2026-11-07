@@ -26,6 +26,7 @@ export function Modal({ isOpen, onClose, title, children, size = 'md', footer })
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-xl',
+    '3xl': 'max-w-3xl',
     full: 'max-w-full mx-4',
   }
 

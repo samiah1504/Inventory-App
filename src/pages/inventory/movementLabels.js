@@ -1,0 +1,46 @@
+// Plain-English names for every stock movement type in inventory_movements
+export const MOVEMENT_LABELS = {
+  purchase: 'Stock received',
+  sale: 'Sold',
+  sale_transit: 'Sold from transit',
+  sale_reversed: 'Sale reversed',
+  reserve: 'Reserved (old system)',
+  release: 'Released (old system)',
+  reserve_out: 'Moved with order (old system)',
+  waybill_out: 'Waybilled out → in transit',
+  transit_in: 'Received from transit',
+  left_at_park: 'Left at state park',
+  holding_waybilled: 'Waybilled from park',
+  holding_delivered: 'Delivered from park',
+  park_transfer: 'Transferred from park',
+  at_state_park: 'At state park',
+  return: 'Returned to stock',
+  return_inspection: 'Awaiting inspection',
+  repair: 'Sent for repair',
+  repaired_in: 'Repaired → restocked',
+  write_off: 'Written off',
+  supplier_return: 'Returned to supplier',
+  display_item: 'Kept as display',
+  return_other: 'Return closed',
+  damage: 'Damaged',
+  missing: 'Missing',
+  transfer_in: 'Transfer in',
+  transfer_out: 'Transfer out',
+  transfer_cancelled: 'Transfer cancelled',
+  adjustment_in: 'Adjustment (+)',
+  adjustment_out: 'Adjustment (−)',
+  correction_in: 'Correction (+)',
+  stock_count_adjustment: 'Stock count adjustment',
+}
+
+export const MOVEMENT_GROUPS = [
+  { value: '', label: 'All movements', types: null },
+  { value: 'in', label: 'Stock received', types: ['purchase'] },
+  { value: 'sales', label: 'Sales', types: ['sale', 'sale_transit', 'sale_reversed'] },
+  { value: 'transit', label: 'Waybills & transfers', types: ['waybill_out', 'transit_in', 'transfer_in', 'transfer_out', 'transfer_cancelled'] },
+  { value: 'damage', label: 'Damage & write-offs', types: ['damage', 'missing', 'write_off', 'repaired_in', 'supplier_return'] },
+  { value: 'returns', label: 'Returns', types: ['return', 'return_inspection', 'display_item', 'return_other'] },
+  { value: 'adjust', label: 'Adjustments & counts', types: ['adjustment_in', 'adjustment_out', 'correction_in', 'stock_count_adjustment'] },
+]
+
+export const movementLabel = (t) => MOVEMENT_LABELS[t] || (t || '').replace(/_/g, ' ')
