@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useInventory, useWarehouseTransfers } from './useInventory'
+import { useInventory, useWarehouseTransfers, useInventoryVariants } from './useInventory'
 import { useInTransit, useDamagedGoods } from './useStockFlow'
 import { useHoldingQueue } from './useHolding'
 import { useWarehouses, useProducts } from './useBusinesses'
@@ -31,6 +31,7 @@ export function useInventoryModel() {
   const parkQ = useHoldingQueue(false)
   const warehousesQ = useWarehouses()
   const productsQ = useProducts()
+  const variantsQ = useInventoryVariants()
 
   const model = useMemo(() => {
     const allowed = allowedWarehouseIds(user)
@@ -59,12 +60,14 @@ export function useInventoryModel() {
           rows: [],
           transitItems: [],
           damagedItems: [],
+          variants: [],               // [{ color, size, key, quantity }] across warehouses
+          unassigned: 0,              // good stock with no colour/size recorded
         }
       }
       return products[key]
     }
     const slot = (p, whId) => {
-      if (!p.perWarehouse[whId]) p.perWarehouse[whId] = { good: 0, inspection: 0, damaged: 0, threshold: 5, row: null }
+      if (!p.perWarehouse[whId]) p.perWarehouse[whId] = { good: 0, inspection: 0, damaged: 0, threshold: 5, row: null, variants: [], unassigned: 0 }
       return p.perWarehouse[whId]
     }
 
@@ -88,6 +91,28 @@ export function useInventoryModel() {
       p.rows.push(r)
     }
 
+    // Variations: good stock per colour / size; the rest of each
+    // warehouse's good stock has no colour/size recorded
+    for (const v of variantsQ.data || []) {
+      if (!whById[v.warehouse_id]) continue
+      const p = products[v.product_id]
+      if (!p) continue
+      slot(p, v.warehouse_id).variants.push({ color: v.color, size: v.size, key: v.variant_key, quantity: n(v.quantity) })
+    }
+    for (const p of Object.values(products)) {
+      const all = {}
+      for (const x of Object.values(p.perWarehouse)) {
+        x.variants.sort((a, b) => b.quantity - a.quantity)
+        x.unassigned = Math.max(0, x.good - x.variants.reduce((a, v) => a + v.quantity, 0))
+        for (const v of x.variants) {
+          if (!all[v.key]) all[v.key] = { color: v.color, size: v.size, key: v.key, quantity: 0 }
+          all[v.key].quantity += v.quantity
+        }
+      }
+      p.variants = Object.values(all).sort((a, b) => b.quantity - a.quantity)
+      p.unassigned = Math.max(0, p.good - p.variants.reduce((a, v) => a + v.quantity, 0))
+    }
+
     // Damaged goods (open records)
     for (const d of damagedQ.data || []) {
       const p = ensure(d.product_id, { name: d.product_name, business_id: d.business_id })
@@ -104,6 +129,7 @@ export function useInventoryModel() {
       transit.push({
         id: `t:${t.id}`, kind: 'order', raw: t,
         product_id: t.product_id, name: t.product_name,
+        variant: [t.color, t.size].filter(Boolean).join(' / ') || null,
         sku: cat?.sku || null, image_url: cat?.image_url || null,
         quantity: n(t.quantity),
         from: t.from_warehouse?.name || t.from_label || 'Unknown origin',
@@ -122,6 +148,7 @@ export function useInventoryModel() {
       transit.push({
         id: `w:${t.id}`, kind: 'transfer', raw: t,
         product_id: t.product_id, name: t.product?.name || t.product_name,
+        variant: [t.color, t.size].filter(Boolean).join(' / ') || null,
         sku: t.product?.sku || catalog[t.product_id]?.sku || null,
         image_url: t.product?.image_url || catalog[t.product_id]?.image_url || null,
         quantity: n(t.quantity),
@@ -195,7 +222,7 @@ export function useInventoryModel() {
     totals.total = totals.good + totals.inspection + totals.damaged + totals.transit
 
     return { products: list, warehouses: whStats, transit, totals, park: parkQ.data || [] }
-  }, [user, inventoryQ.data, transitQ.data, transfersQ.data, damagedQ.data, parkQ.data, warehousesQ.data, productsQ.data])
+  }, [user, inventoryQ.data, transitQ.data, transfersQ.data, damagedQ.data, parkQ.data, warehousesQ.data, productsQ.data, variantsQ.data])
 
   return {
     ...model,
@@ -203,6 +230,7 @@ export function useInventoryModel() {
     // Tables not migrated yet (null) — screens show a setup note
     transitReady: transitQ.data !== null,
     damagedReady: damagedQ.data !== null,
+    variantsReady: variantsQ.data !== null,
     isAdmin: isCompanyAdmin(user),
     canEdit: canEditStock(user),
     limited: !!allowedWarehouseIds(user),

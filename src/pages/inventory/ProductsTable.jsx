@@ -4,6 +4,12 @@ import {
   Panel, ProductThumb, ToolSelect, Segmented, SortTh, Tag, Dot, EmptyNote, LinkButton,
   fmt, naira, COLORS,
 } from './ui'
+import { VariantSummary } from './VariantFields'
+
+// Colours/sizes to show for a row (one warehouse, or every warehouse)
+const variantsFor = (p, warehouseId) => warehouseId
+  ? { variants: p.perWarehouse[warehouseId]?.variants || [], unassigned: p.perWarehouse[warehouseId]?.unassigned || 0 }
+  : { variants: p.variants, unassigned: p.unassigned }
 
 // Figures for a product, optionally limited to one warehouse
 function figuresFor(p, warehouseId) {
@@ -168,6 +174,7 @@ export function ProductsTable({
                           <p className="text-[11px] text-faint truncate">
                             {[p.sku ? `SKU ${p.sku}` : null, p.category].filter(Boolean).join(' · ') || '—'}
                           </p>
+                          <VariantSummary {...variantsFor(p, warehouseId)} className="truncate max-w-[320px]" />
                         </div>
                         {p.isOut && <Tag tone="bad">Out</Tag>}
                         {p.isLow && <Tag tone="warn">Low</Tag>}
@@ -224,6 +231,7 @@ export function ProductsTable({
                       </div>
                     </div>
                     <p className="text-[11px] text-faint truncate">{[p.sku ? `SKU ${p.sku}` : null, p.category].filter(Boolean).join(' · ') || '—'}</p>
+                    <VariantSummary {...variantsFor(p, warehouseId)} limit={3} className="truncate" />
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-mute">
                       <span className="inline-flex items-center gap-1"><Dot color={COLORS.good} />Good <b className="text-charcoal tnum">{fmt(f.good)}</b></span>
                       {f.damaged > 0 && <span className="inline-flex items-center gap-1"><Dot color={COLORS.bad} />Damaged <b className="text-charcoal tnum">{fmt(f.damaged)}</b></span>}

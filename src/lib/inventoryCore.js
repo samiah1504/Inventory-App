@@ -14,6 +14,7 @@ import { supabase } from './supabase'
 // ═══════════════════════════════════════════════════════════════════
 
 let rpcMissing = false
+let variantsMissing = false
 
 function isMissingFunction(error) {
   const msg = `${error?.message || ''} ${error?.details || ''}`
@@ -57,9 +58,21 @@ export async function applyStock(p) {
     p_movement_at: p.movementAt || null,
     p_clamp: !!p.clamp,
   }
+  // Variation (colour / size): sent only when there is one, so the call
+  // also works before the variations migration has been run
+  const color = typeof p.color === 'string' ? p.color.trim() : ''
+  const size = typeof p.size === 'string' ? p.size.trim() : ''
+  if ((color || size) && !variantsMissing) { args.p_color = color || null; args.p_size = size || null }
 
   if (!rpcMissing) {
-    const { data, error } = await supabase.rpc('inventory_apply', args)
+    let { data, error } = await supabase.rpc('inventory_apply', args)
+    if (error && isMissingFunction(error) && 'p_color' in args) {
+      // Variations not migrated yet: retry the plain stock change
+      variantsMissing = true
+      console.warn('Stock by colour/size needs supabase/inventory_v4_variants.sql — changing the product total only.')
+      delete args.p_color; delete args.p_size
+      ;({ data, error } = await supabase.rpc('inventory_apply', args))
+    }
     if (!error) return data
     if (!isMissingFunction(error)) throw new Error(error.message)
     rpcMissing = true
@@ -119,6 +132,40 @@ async function legacyApply(a) {
     if (mvErr) throw new Error(mvErr.message)
   }
   return { applied: qty, requested: a.p_qty, physical: upd.quantity_physical, available: upd.quantity_available }
+}
+
+// Move units between variations (or out of / into "no colour/size
+// recorded") without changing the warehouse total
+export async function moveVariant({ productId, warehouseId, qty, from = {}, to = {}, staffId, notes }) {
+  const { data, error } = await supabase.rpc('inventory_move_variant', {
+    p_product_id: productId, p_warehouse_id: warehouseId, p_qty: Math.trunc(Number(qty) || 0),
+    p_from_color: from.color || null, p_from_size: from.size || null,
+    p_to_color: to.color || null, p_to_size: to.size || null,
+    p_staff_id: staffId || null, p_notes: notes || null,
+  })
+  if (error) {
+    if (isMissingFunction(error) || /inventory_move_variant/.test(error.message || '')) {
+      throw new Error('Run supabase/inventory_v4_variants.sql in Supabase to enable colours and sizes')
+    }
+    throw new Error(error.message)
+  }
+  return data
+}
+
+// Same normalisation as the database: case and extra spaces don't matter
+export const variantKey = (color, size) =>
+  `${String(color || '').trim().replace(/\s+/g, ' ').toLowerCase()}|${String(size || '').trim().replace(/\s+/g, ' ').toLowerCase()}`
+export const variantLabel = (color, size) => [color, size].map(x => (x || '').trim()).filter(Boolean).join(' / ')
+
+// Insert a row, then add colour/size separately so the insert still
+// works before the variations migration adds those columns
+export async function insertWithVariant(table, fields, { color, size } = {}) {
+  const { data, error } = await supabase.from(table).insert(fields).select().single()
+  if (error) throw new Error(error.message)
+  if ((color || size) && data?.id) {
+    await supabase.from(table).update({ color: color || null, size: size || null }).eq('id', data.id)
+  }
+  return data
 }
 
 // A product is "tracked" once it has a stock row in any warehouse.

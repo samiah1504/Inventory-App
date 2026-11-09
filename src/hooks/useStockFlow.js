@@ -101,7 +101,7 @@ export function useTransitAction() {
         try {
           await applyStock({
             productId: row.product_id, warehouseId: warehouse.id, businessId: row.business_id,
-            qty: row.quantity, type: 'transit_in', refId: row.order_id || row.id,
+            qty: row.quantity, color: row.color, size: row.size, type: 'transit_in', refId: row.order_id || row.id,
             refType: row.order_id ? 'order' : 'transit', staffId: user?.id,
             notes: `Goods in Transit received at ${warehouse.name}${row.order_number ? ` — ${row.order_number}` : ''}`,
           })
@@ -142,6 +142,7 @@ export function useTransitAction() {
       try {
         await recordDamaged({
           product_id: row.product_id || null, product_name: row.product_name, quantity: row.quantity,
+          color: row.color, size: row.size,
           business_id: row.business_id || null, source: 'in_transit', state: row.destination_state || null,
           order_id: row.order_id || null, order_number: row.order_number || null,
           reference_id: row.id, reason: reason || 'Damaged in transit',
@@ -201,17 +202,18 @@ export function useDamagedGoods(includeClosed = false) {
 // Tag units on a warehouse shelf as damaged: out of sellable stock,
 // into the Damaged list
 export function useMarkDamagedFromStock() {
-  return useFlowMutation(async ({ row, quantity, reason }, user) => {
+  return useFlowMutation(async ({ row, quantity, reason, color, size }, user) => {
     const qty = Math.trunc(Number(quantity) || 0)
     if (qty <= 0) throw new Error('Enter how many are damaged')
     await applyStock({
       productId: row.product_id, warehouseId: row.warehouse_id, businessId: row.business_id,
-      qty: -qty, damaged: qty, type: 'damage', staffId: user?.id,
+      qty: -qty, damaged: qty, color, size, type: 'damage', staffId: user?.id,
       notes: `Marked damaged in ${row.warehouse?.name || 'warehouse'} — ${reason || 'no reason given'}`,
     })
     try {
       await recordDamaged({
         product_id: row.product_id, product_name: row.product?.name || 'Unknown', quantity: qty,
+        color, size,
         business_id: row.business_id || null, source: 'warehouse', warehouse_id: row.warehouse_id,
         state: row.warehouse?.state || null, reason: reason || null,
       }, user)
@@ -240,7 +242,8 @@ export function useResolveDamaged() {
       try {
         await applyStock({
           productId: item.product_id, warehouseId: warehouse.id, businessId: item.business_id,
-          qty: item.quantity, type: 'repaired_in', refId: item.id, refType: 'damaged', staffId: user?.id,
+          qty: item.quantity, color: item.color, size: item.size,
+          type: 'repaired_in', refId: item.id, refType: 'damaged', staffId: user?.id,
           notes: `Repaired — back into ${warehouse.name}${note ? ` · ${note}` : ''}`,
         })
       } catch (e) {
@@ -368,12 +371,35 @@ export function useCountSheet(scope, warehouseId) {
       const { data } = await supabase.from('inventory')
         .select('product_id, product:products(name)')
         .eq('warehouse_id', warehouseId)
-      return (data || [])
-        .map(r => ({ key: `p:${r.product_id}`, product_id: r.product_id, product_name: r.product?.name || 'Unknown' }))
-        .sort((a, b) => a.product_name.localeCompare(b.product_name))
+      // Products with colours/sizes are counted per variation, plus one
+      // line for units with no colour/size recorded
+      const variants = await warehouseVariants(warehouseId)
+      const out = []
+      for (const r of (data || []).sort((a, b) => (a.product?.name || '').localeCompare(b.product?.name || ''))) {
+        const name = r.product?.name || 'Unknown'
+        const vs = variants.filter(v => v.product_id === r.product_id)
+        for (const v of vs) {
+          out.push({
+            key: `v:${r.product_id}:${v.variant_key}`, product_id: r.product_id, product_name: name,
+            color: v.color, size: v.size, detail: [v.color, v.size].filter(Boolean).join(' / '),
+          })
+        }
+        out.push({
+          key: `p:${r.product_id}`, product_id: r.product_id, product_name: name,
+          detail: vs.length ? 'No colour/size recorded (incl. items awaiting inspection)' : null,
+        })
+      }
+      return out
     },
     staleTime: 0,
   })
+}
+
+// Every variation row in a warehouse ([] before the variations migration)
+async function warehouseVariants(warehouseId) {
+  const { data, error } = await supabase.from('inventory_variants')
+    .select('product_id, variant_key, color, size, quantity').eq('warehouse_id', warehouseId)
+  return error ? [] : (data || [])
 }
 
 // Submit a count: the app's figures are snapshotted NOW and compared
@@ -393,7 +419,13 @@ export function useSubmitStockCount() {
     } else {
       const { data } = await supabase.from('inventory').select('product_id, quantity_physical')
         .eq('warehouse_id', warehouse.id).in('product_id', filled.map(e => e.product_id))
-      for (const r of data || []) systemOf[`p:${r.product_id}`] = Number(r.quantity_physical) || 0
+      const variants = await warehouseVariants(warehouse.id)
+      for (const r of data || []) {
+        const vs = variants.filter(v => v.product_id === r.product_id)
+        // Without colour/size = everything on the shelf not in a variation
+        systemOf[`p:${r.product_id}`] = (Number(r.quantity_physical) || 0) - vs.reduce((a, v) => a + (Number(v.quantity) || 0), 0)
+        for (const v of vs) systemOf[`v:${r.product_id}:${v.variant_key}`] = Number(v.quantity) || 0
+      }
     }
 
     const { data: count, error } = await supabase.from('stock_counts').insert({
@@ -421,6 +453,8 @@ export function useSubmitStockCount() {
         system_qty, counted_qty, variance,
         status: variance === 0 ? 'matched' : 'pending',
         note: e.note || null,
+        // colour/size columns exist once the variations migration has run
+        ...((e.color || e.size) ? { color: e.color || null, size: e.size || null } : {}),
       }
     })
     const { error: lErr } = await supabase.from('stock_count_lines').insert(lines)
@@ -471,11 +505,11 @@ export function useDecideCountLines() {
         } else {
           const res = await applyStock({
             productId: line.product_id, warehouseId: count.warehouse_id, businessId: count.business_id,
-            qty: line.variance, clamp: true, type: 'stock_count_adjustment',
+            qty: line.variance, clamp: true, color: line.color, size: line.size, type: 'stock_count_adjustment',
             refId: count.id, refType: 'stock_count', staffId: user?.id, notes: note,
           })
           if (res.applied !== line.variance) {
-            problems.push(`${line.product_name}: only ${-res.applied} could be removed (stock has changed since the count)`)
+            problems.push(`${line.product_name}${line.color || line.size ? ` (${[line.color, line.size].filter(Boolean).join(' / ')})` : ''}: only ${-res.applied} could be removed (stock has changed since the count)`)
           }
         }
       } catch (e) {

@@ -252,7 +252,7 @@ function CountReport({ id, isCeo, onClose }) {
                   <div key={l.id} className="px-3 py-2 space-y-1.5">
                     <div className="grid grid-cols-12 gap-1 items-center">
                       <div className="col-span-6 min-w-0">
-                        <p className="text-sm text-gray-900 truncate">{l.product_name}</p>
+                        <p className="text-sm text-gray-900 truncate">{l.product_name}{(l.color || l.size) ? <span className="text-gray-500"> · {[l.color, l.size].filter(Boolean).join(' / ')}</span> : null}</p>
                         {l.location_label && <p className="text-[11px] text-gray-500 truncate">{l.location_label}</p>}
                       </div>
                       <span className="col-span-2 text-right text-sm text-gray-600">{l.system_qty}</span>
@@ -283,7 +283,7 @@ function CountReport({ id, isCeo, onClose }) {
             <details className="text-xs text-gray-600">
               <summary className="cursor-pointer">Show matched items</summary>
               <ul className="mt-1 space-y-0.5">
-                {matched.map(l => <li key={l.id}>{l.product_name}{l.location_label ? ` (${l.location_label})` : ''} — {l.counted_qty}</li>)}
+                {matched.map(l => <li key={l.id}>{l.product_name}{(l.color || l.size) ? ` · ${[l.color, l.size].filter(Boolean).join(' / ')}` : ''}{l.location_label ? ` (${l.location_label})` : ''} — {l.counted_qty}</li>)}
               </ul>
             </details>
           )}

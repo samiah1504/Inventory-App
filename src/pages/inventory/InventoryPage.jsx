@@ -21,6 +21,7 @@ import { AlertsSection } from './AlertsSection'
 import { StockTakeTab } from './StockTakeTab'
 import { ProductDetail } from './ProductDetail'
 import { Btn, fmt } from './ui'
+import { VariantRows, variantRowsValid, VariantSelect, variantFromKey } from './VariantFields'
 
 const SECTIONS = [
   { key: 'overview', label: 'Overview' },
@@ -85,6 +86,15 @@ export function InventoryPage() {
   const [adjustForm, setAdjustForm] = useState({ adjustment: '', reason: '' })
   const [damageForm, setDamageForm] = useState({ quantity: '', reason: '' })
   const [minForm, setMinForm] = useState('')
+  // Colour / size
+  const [useVariants, setUseVariants] = useState(false)
+  const [variantRows, setVariantRows] = useState([])
+  const [adjustVariant, setAdjustVariant] = useState('')
+  const [damageVariant, setDamageVariant] = useState('')
+  const [transferVariant, setTransferVariant] = useState('')
+  const slotFor = (productId, warehouseId) =>
+    model.products.find(p => p.product_id === productId)?.perWarehouse[warehouseId] || null
+  const knownVariants = (productId) => model.products.find(p => p.product_id === productId)?.variants || []
 
   function go(next, extra) {
     setTabState(next)
@@ -100,28 +110,50 @@ export function InventoryPage() {
     if (searchParams.get('tab') !== tab) setSearchParams({ tab }, { replace: true })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A different product / source warehouse has different variations
+  useEffect(() => { setTransferVariant('') }, [transferForm.product_id, transferForm.from_warehouse_id])
+
   const openProduct = useMemo(() => model.products.find(p => p.key === openKey) || null, [model.products, openKey])
   const whOptions = model.warehouses
 
   // ── Handlers (same mutations as before the redesign) ──
   async function handleAddStock() {
-    if (!stockForm.product_id || !stockForm.warehouse_id || !stockForm.quantity) {
+    if (!stockForm.product_id || !stockForm.warehouse_id || (!useVariants && !stockForm.quantity)) {
       showToast('Fill in required fields', 'error'); return
     }
+    if (useVariants) {
+      const problem = variantRowsValid(variantRows)
+      if (problem) { showToast(problem, 'error'); return }
+    }
     try {
-      await addStock.mutateAsync({ ...stockForm, quantity: Number(stockForm.quantity), unit_cost: Number(stockForm.unit_cost) || 0 })
-      setShowAdd(false); setStockForm(emptyStock())
+      await addStock.mutateAsync({
+        ...stockForm,
+        quantity: useVariants ? variantRows.reduce((a, r) => a + Number(r.quantity), 0) : Number(stockForm.quantity),
+        unit_cost: Number(stockForm.unit_cost) || 0,
+        variants: useVariants ? variantRows.map(r => ({ color: r.color.trim(), size: r.size.trim(), quantity: Number(r.quantity) })) : null,
+      })
+      setShowAdd(false); setStockForm(emptyStock()); setVariantRows([]); setUseVariants(false)
     } catch { /* toast shown */ }
+  }
+  // Picking a product that already has colours/sizes switches on variations
+  function pickStockProduct(product_id) {
+    setStockForm(f => ({ ...f, product_id }))
+    const has = knownVariants(product_id).length > 0
+    setUseVariants(has)
+    setVariantRows(has ? [{ color: '', size: '', quantity: '' }] : [])
   }
   async function handleAdjust() {
     const adj = Number(adjustForm.adjustment)
     if (!adj || !adjustForm.reason.trim()) { showToast('Enter adjustment amount and reason', 'error'); return }
+    const slot = slotFor(adjustRow.product_id, adjustRow.warehouse_id)
+    if (slot?.variants?.length && !adjustVariant) { showToast('Choose the colour/size', 'error'); return }
     try {
       await adjustStock.mutateAsync({
         inventory_id: adjustRow.id, product_id: adjustRow.product_id, warehouse_id: adjustRow.warehouse_id,
         business_id: adjustRow.business_id, adjustment: adj, reason: adjustForm.reason,
+        ...variantFromKey(slot, adjustVariant),
       })
-      setAdjustRow(null); setAdjustForm({ adjustment: '', reason: '' })
+      setAdjustRow(null); setAdjustForm({ adjustment: '', reason: '' }); setAdjustVariant('')
     } catch { /* toast shown */ }
   }
   async function handleTransfer() {
@@ -129,17 +161,24 @@ export function InventoryPage() {
       showToast('Fill in required fields', 'error'); return
     }
     const prod = (products || []).find(p => p.id === transferForm.product_id)
+    const slot = slotFor(transferForm.product_id, transferForm.from_warehouse_id)
+    if (slot?.variants?.length && !transferVariant) { showToast('Choose the colour/size being transferred', 'error'); return }
     try {
-      await transferStock.mutateAsync({ ...transferForm, product_name: prod?.name || 'Unknown', quantity: Number(transferForm.quantity) })
-      setShowTransfer(false); setTransferForm(emptyTransfer())
+      await transferStock.mutateAsync({
+        ...transferForm, product_name: prod?.name || 'Unknown', quantity: Number(transferForm.quantity),
+        ...variantFromKey(slot, transferVariant),
+      })
+      setShowTransfer(false); setTransferForm(emptyTransfer()); setTransferVariant('')
     } catch { /* toast shown */ }
   }
   async function handleMarkDamaged() {
     const qty = Number(damageForm.quantity)
     if (!qty || qty <= 0 || !damageForm.reason.trim()) { showToast('Enter how many are damaged and why', 'error'); return }
+    const slot = slotFor(damageRow.product_id, damageRow.warehouse_id)
+    if (slot?.variants?.length && !damageVariant) { showToast('Choose the colour/size', 'error'); return }
     try {
-      await markDamaged.mutateAsync({ row: damageRow, quantity: qty, reason: damageForm.reason.trim() })
-      setDamageRow(null); setDamageForm({ quantity: '', reason: '' })
+      await markDamaged.mutateAsync({ row: damageRow, quantity: qty, reason: damageForm.reason.trim(), ...variantFromKey(slot, damageVariant) })
+      setDamageRow(null); setDamageForm({ quantity: '', reason: '' }); setDamageVariant('')
     } catch { /* toast shown */ }
   }
   async function handleSetMin() {
@@ -152,8 +191,8 @@ export function InventoryPage() {
   }
 
   const onOpenProduct = (p) => setOpenKey(p.key)
-  const onAdjust = (row) => { setAdjustRow(row); setAdjustForm({ adjustment: '', reason: '' }) }
-  const onDamage = (row) => { setDamageRow(row); setDamageForm({ quantity: '', reason: '' }) }
+  const onAdjust = (row, key = '') => { setAdjustRow(row); setAdjustForm({ adjustment: '', reason: '' }); setAdjustVariant(key) }
+  const onDamage = (row, key = '') => { setDamageRow(row); setDamageForm({ quantity: '', reason: '' }); setDamageVariant(key) }
   const onEditThreshold = (p) => { setMinProduct(p); setMinForm(String(p.minThreshold)) }
   const rowName = (row) => model.products.find(p => p.product_id === row?.product_id)?.name || row?.product?.name || 'Product'
   const rowWarehouse = (row) => model.warehouses.find(w => w.id === row?.warehouse_id)
@@ -268,7 +307,7 @@ export function InventoryPage() {
             <option value="">Select business...</option>
             {(businesses || []).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </Select>
-          <Select label="Product" required value={stockForm.product_id} onChange={e => setStockForm({ ...stockForm, product_id: e.target.value })}>
+          <Select label="Product" required value={stockForm.product_id} onChange={e => pickStockProduct(e.target.value)}>
             <option value="">Select product...</option>
             {(products || []).filter(p => !stockForm.business_id || p.business_id === stockForm.business_id).map(p => (
               <option key={p.id} value={p.id}>{p.name}{p.sku ? ` (${p.sku})` : ''}</option>
@@ -278,10 +317,25 @@ export function InventoryPage() {
             <option value="">Select warehouse...</option>
             {whOptions.map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
           </Select>
-          <div className="grid grid-cols-2 gap-3">
-            <Input label="Quantity" type="number" inputMode="numeric" required value={stockForm.quantity} onChange={e => setStockForm({ ...stockForm, quantity: e.target.value })} />
-            <Input label="Unit Cost (₦)" type="number" inputMode="decimal" value={stockForm.unit_cost} onChange={e => setStockForm({ ...stockForm, unit_cost: e.target.value })} />
-          </div>
+          <label className="flex items-start gap-2.5 rounded-lg border border-line px-3 py-2.5 cursor-pointer">
+            <input type="checkbox" className="mt-0.5 accent-[#D69E00]" checked={useVariants}
+              onChange={e => { setUseVariants(e.target.checked); if (e.target.checked && !variantRows.length) setVariantRows([{ color: '', size: '', quantity: '' }]) }} />
+            <span>
+              <span className="block text-sm font-medium text-charcoal">Comes in colours / sizes</span>
+              <span className="block text-xs text-mute">Enter how many of each. They add up to the total, and orders deduct the exact colour/size sold.</span>
+            </span>
+          </label>
+          {useVariants ? (
+            <>
+              <VariantRows rows={variantRows} onChange={setVariantRows} known={knownVariants(stockForm.product_id)} idPrefix="rec" />
+              <Input label="Unit Cost (₦)" type="number" inputMode="decimal" value={stockForm.unit_cost} onChange={e => setStockForm({ ...stockForm, unit_cost: e.target.value })} />
+            </>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="Quantity" type="number" inputMode="numeric" required value={stockForm.quantity} onChange={e => setStockForm({ ...stockForm, quantity: e.target.value })} />
+              <Input label="Unit Cost (₦)" type="number" inputMode="decimal" value={stockForm.unit_cost} onChange={e => setStockForm({ ...stockForm, unit_cost: e.target.value })} />
+            </div>
+          )}
           <Input label="Date Received" type="date" value={stockForm.date} onChange={e => setStockForm({ ...stockForm, date: e.target.value })} />
           <Input label="Supplier" placeholder="Supplier name" value={stockForm.supplier} onChange={e => setStockForm({ ...stockForm, supplier: e.target.value })} />
           <Textarea label="Notes" rows={2} value={stockForm.notes} onChange={e => setStockForm({ ...stockForm, notes: e.target.value })} />
@@ -308,6 +362,7 @@ export function InventoryPage() {
               {fmt(model.products.find(p => p.product_id === transferForm.product_id)?.perWarehouse[transferForm.from_warehouse_id]?.good || 0)} good units available there
             </p>
           )}
+          <VariantSelect slot={slotFor(transferForm.product_id, transferForm.from_warehouse_id)} value={transferVariant} onChange={setTransferVariant} required />
           <Select label="To Warehouse" required value={transferForm.to_warehouse_id} onChange={e => setTransferForm({ ...transferForm, to_warehouse_id: e.target.value })}>
             <option value="">Select destination...</option>
             {whOptions.filter(w => w.id !== transferForm.from_warehouse_id).map(w => <option key={w.id} value={w.id}>{w.name} ({w.state})</option>)}
@@ -333,6 +388,7 @@ export function InventoryPage() {
               <p className="text-xs text-mute">Good stock in {rowWarehouse(adjustRow)?.name}</p>
               <p className="text-2xl font-semibold tnum">{fmt(adjustRow.quantity_available)}</p>
             </div>
+            <VariantSelect slot={slotFor(adjustRow.product_id, adjustRow.warehouse_id)} value={adjustVariant} onChange={setAdjustVariant} required />
             <Input label="Adjustment" type="number" inputMode="numeric" placeholder="e.g. +10 or -3"
               value={adjustForm.adjustment} onChange={e => setAdjustForm({ ...adjustForm, adjustment: e.target.value })}
               hint={adjustForm.adjustment && !isNaN(Number(adjustForm.adjustment))
@@ -354,6 +410,7 @@ export function InventoryPage() {
               <p className="text-xs text-mute">Good stock in {rowWarehouse(damageRow)?.name}</p>
               <p className="text-2xl font-semibold tnum">{fmt(damageRow.quantity_available)}</p>
             </div>
+            <VariantSelect slot={slotFor(damageRow.product_id, damageRow.warehouse_id)} value={damageVariant} onChange={setDamageVariant} required />
             <Input label="How many are damaged?" type="number" inputMode="numeric" required value={damageForm.quantity} onChange={e => setDamageForm({ ...damageForm, quantity: e.target.value })} />
             <Input label="What happened?" required placeholder="e.g. Broken leg, water damage" value={damageForm.reason} onChange={e => setDamageForm({ ...damageForm, reason: e.target.value })} />
             <p className="text-xs text-mute">They leave good stock and appear under Stock Condition → Damaged items, where they can be repaired, written off or returned to the supplier.</p>

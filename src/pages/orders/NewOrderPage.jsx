@@ -11,6 +11,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { NIGERIAN_STATES, ORDER_SOURCES, DELIVERY_WINDOWS, formatCurrency } from '../../utils/format'
 import { supabase } from '../../lib/supabase'
 import { useAppStore } from '../../stores/appStore'
+import { StockVariantPicker } from '../../components/orders/StockVariantPicker'
 
 function newItem() {
   return {
@@ -334,6 +335,9 @@ function ItemRow({ item, idx, canRemove, allProducts, businesses, onUpdate, onRe
         <Input label="Size (optional)" placeholder="e.g. 3x2"
           value={item.size} onChange={e => onUpdate({ size: e.target.value })} />
       </div>
+
+      <StockVariantPicker productId={item.product_id} color={item.color} size={item.size}
+        onPick={(v) => onUpdate(v)} />
 
       {itemTotal > 0 && (
         <div className="flex justify-between items-center pt-1">

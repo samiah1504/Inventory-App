@@ -134,7 +134,7 @@ function InTransitList({ model, search, canEdit }) {
                           <ProductThumb src={t.image_url} name={t.name} />
                           <div className="min-w-0">
                             <p className="font-semibold text-charcoal truncate max-w-[260px]">{t.name}</p>
-                            <p className="text-[11px] text-faint">{t.sku ? `SKU ${t.sku}` : '—'}</p>
+                            <p className="text-[11px] text-faint">{[t.variant, t.sku ? `SKU ${t.sku}` : null].filter(Boolean).join(' · ') || '—'}</p>
                           </div>
                         </div>
                       </td>
