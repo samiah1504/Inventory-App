@@ -78,16 +78,16 @@ async function reverseInventoryEffects(order, staffId) {
   const soldByKey = {}
   for (const m of movements) {
     if (m.movement_type === 'sale' && m.product_id && m.warehouse_id) {
-      const key = `${m.product_id}|${m.warehouse_id}`
+      const key = JSON.stringify([m.product_id, m.warehouse_id, m.color || '', m.size || ''])
       soldByKey[key] = (soldByKey[key] || 0) + Math.abs(Number(m.quantity) || 0)
     }
   }
   for (const [key, qty] of Object.entries(soldByKey)) {
     if (!qty) continue
-    const [product_id, warehouse_id] = key.split('|')
+    const [product_id, warehouse_id, color, size] = JSON.parse(key)
     try {
       await applyStock({
-        productId: product_id, warehouseId: warehouse_id, qty, sold: -qty,
+        productId: product_id, warehouseId: warehouse_id, qty, sold: -qty, color, size,
         type: 'sale_reversed', refType: 'order', staffId,
         notes: `Order ${order.order_number} deleted — sale reversed`,
       })

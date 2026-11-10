@@ -65,15 +65,30 @@ export function useAddStock() {
 
   return useMutation({
     mutationFn: async (stockData) => {
-      const { product_id, warehouse_id, business_id, quantity, unit_cost, supplier, notes, date } = stockData
-      const qty = Math.trunc(Number(quantity) || 0)
-      if (qty <= 0) throw new Error('Enter a quantity greater than zero')
-      // Stock row + purchase log in one atomic step
-      return applyStock({
-        productId: product_id, warehouseId: warehouse_id, businessId: business_id,
-        qty, type: 'purchase', unitCost: unit_cost, supplier, notes,
-        staffId: user?.id, movementAt: date ? `${date}T12:00:00` : null,
-      })
+      const { product_id, warehouse_id, business_id, quantity, unit_cost, supplier, notes, date, variants } = stockData
+      // One line per variation (colour / size), or a single plain quantity.
+      // Each line is its own atomic stock change + purchase log entry.
+      const lines = (variants && variants.length)
+        ? variants.map(v => ({ color: v.color, size: v.size, qty: Math.trunc(Number(v.quantity) || 0) }))
+        : [{ color: null, size: null, qty: Math.trunc(Number(quantity) || 0) }]
+      if (lines.some(l => l.qty <= 0)) throw new Error('Every quantity must be greater than zero')
+      const label = (x) => [x.color, x.size].filter(Boolean).join(' / ') || 'no colour/size'
+      const done = []
+      for (const l of lines) {
+        try {
+          await applyStock({
+            productId: product_id, warehouseId: warehouse_id, businessId: business_id,
+            qty: l.qty, color: l.color, size: l.size, type: 'purchase', unitCost: unit_cost, supplier, notes,
+            staffId: user?.id, movementAt: date ? `${date}T12:00:00` : null,
+          })
+          done.push(l)
+        } catch (e) {
+          throw new Error(done.length
+            ? `Recorded ${done.map(d => `${d.qty} ${label(d)}`).join(', ')} — but ${label(l)} failed: ${e.message}`
+            : e.message)
+        }
+      }
+      return { lines: done.length }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['inventory'] })
@@ -90,12 +105,12 @@ export function useAdjustStock() {
   const { user } = useAuthStore()
 
   return useMutation({
-    mutationFn: async ({ product_id, warehouse_id, business_id, adjustment, reason }) => {
+    mutationFn: async ({ product_id, warehouse_id, business_id, adjustment, reason, color, size }) => {
       const qty = Math.trunc(Number(adjustment) || 0)
       if (qty === 0) throw new Error('Enter an adjustment other than zero')
       // Refuses (with the real available figure) if it would go negative
       await applyStock({
-        productId: product_id, warehouseId: warehouse_id, businessId: business_id,
+        productId: product_id, warehouseId: warehouse_id, businessId: business_id, color, size,
         qty, type: qty > 0 ? 'adjustment_in' : 'adjustment_out', notes: reason, staffId: user?.id,
       })
     },
@@ -163,7 +178,7 @@ export function useTransferStock() {
   const { user } = useAuthStore()
 
   return useMutation({
-    mutationFn: async ({ product_id, product_name, from_warehouse_id, to_warehouse_id, quantity, date, notes }) => {
+    mutationFn: async ({ product_id, product_name, from_warehouse_id, to_warehouse_id, quantity, date, notes, color, size }) => {
       if (from_warehouse_id === to_warehouse_id) throw new Error('Source and destination must differ')
 
       const transfer_number = `TRF-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`
@@ -177,7 +192,7 @@ export function useTransferStock() {
         .eq('product_id', product_id).eq('warehouse_id', from_warehouse_id).limit(1)
       await applyStock({
         productId: product_id, warehouseId: from_warehouse_id, businessId: srcRow?.[0]?.business_id,
-        qty: -qty, type: 'transfer_out', refId: transferId, refType: 'transfer',
+        qty: -qty, color, size, type: 'transfer_out', refId: transferId, refType: 'transfer',
         notes: `${transfer_number} → destination warehouse`, staffId: user?.id,
       })
 
@@ -197,11 +212,15 @@ export function useTransferStock() {
       if (trfErr) {
         // Put the stock back so nothing disappears
         await applyStock({
-          productId: product_id, warehouseId: from_warehouse_id, qty,
+          productId: product_id, warehouseId: from_warehouse_id, qty, color, size,
           type: 'transfer_cancelled', refId: transferId, refType: 'transfer',
           notes: `${transfer_number} could not be created — stock returned`, staffId: user?.id,
         })
         throw trfErr
+      }
+      // Variation on the transfer (column added by the variations migration)
+      if (color || size) {
+        await supabase.from('warehouse_transfers').update({ color: color || null, size: size || null }).eq('id', transferId)
       }
 
       return transfer
@@ -241,7 +260,7 @@ export function useReceiveTransfer() {
         await applyStock({
           productId: transfer.product_id, warehouseId: transfer.to_warehouse_id,
           businessId: src?.[0]?.business_id || null,
-          qty: transfer.quantity, type: 'transfer_in',
+          qty: transfer.quantity, color: transfer.color, size: transfer.size, type: 'transfer_in',
           refId: transfer.id, refType: 'transfer', notes: `${transfer.transfer_number} received`, staffId: user?.id,
         })
       } catch (e) {
@@ -429,5 +448,48 @@ export function useStockMovements({ warehouseId = '', types = null, days = 30 } 
       return data || []
     },
     staleTime: 30000,
+  })
+}
+
+// ─── Stock by variation (colour / size) ─────────────────────────────────
+// null = variations not migrated yet
+export function useInventoryVariants() {
+  const { user } = useAuthStore()
+  return useQuery({
+    queryKey: ['inventory', 'variants', user?.id],
+    retry: false,
+    queryFn: async () => {
+      let q = supabase.from('inventory_variants')
+        .select('id, product_id, warehouse_id, business_id, color, size, variant_key, quantity')
+        .gt('quantity', 0)
+      q = scopeToBusinesses(q, user)
+      q = scopeToWarehouses(q, user)
+      const { data, error } = await q
+      if (error) return null
+      return data || []
+    },
+    staleTime: 30000,
+  })
+}
+
+// Split "no colour/size recorded" stock into variations, or move units
+// from one variation to another — the warehouse total never changes
+export function useMoveVariant() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+  return useMutation({
+    mutationFn: async ({ product_id, warehouse_id, moves }) => {
+      const { moveVariant } = await import('../lib/inventoryCore')
+      for (const m of moves) {
+        await moveVariant({ productId: product_id, warehouseId: warehouse_id, qty: m.qty, from: m.from, to: m.to, staffId: user?.id })
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      showToast('Variations updated', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error', 6000),
   })
 }

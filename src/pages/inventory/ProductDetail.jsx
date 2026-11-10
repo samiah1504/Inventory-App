@@ -1,4 +1,7 @@
-import { ArrowRight, Sliders, AlertTriangle, Bell } from 'lucide-react'
+import { useState } from 'react'
+import { ArrowRight, Sliders, AlertTriangle, Bell, Palette } from 'lucide-react'
+import { SplitVariantsModal } from './SplitVariantsModal'
+import { variantLabel } from '../../lib/inventoryCore'
 import { Modal } from '../../components/ui/Modal'
 import { useProductMovements } from '../../hooks/useInventory'
 import { formatDate } from '../../utils/format'
@@ -10,7 +13,9 @@ import { DAMAGED_STATUSES, DAMAGE_SOURCES } from '../../hooks/useStockFlow'
 // what is on the road, and its movement history
 export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, onDamage, onEditThreshold }) {
   const movementsQ = useProductMovements(p?.product_id)
+  const [splitFor, setSplitFor] = useState(null)
   if (!p) return null
+  const variantsReady = model.variantsReady
   const { warehouses, isAdmin } = model
   const lines = warehouses.map(w => ({ w, x: p.perWarehouse[w.id] })).filter(l => l.x)
 
@@ -59,6 +64,26 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
           ]} /></div>
         </div>
 
+        {/* Colours & sizes across warehouses */}
+        {p.variants.length > 0 && (
+          <section>
+            <h4 className="text-[11px] uppercase tracking-wide text-faint mb-2">Good stock by colour / size</h4>
+            <div className="flex flex-wrap gap-1.5">
+              {p.variants.map(v => (
+                <span key={v.key} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-white px-2 py-1 text-xs">
+                  <span className="text-charcoal">{variantLabel(v.color, v.size)}</span>
+                  <span className="font-semibold tnum">{fmt(v.quantity)}</span>
+                </span>
+              ))}
+              {p.unassigned > 0 && (
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-line-strong px-2 py-1 text-xs text-mute">
+                  No colour/size recorded <span className="font-semibold tnum">{fmt(p.unassigned)}</span>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* By warehouse */}
         <section>
           <div className="flex items-center justify-between mb-2">
@@ -81,7 +106,7 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
                   </tr>
                 </thead>
                 <tbody>
-                  {lines.map(({ w, x }) => (
+                  {lines.flatMap(({ w, x }) => [
                     <tr key={w.id} className="border-b border-line last:border-0">
                       <td className="px-3 py-2">
                         <p className="font-medium text-charcoal">{w.name}</p>
@@ -97,12 +122,31 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
                             <>
                               <Btn size="sm" variant="ghost" onClick={() => onDamage(x.row)} title="Mark damaged"><AlertTriangle size={13} className="text-bad" />Damaged</Btn>
                               <Btn size="sm" variant="ghost" onClick={() => onAdjust(x.row)} title="Adjust stock"><Sliders size={13} />Adjust</Btn>
+                              {variantsReady && x.good > 0 && (
+                                <Btn size="sm" variant="ghost" onClick={() => setSplitFor({ w, x })} title="Colours & sizes"><Palette size={13} />Colours</Btn>
+                              )}
                             </>
                           )}
                         </td>
                       )}
-                    </tr>
-                  ))}
+                    </tr>,
+                    ...(x.variants.length ? [
+                      ...x.variants.map(v => (
+                        <tr key={`${w.id}-${v.key}`} className="border-b border-line bg-[#FCFBF9] text-[12px]">
+                          <td className="pl-7 pr-3 py-1.5 text-mute">{variantLabel(v.color, v.size)}</td>
+                          <td className="px-3 py-1.5 text-right tnum text-charcoal">{fmt(v.quantity)}</td>
+                          <td colSpan={2 + (isAdmin ? 1 : 0) + (canEdit ? 1 : 0)} />
+                        </tr>
+                      )),
+                      ...(x.unassigned > 0 ? [(
+                        <tr key={`${w.id}-none`} className="border-b border-line bg-[#FCFBF9] text-[12px]">
+                          <td className="pl-7 pr-3 py-1.5 text-faint italic">No colour/size recorded</td>
+                          <td className="px-3 py-1.5 text-right tnum text-faint">{fmt(x.unassigned)}</td>
+                          <td colSpan={2 + (isAdmin ? 1 : 0) + (canEdit ? 1 : 0)} />
+                        </tr>
+                      )] : []),
+                    ] : []),
+                  ])}
                 </tbody>
               </table>
             </div>
@@ -161,7 +205,7 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
                     <li key={m.id} className="px-3 py-2 flex gap-3 text-[13px]">
                       <span className={`w-10 shrink-0 text-right font-semibold tnum ${q > 0 ? 'text-good' : q < 0 ? 'text-bad' : 'text-faint'}`}>{q > 0 ? `+${fmt(q)}` : fmt(q)}</span>
                       <div className="min-w-0">
-                        <p className="text-charcoal">{movementLabel(m.movement_type)}{m.warehouse?.name ? <span className="text-faint"> · {m.warehouse.name}</span> : null}</p>
+                        <p className="text-charcoal">{movementLabel(m.movement_type)}{(m.color || m.size) ? <span className="text-mute"> · {variantLabel(m.color, m.size)}</span> : null}{m.warehouse?.name ? <span className="text-faint"> · {m.warehouse.name}</span> : null}</p>
                         {m.notes && <p className="text-[11px] text-mute truncate">{m.notes}</p>}
                         <p className="text-[11px] text-faint">{formatDate(m.created_at)}{m.staff?.name ? ` · ${m.staff.name}${m.staff.is_deleted ? ' (Former Staff)' : ''}` : ''}</p>
                       </div>
@@ -172,6 +216,9 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
             )}
         </section>
       </div>
+      {splitFor && (
+        <SplitVariantsModal product={p} warehouse={splitFor.w} slot={splitFor.x} onClose={() => setSplitFor(null)} />
+      )}
     </Modal>
   )
 }

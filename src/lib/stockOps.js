@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import {
-  applyStock, isTracked, warehousesInState, mainWarehouse, stockWarning,
+  applyStock, isTracked, warehousesInState, mainWarehouse, stockWarning, insertWithVariant,
 } from './inventoryCore'
 
 // ═══════════════════════════════════════════════════════════════════
@@ -141,13 +141,13 @@ async function createTransit(fields, staff) {
 
 // Anything tagged damaged lands in the Damaged list
 export async function recordDamaged(fields, staff) {
-  const { error } = await supabase.from('damaged_goods').insert({
+  const { color, size, ...rest } = fields
+  await insertWithVariant('damaged_goods', {
     status: 'damaged',
     recorded_by: staff?.id || null,
     recorded_by_name: staff?.name || null,
-    ...fields,
-  })
-  if (error) throw new Error(error.message)
+    ...rest,
+  }, { color, size })
 }
 
 // Run one stock step; turn any failure into a visible warning
@@ -186,7 +186,7 @@ export async function dispatchOrderStock(order, source, staff) {
       const res = await attempt(warnings, order, staff, `Could not take ${line.product_name} out of ${wh.name}`, () =>
         applyStock({
           productId: line.product_id, warehouseId: wh.id, businessId: order.business_id,
-          qty: -line.quantity, clamp: true,
+          qty: -line.quantity, clamp: true, color: line.color, size: line.size,
           type: 'waybill_out', refId: order.id, refType: 'order', staffId: staff?.id,
           notes: `Waybilled to ${order.state || 'customer'} — in transit for ${order.order_number}`,
         }))
@@ -243,7 +243,7 @@ export async function receiveOrderStockAtWarehouse(order, staff) {
       await attempt(warnings, order, staff, `Could not add ${line.product_name} to ${dest.name}`, () =>
         applyStock({
           productId: line.product_id, warehouseId: dest.id, businessId: order.business_id,
-          qty: line.quantity, type: 'transit_in', refId: order.id, refType: 'order', staffId: staff?.id,
+          qty: line.quantity, color: line.color, size: line.size, type: 'transit_in', refId: order.id, refType: 'order', staffId: staff?.id,
           notes: `Received at ${dest.name} for ${order.order_number}`,
         }))
     }
@@ -311,7 +311,7 @@ export async function deductSoldStock(order, staff) {
     const res = await attempt(warnings, order, staff, `Could not deduct ${i.product_name}`, () =>
       applyStock({
         productId: i.product_id, warehouseId: whId, businessId: order.business_id,
-        qty: -i.quantity, sold: i.quantity, clamp: true,
+        qty: -i.quantity, sold: i.quantity, clamp: true, color: i.color, size: i.size,
         type: 'sale', refId: order.id, refType: 'order', staffId: staff?.id,
         notes: `Sold — ${order.order_number}`,
       }))
@@ -381,7 +381,8 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
   const transitIds = loc.kind === 'transit' ? loc.rows.map(t => t.id) : []
   const takeOut = (line, type, notes, extra = {}) => applyStock({
     productId: line.product_id, warehouseId: loc.warehouseId, businessId: order.business_id,
-    qty: -line.quantity, clamp: true, type, refId: order.id, refType: 'order', staffId: staff?.id, notes, ...extra,
+    qty: -line.quantity, clamp: true, color: line.color, size: line.size,
+    type, refId: order.id, refType: 'order', staffId: staff?.id, notes, ...extra,
   })
 
   if (o.disposition === 'returned_warehouse') {
@@ -400,7 +401,8 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
       await attempt(warnings, order, staff, `Could not add ${line.product_name} to ${dest.name}`, () =>
         applyStock({
           productId: line.product_id, warehouseId: dest.id, businessId: order.business_id,
-          qty: line.quantity, returned: line.quantity, type: 'return', refId: order.id, refType: 'order',
+          qty: line.quantity, returned: line.quantity, color: line.color, size: line.size,
+          type: 'return', refId: order.id, refType: 'order',
           staffId: staff?.id, notes: `Returned to ${dest.name} after failed delivery — ${order.order_number}`,
         }))
     }
@@ -472,6 +474,7 @@ export async function resolveFailedDeliveryStock(order, outcome, staff) {
         await attempt(warnings, order, staff, `Could not add ${line.product_name} to Damaged goods`, () =>
           recordDamaged({
             product_id: line.product_id, product_name: line.product_name, quantity: line.quantity,
+            color: line.color, size: line.size,
             business_id: order.business_id || null,
             source: loc.kind === 'transit' ? 'in_transit' : 'delivery',
             warehouse_id: loc.kind === 'warehouse' ? loc.warehouseId : null,
@@ -566,13 +569,16 @@ export async function startReturnProcess(order, staff) {
       const res = await attempt(warnings, order, staff, `Could not move ${item.product_name} into inspection`, () =>
         applyStock({
           productId: item.product_id, warehouseId: order.stock_warehouse_id, businessId: order.business_id,
-          inspection: item.quantity, type: 'return_inspection', movementQty: item.quantity,
+          inspection: item.quantity, color: item.color, size: item.size,
+          type: 'return_inspection', movementQty: item.quantity,
           refId: order.id, refType: 'order', staffId: staff?.id,
           notes: `Awaiting inspection — ${order.order_number}`,
         }))
       if (res) warehouse_id = order.stock_warehouse_id
     }
-    const { data: ret, error } = await supabase.from('returns').insert({
+    let ret = null, error = null
+    try {
+      ret = await insertWithVariant('returns', {
       return_number: `RET-${year}-${Date.now().toString().slice(-6)}${i > 0 ? `-${i + 1}` : ''}`,
       order_id: order.id,
       order_number: order.order_number,
@@ -584,7 +590,9 @@ export async function startReturnProcess(order, staff) {
       warehouse_id,
       status: 'awaiting_inspection',
       created_by: staff?.id || null,
-    }).select().single()
+      }, { color: item.color, size: item.size })
+      ret = { ...ret, color: item.color || null, size: item.size || null }
+    } catch (e) { error = e }
     if (error) {
       warnings.push(await stockWarning(order, `Could not create the return record for ${item.product_name} — ${error.message}`, staff))
       continue
@@ -618,6 +626,7 @@ export async function applyReturnOutcome(ret, outcome, staff) {
   const order = ret.order_id ? { id: ret.order_id } : null
   const base = {
     productId: ret.product_id, warehouseId: whId, businessId: ret.business_id,
+    color: ret.color, size: ret.size,
     refId: ret.id, refType: 'return', staffId: staff?.id,
   }
   const out = (type, notes, extra = {}) => inInspection
@@ -630,6 +639,7 @@ export async function applyReturnOutcome(ret, outcome, staff) {
       out('damage', `${outcome === 'repair' ? 'Sent for repair' : 'Damaged'} — ${ret.return_number}`, { damaged: qty }))
     await step('Could not add the item to Damaged goods', () => recordDamaged({
       product_id: ret.product_id || null, product_name: ret.product_name, quantity: qty,
+      color: ret.color, size: ret.size,
       business_id: ret.business_id || null, source: 'return', warehouse_id: whId,
       order_id: ret.order_id || null, order_number: ret.order_number || null, reference_id: ret.id,
       reason: ret.reason_note || ret.reason || (outcome === 'repair' ? 'Needs repair' : 'Damaged on return'),
@@ -724,7 +734,8 @@ export async function sendReturnToAnotherState(order, destinationState, staff) {
       const res = await attempt(warnings, order, staff, `Could not take ${ret.product_name} out of inspection`, () =>
         applyStock({
           productId: ret.product_id, warehouseId: ret.warehouse_id, businessId: ret.business_id,
-          qty: -qty, inspection: -qty, type: 'waybill_out', refId: order.id, refType: 'order', staffId: staff?.id,
+          qty: -qty, inspection: -qty, color: ret.color, size: ret.size,
+          type: 'waybill_out', refId: order.id, refType: 'order', staffId: staff?.id,
           notes: `Returned stock sent to ${destinationState} — ${order.order_number}`,
         }))
       if (res) deducted = qty
@@ -734,7 +745,8 @@ export async function sendReturnToAnotherState(order, destinationState, staff) {
       const res = whId && await attempt(warnings, order, staff, `Could not take ${ret.product_name} out of stock`, () =>
         applyStock({
           productId: ret.product_id, warehouseId: whId, businessId: ret.business_id,
-          qty: -qty, clamp: true, type: 'waybill_out', refId: order.id, refType: 'order', staffId: staff?.id,
+          qty: -qty, clamp: true, color: ret.color, size: ret.size,
+          type: 'waybill_out', refId: order.id, refType: 'order', staffId: staff?.id,
           notes: `Returned stock sent to ${destinationState} — ${order.order_number}`,
         }))
       if (res) { deducted = -res.applied; ret = { ...ret, warehouse_id: whId } }
@@ -742,6 +754,7 @@ export async function sendReturnToAnotherState(order, destinationState, staff) {
     await attempt(warnings, order, staff, `Could not record ${ret.product_name} as in transit`, () =>
       createTransit({
         product_id: ret.product_id || null, product_name: ret.product_name, quantity: qty,
+        color: ret.color || null, size: ret.size || null,
         deducted_qty: deducted, order_id: order.id, order_number: order.order_number,
         business_id: ret.business_id || order.business_id || null,
         from_warehouse_id: deducted ? ret.warehouse_id : null,

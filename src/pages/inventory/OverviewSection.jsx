@@ -191,7 +191,7 @@ export function TransitLine({ t, onClick }) {
           <span className="truncate">{t.to}</span>
         </p>
         <p className="text-[11px] text-faint truncate">
-          {[t.sku ? `SKU ${t.sku}` : null, t.reference, t.dispatchedAt ? `Sent ${formatDate(t.dispatchedAt)}` : null].filter(Boolean).join(' · ')}
+          {[t.variant, t.sku ? `SKU ${t.sku}` : null, t.reference, t.dispatchedAt ? `Sent ${formatDate(t.dispatchedAt)}` : null].filter(Boolean).join(' · ')}
         </p>
       </div>
     </button>

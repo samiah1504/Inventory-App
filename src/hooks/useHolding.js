@@ -161,7 +161,7 @@ export function useHoldingToWarehouse() {
       try {
         await applyStock({
           productId: item.product_id, warehouseId: warehouse.id, businessId: item.business_id,
-          qty: item.quantity, returned: item.quantity,
+          qty: item.quantity, returned: item.quantity, color: item.color, size: item.size,
           type: 'return', refId: item.id, refType: 'holding', staffId: user?.id,
           notes: `From Goods at Park (${item.source_order_number || 'failed order'}) into ${warehouse.name}` +
             `${condition ? ` · condition: ${condition}` : ''}${receivedBy ? ` · received by ${receivedBy}` : ''}`,
@@ -374,6 +374,7 @@ export function useHoldingDamaged() {
     if (error) throw error
     await recordDamaged({
       product_id: item.product_id || null, product_name: item.product_name, quantity: item.quantity,
+      color: item.color, size: item.size,
       business_id: item.business_id || null, source: 'park', state: item.state,
       location_note: [item.park_name, item.city].filter(Boolean).join(', ') || null,
       order_id: item.source_order_id || null, order_number: item.source_order_number || null,

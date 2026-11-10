@@ -130,6 +130,9 @@ export async function correctOrderProducts({ order, newLines, reason, user }) {
     const delta = (newQty[pid] || 0) - (oldQty[pid] || 0)
     if (delta === 0 || stage !== 'sold') continue
     const nameOf = [...newLines, ...oldLines].find(l => l.product_id === pid)?.product_name || 'product'
+    // Colour / size of the line, so the right variation moves
+    const oldVar = oldLines.find(l => l.product_id === pid) || {}
+    const newVar = newLines.find(l => l.product_id === pid) || {}
 
     try {
       if (delta < 0) {
@@ -144,7 +147,8 @@ export async function correctOrderProducts({ order, newLines, reason, user }) {
           const qty = Math.min(q, toReverse)
           await applyStock({
             productId: pid, warehouseId: whId, businessId: order.business_id,
-            qty, sold: -qty, type: 'correction_in', refId: order.id, refType: 'order', staffId: user?.id,
+            qty, sold: -qty, color: oldVar.color, size: oldVar.size,
+            type: 'correction_in', refId: order.id, refType: 'order', staffId: user?.id,
             notes: `Product correction — recorded sale reversed (${order.order_number})`,
           })
           toReverse -= qty
@@ -155,7 +159,8 @@ export async function correctOrderProducts({ order, newLines, reason, user }) {
         if (!whId) { stockNotes.push(`${nameOf}: not tracked in inventory — no stock change`); continue }
         const res = await applyStock({
           productId: pid, warehouseId: whId, businessId: order.business_id,
-          qty: -delta, sold: delta, clamp: true, type: 'sale', refId: order.id, refType: 'order', staffId: user?.id,
+          qty: -delta, sold: delta, clamp: true, color: newVar.color, size: newVar.size,
+          type: 'sale', refId: order.id, refType: 'order', staffId: user?.id,
           notes: `Product correction — sold with ${order.order_number}`,
         })
         if (-res.applied < delta) stockNotes.push(`${nameOf}: only ${-res.applied} of ${delta} were in stock — the rest was not deducted`)

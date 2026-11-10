@@ -73,7 +73,8 @@ export function DamagedTab({ canManage }) {
                 {DAMAGE_SOURCES[r.source] || r.source}
               </span>
             </div>
-            <p className="text-sm font-semibold text-gray-900">{r.quantity} × {r.product_name}</p>
+            <p className="text-sm font-semibold text-gray-900">{r.quantity} × {r.product_name}
+              {(r.color || r.size) && <span className="font-normal text-mute"> · {[r.color, r.size].filter(Boolean).join(' / ')}</span>}</p>
             <p className="text-xs text-gray-600">
               {[r.warehouse?.name, r.location_note, r.state].filter(Boolean).join(' · ') || 'Location not recorded'}
             </p>

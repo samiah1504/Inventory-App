@@ -249,7 +249,21 @@ export function ProductsPage() {
       // counted twice, even if someone is selling at the same moment.
       const stockProblems = []
       const { data: srcRows } = await supabase.from('inventory').select('*, warehouse:warehouses(name)').eq('product_id', source.id)
-      for (const row of (srcRows || [])) {
+      // Variations (colour / size) move first, each as its own step
+      const { data: srcVariants } = await supabase.from('inventory_variants')
+        .select('*').eq('product_id', source.id).gt('quantity', 0)
+      for (const v of (srcVariants || [])) {
+        try {
+          await applyStock({ productId: source.id, warehouseId: v.warehouse_id, qty: -v.quantity, color: v.color, size: v.size })
+          await applyStock({ productId: target.id, warehouseId: v.warehouse_id, businessId: v.business_id, qty: v.quantity, color: v.color, size: v.size })
+          // The duplicate's total went down with the variation; the move
+          // below then only carries what had no colour/size
+        } catch (e) {
+          stockProblems.push(`${[v.color, v.size].filter(Boolean).join(' / ')}: not moved — ${e.message}`)
+        }
+      }
+      const { data: freshRows } = await supabase.from('inventory').select('*, warehouse:warehouses(name)').eq('product_id', source.id)
+      for (const row of (freshRows || srcRows || [])) {
         const physical = Number(row.quantity_physical) || 0
         const inspection = Number(row.quantity_inspection) || 0
         const counters = {
