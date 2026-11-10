@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { ArrowRight, Sliders, AlertTriangle, Bell, Palette } from 'lucide-react'
+import { ArrowRight, Sliders, AlertTriangle, Bell, Palette, Trash2 } from 'lucide-react'
 import { SplitVariantsModal } from './SplitVariantsModal'
+import { DeleteStockModal } from './DeleteStockModal'
 import { variantLabel } from '../../lib/inventoryCore'
 import { Modal } from '../../components/ui/Modal'
 import { useProductMovements } from '../../hooks/useInventory'
@@ -14,7 +15,9 @@ import { DAMAGED_STATUSES, DAMAGE_SOURCES } from '../../hooks/useStockFlow'
 export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, onDamage, onEditThreshold }) {
   const movementsQ = useProductMovements(p?.product_id)
   const [splitFor, setSplitFor] = useState(null)
+  const [deleteFor, setDeleteFor] = useState(null)   // { w, x } or { movement }
   if (!p) return null
+  const isCeo = model.isAdmin
   const variantsReady = model.variantsReady
   const { warehouses, isAdmin } = model
   const lines = warehouses.map(w => ({ w, x: p.perWarehouse[w.id] })).filter(l => l.x)
@@ -125,6 +128,9 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
                               {variantsReady && x.good > 0 && (
                                 <Btn size="sm" variant="ghost" onClick={() => setSplitFor({ w, x })} title="Colours & sizes"><Palette size={13} />Colours</Btn>
                               )}
+                              {isCeo && (
+                                <Btn size="sm" variant="ghost" onClick={() => setDeleteFor({ w, x })} title="Delete stock (CEO)"><Trash2 size={13} className="text-bad" />Delete</Btn>
+                              )}
                             </>
                           )}
                         </td>
@@ -207,7 +213,11 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
                       <div className="min-w-0">
                         <p className="text-charcoal">{movementLabel(m.movement_type)}{(m.color || m.size) ? <span className="text-mute"> · {variantLabel(m.color, m.size)}</span> : null}{m.warehouse?.name ? <span className="text-faint"> · {m.warehouse.name}</span> : null}</p>
                         {m.notes && <p className="text-[11px] text-mute truncate">{m.notes}</p>}
-                        <p className="text-[11px] text-faint">{formatDate(m.created_at)}{m.staff?.name ? ` · ${m.staff.name}${m.staff.is_deleted ? ' (Former Staff)' : ''}` : ''}</p>
+                        <p className="text-[11px] text-faint">{formatDate(m.created_at)}{m.staff?.name ? ` · ${m.staff.name}${m.staff.is_deleted ? ' (Former Staff)' : ''}` : ''}
+                          {isCeo && m.movement_type === 'purchase' && (
+                            <button onClick={() => setDeleteFor({ movement: { ...m, product: { name: p.name } } })}
+                              className="ml-2 font-semibold text-bad hover:underline">Delete delivery</button>
+                          )}</p>
                       </div>
                     </li>
                   )
@@ -218,6 +228,13 @@ export function ProductDetail({ product: p, model, canEdit, onClose, onAdjust, o
       </div>
       {splitFor && (
         <SplitVariantsModal product={p} warehouse={splitFor.w} slot={splitFor.x} onClose={() => setSplitFor(null)} />
+      )}
+      {deleteFor && (
+        <DeleteStockModal
+          movement={deleteFor.movement}
+          row={deleteFor.x?.row} slot={deleteFor.x}
+          productName={p.name} warehouseName={deleteFor.w?.name || deleteFor.movement?.warehouse?.name}
+          onClose={() => setDeleteFor(null)} />
       )}
     </Modal>
   )

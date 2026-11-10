@@ -4,7 +4,7 @@ import { useAuthStore } from '../stores/authStore'
 import { useAppStore } from '../stores/appStore'
 import { scopeToBusinesses } from '../lib/businessScope'
 import { applyStock } from '../lib/inventoryCore'
-import { scopeToWarehouses, allowedWarehouseIds, pgList } from '../lib/inventoryAccess'
+import { scopeToWarehouses, allowedWarehouseIds, pgList, isCompanyAdmin } from '../lib/inventoryAccess'
 
 export function useInventory(filters = {}) {
   const { user } = useAuthStore()
@@ -108,6 +108,8 @@ export function useAdjustStock() {
     mutationFn: async ({ product_id, warehouse_id, business_id, adjustment, reason, color, size }) => {
       const qty = Math.trunc(Number(adjustment) || 0)
       if (qty === 0) throw new Error('Enter an adjustment other than zero')
+      // Reducing stock is CEO-only; others can only add
+      if (qty < 0 && !isCompanyAdmin(user)) throw new Error('Only the CEO can reduce stock — ask the CEO to remove these units')
       // Refuses (with the real available figure) if it would go negative
       await applyStock({
         productId: product_id, warehouseId: warehouse_id, businessId: business_id, color, size,
@@ -491,5 +493,100 @@ export function useMoveVariant() {
       showToast('Variations updated', 'success')
     },
     onError: (err) => showToast(err.message, 'error', 6000),
+  })
+}
+
+// ─── CEO-only: delete stock ─────────────────────────────────────────────
+// Three kinds, each needing a reason and logged as 'stock_deleted':
+//   undo  — reverse one recorded delivery (exact quantity + colour/size);
+//           refused if those units have already been sold or moved
+//   units — remove N units (of a colour/size) from a warehouse
+//   line  — clear a product from a warehouse completely, then remove
+//           its empty stock row
+// Every step is the same atomic, never-below-zero stock change.
+export function useDeleteStock() {
+  const queryClient = useQueryClient()
+  const { showToast } = useAppStore()
+  const { user } = useAuthStore()
+  return useMutation({
+    mutationFn: async ({ mode, reason, movement, row, quantity, color, size, product_name, warehouse_name }) => {
+      if (!isCompanyAdmin(user) || user?._preview) throw new Error('Only the CEO can delete stock')
+      const why = (reason || '').trim()
+      if (!why) throw new Error('Enter the reason for deleting this stock')
+      const by = `Deleted by ${user?.name || 'CEO'} — ${why}`
+
+      if (mode === 'undo') {
+        if (!movement || movement.movement_type !== 'purchase') throw new Error('Only a recorded delivery can be undone')
+        const { data: done } = await supabase.from('inventory_movements').select('id')
+          .eq('reference_type', 'movement_undo').eq('reference_id', movement.id).limit(1)
+        if ((done || []).length) throw new Error('This delivery has already been deleted')
+        const qty = Math.abs(Number(movement.quantity) || 0)
+        if (!qty) throw new Error('Nothing to undo on this entry')
+        try {
+          await applyStock({
+            productId: movement.product_id, warehouseId: movement.warehouse_id, businessId: movement.business_id,
+            qty: -qty, color: movement.color, size: movement.size,
+            type: 'stock_deleted', refId: movement.id, refType: 'movement_undo', staffId: user?.id,
+            notes: `Delivery of ${qty} deleted (recorded ${new Date(movement.created_at).toLocaleDateString('en-NG')}) — ${by}`,
+          })
+        } catch (e) {
+          throw new Error(`Can't delete this delivery: ${e.message}. Some of these units may already be sold or moved — use Remove units instead.`)
+        }
+        return { message: `Delivery of ${qty} deleted` }
+      }
+
+      if (mode === 'units') {
+        const qty = Math.trunc(Number(quantity) || 0)
+        if (qty <= 0) throw new Error('Enter how many units to delete')
+        await applyStock({
+          productId: row.product_id, warehouseId: row.warehouse_id, businessId: row.business_id,
+          qty: -qty, color, size, type: 'stock_deleted', refType: 'stock_delete', staffId: user?.id,
+          notes: `${qty} unit(s)${color || size ? ` (${[color, size].filter(Boolean).join(' / ')})` : ''} deleted from ${warehouse_name || 'warehouse'} — ${by}`,
+        })
+        return { message: `${qty} unit(s) deleted` }
+      }
+
+      if (mode === 'line') {
+        const base = { productId: row.product_id, warehouseId: row.warehouse_id, businessId: row.business_id,
+          type: 'stock_deleted', refType: 'stock_delete', staffId: user?.id }
+        let removed = 0
+        // 1. each colour / size
+        const { data: vars } = await supabase.from('inventory_variants').select('color, size, quantity')
+          .eq('product_id', row.product_id).eq('warehouse_id', row.warehouse_id).gt('quantity', 0)
+        for (const v of vars || []) {
+          const res = await applyStock({ ...base, qty: -v.quantity, color: v.color, size: v.size,
+            notes: `${product_name || 'Product'} removed from ${warehouse_name || 'warehouse'} — ${by}` })
+          removed += -(res?.applied || 0)
+        }
+        // 2. what is left (no colour/size, and items awaiting inspection)
+        const { data: fresh } = await supabase.from('inventory').select('*').eq('id', row.id).maybeSingle()
+        if (fresh) {
+          const insp = Number(fresh.quantity_inspection) || 0
+          const rest = (Number(fresh.quantity_physical) || 0)
+          if (rest > 0) {
+            const res = await applyStock({ ...base, qty: -rest, inspection: -insp,
+              notes: `${product_name || 'Product'} removed from ${warehouse_name || 'warehouse'} — ${by}` })
+            removed += -(res?.applied || 0)
+          }
+          // 3. the empty stock row (and empty colour rows) go away
+          const { data: after } = await supabase.from('inventory').select('quantity_physical').eq('id', row.id).maybeSingle()
+          if (after && Number(after.quantity_physical) === 0) {
+            await supabase.from('inventory_variants').delete().eq('product_id', row.product_id).eq('warehouse_id', row.warehouse_id)
+            await supabase.from('inventory').delete().eq('id', row.id)
+          } else if (after) {
+            throw new Error('Stock changed while deleting — some units remain. Check the product and try again.')
+          }
+        }
+        return { message: `${product_name || 'Product'} removed from ${warehouse_name || 'warehouse'} (${removed} unit${removed === 1 ? '' : 's'})` }
+      }
+      throw new Error('Unknown delete')
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ['inventory'] })
+      queryClient.invalidateQueries({ queryKey: ['inventory_movements'] })
+      queryClient.invalidateQueries({ queryKey: ['stock_availability'] })
+      showToast(res?.message || 'Stock deleted', 'success')
+    },
+    onError: (err) => showToast(err.message, 'error', 8000),
   })
 }
