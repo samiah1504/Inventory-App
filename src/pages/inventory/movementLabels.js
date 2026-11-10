@@ -31,6 +31,8 @@ export const MOVEMENT_LABELS = {
   adjustment_out: 'Adjustment (−)',
   correction_in: 'Correction (+)',
   stock_count_adjustment: 'Stock count adjustment',
+  stock_deleted: 'Deleted by CEO',
+  variant_reassign: 'Colour/size corrected',
 }
 
 export const MOVEMENT_GROUPS = [
@@ -40,7 +42,7 @@ export const MOVEMENT_GROUPS = [
   { value: 'transit', label: 'Waybills & transfers', types: ['waybill_out', 'transit_in', 'transfer_in', 'transfer_out', 'transfer_cancelled'] },
   { value: 'damage', label: 'Damage & write-offs', types: ['damage', 'missing', 'write_off', 'repaired_in', 'supplier_return'] },
   { value: 'returns', label: 'Returns', types: ['return', 'return_inspection', 'display_item', 'return_other'] },
-  { value: 'adjust', label: 'Adjustments & counts', types: ['adjustment_in', 'adjustment_out', 'correction_in', 'stock_count_adjustment'] },
+  { value: 'adjust', label: 'Adjustments & counts', types: ['adjustment_in', 'adjustment_out', 'correction_in', 'stock_count_adjustment', 'stock_deleted', 'variant_reassign'] },
 ]
 
 export const movementLabel = (t) => MOVEMENT_LABELS[t] || (t || '').replace(/_/g, ' ')

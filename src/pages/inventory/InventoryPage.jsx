@@ -145,6 +145,7 @@ export function InventoryPage() {
   async function handleAdjust() {
     const adj = Number(adjustForm.adjustment)
     if (!adj || !adjustForm.reason.trim()) { showToast('Enter adjustment amount and reason', 'error'); return }
+    if (adj < 0 && !isAdmin) { showToast('Only the CEO can reduce stock', 'error'); return }
     const slot = slotFor(adjustRow.product_id, adjustRow.warehouse_id)
     if (slot?.variants?.length && !adjustVariant) { showToast('Choose the colour/size', 'error'); return }
     try {
@@ -389,10 +390,13 @@ export function InventoryPage() {
               <p className="text-2xl font-semibold tnum">{fmt(adjustRow.quantity_available)}</p>
             </div>
             <VariantSelect slot={slotFor(adjustRow.product_id, adjustRow.warehouse_id)} value={adjustVariant} onChange={setAdjustVariant} required />
-            <Input label="Adjustment" type="number" inputMode="numeric" placeholder="e.g. +10 or -3"
+            <Input label={isAdmin ? 'Adjustment' : 'Units to add'} type="number" inputMode="numeric" placeholder={isAdmin ? 'e.g. +10 or -3' : 'e.g. 10'}
               value={adjustForm.adjustment} onChange={e => setAdjustForm({ ...adjustForm, adjustment: e.target.value })}
               hint={adjustForm.adjustment && !isNaN(Number(adjustForm.adjustment))
-                ? `New quantity: ${Number(adjustRow.quantity_available) + Number(adjustForm.adjustment)}` : 'Positive to add, negative to remove'} />
+                ? (!isAdmin && Number(adjustForm.adjustment) < 0
+                    ? 'Only the CEO can reduce stock'
+                    : `New quantity: ${Number(adjustRow.quantity_available) + Number(adjustForm.adjustment)}`)
+                : isAdmin ? 'Positive to add, negative to remove' : 'You can add stock. Only the CEO can reduce or delete stock.'} />
             <Input label="Reason" required placeholder="e.g. Stocktake correction" value={adjustForm.reason} onChange={e => setAdjustForm({ ...adjustForm, reason: e.target.value })} />
           </div>
         )}
