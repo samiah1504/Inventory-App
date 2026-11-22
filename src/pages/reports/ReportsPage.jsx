@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import * as XLSX from 'xlsx'
+import { exportCSV, exportXLSX, exportPDF } from '../../lib/reportExport'
+import { useAppStore } from '../../stores/appStore'
 import jsPDF from 'jspdf'
 import { supabase } from '../../lib/supabase'
 import { TopBar } from '../../components/layout/TopBar'
@@ -255,34 +256,6 @@ function computePL(orders, expenses, catalogById, catalogByName, itemRowsByOrder
   }
 }
 
-function downloadCSV(rows, filename) {
-  if (!rows.length) return
-  const headers = Object.keys(rows[0])
-  const csv = [
-    headers.join(','),
-    ...rows.map(row =>
-      headers.map(h => {
-        const val = row[h] === null || row[h] === undefined ? '' : String(row[h])
-        return val.includes(',') || val.includes('"') || val.includes('\n')
-          ? `"${val.replace(/"/g, '""')}"` : val
-      }).join(',')
-    ),
-  ].join('\n')
-  const blob = new Blob([csv], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
-}
-
-function downloadXLSX(rows, sheetName, filename) {
-  if (!rows.length) return
-  const ws = XLSX.utils.json_to_sheet(rows)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, sheetName)
-  XLSX.writeFile(wb, filename)
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export function ReportsPage() {
@@ -296,6 +269,9 @@ export function ReportsPage() {
   const [businessId, setBusinessId] = useState('')
   const [showExportMenu, setShowExportMenu] = useState(false)
   const exportRef = useRef(null)
+  // Overview → "all reports": tab-only data is loaded on demand first
+  const [exportAllFormat, setExportAllFormat] = useState(null)
+  const loadAll = !!exportAllFormat
 
   const [productSearch, setProductSearch]                   = useState('')
   const [productSort, setProductSort]                       = useState('units')
@@ -312,6 +288,7 @@ export function ReportsPage() {
   const [expandedExpCat, setExpandedExpCat] = useState(null)
 
   const { user } = useAuthStore()
+  const { showToast } = useAppStore()
   const { data: businesses } = useBusinesses()
   const { data: catalogProducts } = useProducts()
   const { data: warehouses } = useWarehouses()
@@ -436,7 +413,7 @@ export function ReportsPage() {
 
   const expenseOrdersQ = useQuery({
     queryKey: ['report_expense_orders', expenseOrderIds],
-    enabled: tab === 'expenses' && isCeo && expenseOrderIds.length > 0,
+    enabled: (tab === 'expenses' || loadAll) && isCeo && expenseOrderIds.length > 0,
     queryFn: async () => {
       try {
         const { data, error } = await supabase
@@ -506,7 +483,7 @@ export function ReportsPage() {
 
   const staffListQ = useQuery({
     queryKey: ['report_staff_list'],
-    enabled: tab === 'expenses' && isCeo,
+    enabled: (tab === 'expenses' || loadAll) && isCeo,
     queryFn: async () => {
       try {
         const { data, error } = await supabase.from('staff_users').select('*')
@@ -555,7 +532,7 @@ export function ReportsPage() {
 
   const inventoryMovements = useQuery({
     queryKey: ['report_inventory_movements', dateFrom, dateTo, businessId],
-    enabled: tab === 'inventory' || tab === 'products',
+    enabled: tab === 'inventory' || tab === 'products' || loadAll,
     queryFn: async () => {
       try {
         let q = supabase
@@ -946,98 +923,179 @@ export function ReportsPage() {
 
   // ── Export handlers ───────────────────────────────────────────────────────
 
-  function handleExportCSV() {
-    if (tab === 'expenses') {
-      const rows = expenseData.map(e => ({
-        date: e.date, expense_type: e.expense_type, amount: e.amount,
-        kind: e.isOrderExpense ? 'order' : 'business',
-        business: e.businessName || '', description: e.description || '',
-        order_number: e.order?.order_number || '', entered_by: e.staffName || '',
-      }))
-      downloadCSV(rows, `expenses-${dateFrom}-to-${dateTo}.csv`)
-    } else if (tab === 'staff') {
+  // Each tab's download holds exactly what that tab shows; Overview
+  // downloads every report the user is allowed to see.
+  const periodLabel = `${dateFrom} to ${dateTo}`
+  const bizName = businessId ? (businesses || []).find(b => b.id === businessId)?.name : 'All businesses'
+  const naira = (v) => Math.round((Number(v) || 0) * 100) / 100
+  const itemsText = (o) => Array.isArray(o.items_data) && o.items_data.length
+    ? o.items_data.map(i => `${i.product_name || i.name || ''}${Number(i.quantity) > 1 ? ` x${i.quantity}` : ''}${i.color ? ` (${[i.color, i.size].filter(Boolean).join(' / ')})` : ''}`).join('; ')
+    : (o.product_name || '')
+  const bizOf = (id) => (businesses || []).find(b => b.id === id)?.name || ''
+  const countRows = (obj, label) => Object.entries(obj).sort(([, x], [, y]) => y - x).map(([k, v]) => ({ [label]: String(k).replace(/_/g, ' '), Orders: v }))
+
+  function reportSections(key) {
+    if (key === 'orders') {
+      return [
+        { title: 'Orders', rows: orders.map(o => ({
+          'Order #': o.order_number || '', Date: o.created_at?.slice(0, 10) || '', Customer: o.customer_name || '',
+          Phone: o.customer_phone || '', Business: bizOf(o.business_id), State: o.state || '', Source: o.source || '',
+          Products: itemsText(o), Status: (o.status || '').replace(/_/g, ' '),
+          'Total (NGN)': naira(o.total_amount), 'Paid (NGN)': naira(o.amount_paid), 'Balance (NGN)': naira(o.balance_amount),
+        })) },
+        { title: 'Orders by status', rows: countRows(byStatus, 'Status') },
+        { title: 'Orders by state', rows: countRows(byState, 'State') },
+        { title: 'Orders by source', rows: countRows(bySource, 'Source') },
+      ]
+    }
+    if (key === 'sales') {
+      const byStateRev = {}
+      revenueOrders.forEach(o => { const st = o.state || 'Unknown'; byStateRev[st] = (byStateRev[st] || 0) + orderRevenue(o) })
+      return [
+        { title: 'Sales summary', rows: [
+          { Measure: 'Total revenue (money received)', 'Value (NGN)': naira(totalSales) },
+          { Measure: 'Orders paid in the period', 'Value (NGN)': revenueOrders.length },
+          { Measure: 'Outstanding balances', 'Value (NGN)': naira(outstanding) },
+        ] },
+        { title: 'Payments received', rows: revenueOrders.map(o => ({
+          'Paid on': (o.paid_at || o.created_at || '').slice(0, 10), 'Order #': o.order_number || '',
+          Customer: o.customer_name || '', Business: bizOf(o.business_id), State: o.state || '', Products: itemsText(o),
+          Status: (o.status || '').replace(/_/g, ' '), 'Order total (NGN)': naira(o.total_amount),
+          'Received (NGN)': naira(orderRevenue(o)), 'Balance (NGN)': naira(o.balance_amount),
+        })) },
+        { title: 'Revenue by state', rows: Object.entries(byStateRev).sort(([, x], [, y]) => y - x)
+          .map(([st, amt]) => ({ State: st, 'Revenue (NGN)': naira(amt) })) },
+        { title: 'Revenue by product', rows: productStats.map(p => ({
+          Product: p.name, Units: p.qty, Orders: p.orderCount, 'Revenue (NGN)': naira(p.revenue) })) },
+        { title: 'Outstanding balances', rows: outstandingOrders.map(o => ({
+          'Order #': o.order_number || '', Customer: o.customer_name || '', Phone: o.customer_phone || '',
+          'Balance (NGN)': naira(o.balance_amount) })) },
+      ]
+    }
+    if (key === 'products') {
+      return [{ title: 'Product performance', rows: filteredSortedProducts.map(p => ({
+        Product: p.name, SKU: p.sku || '', Business: p.business, Category: p.category || '',
+        'Units sold': p.qty, Orders: p.orderCount, 'Last sold': p.lastSoldAt?.slice(0, 10) || '',
+        'Stock available': p.hasInventory ? p.available : '',
+      })) }]
+    }
+    if (key === 'profit' && isCeo) {
+      const pl = plData
+      return [
+        { title: 'Profit and loss', rows: [
+          { Line: 'Sales revenue', 'Amount (NGN)': naira(pl.revenue) },
+          { Line: 'Cost of goods sold', 'Amount (NGN)': naira(-pl.cogs) },
+          { Line: 'Gross profit', 'Amount (NGN)': naira(pl.grossProfit) },
+          { Line: 'Order expenses', 'Amount (NGN)': naira(-pl.orderExpTotal) },
+          { Line: 'Operating expenses', 'Amount (NGN)': naira(-pl.opExTotal) },
+          { Line: 'Net profit', 'Amount (NGN)': naira(pl.netProfit) },
+          { Line: 'Gross margin %', 'Amount (NGN)': Number(pl.grossMargin.toFixed(1)) },
+          { Line: 'Net margin %', 'Amount (NGN)': Number(pl.netMargin.toFixed(1)) },
+        ] },
+        { title: 'Cost of goods by product', rows: pl.cogsLines.map(l => ({
+          Product: l.name, Units: l.qty, 'Unit cost (NGN)': naira(l.unitCost), 'Total cost (NGN)': naira(l.total),
+          Note: l.hasCost ? '' : 'No cost price' })) },
+        { title: 'Expenses by type', rows: [
+          ...pl.orderExpByType.map(e => ({ Kind: 'Order', Type: e.type, 'Amount (NGN)': naira(e.total) })),
+          ...pl.opExByType.map(e => ({ Kind: 'Operating', Type: e.type, 'Amount (NGN)': naira(e.total) })),
+        ] },
+        ...(perBusinessPL.length ? [{ title: 'Profit by business', rows: perBusinessPL.map(({ business, pl: b }) => ({
+          Business: business.name, 'Revenue (NGN)': naira(b.revenue), 'COGS (NGN)': naira(b.cogs),
+          'Gross profit (NGN)': naira(b.grossProfit), 'Expenses (NGN)': naira(b.orderExpTotal + b.opExTotal),
+          'Net profit (NGN)': naira(b.netProfit), 'Net margin %': Number(b.netMargin.toFixed(1)) })) }] : []),
+      ]
+    }
+    if (key === 'compare') {
+      return [{ title: 'Business comparison', rows: compareStats.map(b => ({
+        Business: b.name, Orders: b.totalOrders, Delivered: b.delivered, Failed: b.failed, Cancelled: b.cancelled,
+        'Sales (NGN)': naira(b.grossSales), 'Expenses (NGN)': naira(b.totalExpenses), 'Net profit (NGN)': naira(b.netProfit),
+        'Margin %': Number(b.margin.toFixed(1)), 'Delivery rate %': Number(b.deliverySuccessRate.toFixed(1)),
+        'Top product': b.bestProduct?.name || '' })) }]
+    }
+    if (key === 'expenses' && isCeo) {
+      return [{ title: 'Expenses', rows: expenseData.map(e => ({
+        Date: e.date, Type: e.expense_type, 'Amount (NGN)': naira(e.amount), Kind: e.isOrderExpense ? 'Order' : 'Business',
+        Business: e.businessName || '', Description: e.description || '', 'Order #': e.order?.order_number || '',
+        'Entered by': e.staffName || '' })) }]
+    }
+    if (key === 'inventory') {
+      return [
+        { title: 'Stock on hand', rows: inventoryItems.map(i => ({
+          Product: i.product?.name || '', Business: i.product?.business?.name || '', Warehouse: i.warehouse?.name || '',
+          State: i.warehouse?.state || '', Available: Number(i.quantity_available) || 0,
+          'On shelf': Number(i.quantity_physical) || 0, 'Low-stock level': i.low_stock_threshold ?? 5 })) },
+        { title: 'Stock movements', rows: (inventoryMovements.data || []).map(m => ({
+          Date: m.created_at?.slice(0, 10) || '', Product: m.product?.name || '', Warehouse: m.warehouse?.name || '',
+          Movement: (m.movement_type || '').replace(/_/g, ' '), 'Colour/size': [m.color, m.size].filter(Boolean).join(' / '),
+          Quantity: Number(m.quantity) || 0, Notes: m.notes || '' })) },
+      ]
+    }
+    if (key === 'staff' && isCeo) {
       const byStaff = {}
       staffOrders.forEach(o => {
         const name = o.staff?.name || o.created_by || 'Unknown'
-        const code = o.staff?.staff_code || ''
-        if (!byStaff[name]) byStaff[name] = { name, staff_code: code, total: 0, paid: 0, failed: 0, cancelled: 0 }
-        byStaff[name].total++
-        if (['paid', 'partially_paid'].includes(o.status)) byStaff[name].paid++
-        if (o.status === 'failed_delivery') byStaff[name].failed++
-        if (o.status === 'cancelled') byStaff[name].cancelled++
+        if (!byStaff[name]) byStaff[name] = { Staff: name, Code: o.staff?.staff_code || '', Orders: 0, Paid: 0, Failed: 0, Cancelled: 0 }
+        byStaff[name].Orders++
+        if (['paid', 'partially_paid'].includes(o.status)) byStaff[name].Paid++
+        if (o.status === 'failed_delivery') byStaff[name].Failed++
+        if (o.status === 'cancelled') byStaff[name].Cancelled++
       })
-      downloadCSV(Object.values(byStaff), `staff-report-${dateFrom}-to-${dateTo}.csv`)
-    } else if (tab === 'inventory') {
-      const movements = inventoryMovements.data || []
-      if (movements.length > 0) {
-        downloadCSV(movements.map(m => ({
-          date: m.created_at?.slice(0, 10) || '', product: m.product?.name || '',
-          warehouse: m.warehouse?.name || '', movement_type: m.movement_type || '',
-          quantity: m.quantity, unit_cost: m.unit_cost || '', total_cost: m.total_cost || '',
-        })), `inventory-movements-${dateFrom}-to-${dateTo}.csv`)
-      } else {
-        downloadCSV(inventoryItems.map(i => ({
-          product: i.product?.name || '', warehouse: i.warehouse?.name || '',
-          quantity_available: i.quantity_available,
-        })), `inventory-snapshot.csv`)
-      }
-    } else if (tab === 'products') {
-      downloadCSV(filteredSortedProducts.map(p => ({
-        product_name: p.name, business: p.business, category: p.category || '',
-        units_sold: p.qty, order_count: p.orderCount,
-        last_sold: p.lastSoldAt?.slice(0, 10) || '',
-        available_stock: p.hasInventory ? p.available : '',
-      })), `products-${dateFrom}-to-${dateTo}.csv`)
-    } else if (tab === 'compare') {
-      downloadCSV(compareStats.map(b => ({
-        business: b.name, total_orders: b.totalOrders, delivered: b.delivered,
-        failed: b.failed, cancelled: b.cancelled, gross_sales: b.grossSales,
-        expenses: b.totalExpenses, net_profit: b.netProfit,
-        margin_pct: b.margin.toFixed(1), delivery_rate_pct: b.deliverySuccessRate.toFixed(1),
-      })), `compare-${dateFrom}-to-${dateTo}.csv`)
+      return [{ title: 'Staff performance', rows: Object.values(byStaff).sort((x, y) => y.Orders - x.Orders) }]
+    }
+    if (key === 'overview') {
+      const paidCount = orders.filter(o => REVENUE_STATUSES.includes(o.status)).length
+      const opsO = opsOrdersQ.data || []
+      const summary = [
+        { Measure: 'Total orders', Value: totalOrders },
+        { Measure: 'Paid orders', Value: paidCount },
+        { Measure: 'Sales revenue (NGN)', Value: naira(plData.revenue) },
+        ...(isCeo ? [{ Measure: 'Net profit (NGN)', Value: naira(plData.netProfit) }] : []),
+        { Measure: 'Outstanding balances (NGN)', Value: naira(outstanding) },
+        { Measure: 'Awaiting waybill (now)', Value: opsO.filter(o => o.status === 'awaiting_waybill').length },
+        { Measure: 'Delivered awaiting payment (now)', Value: opsO.filter(o => o.status === 'delivered').length },
+        { Measure: 'Failed deliveries to follow up (now)', Value: opsO.filter(o => o.status === 'failed_delivery').length },
+      ]
+      const rest = visibleTabs.filter(t => t.key !== 'overview').flatMap(t =>
+        reportSections(t.key).map(sec => ({ ...sec, title: sec.title })))
+      return [{ title: 'Overview', rows: summary }, ...rest]
+    }
+    return []
+  }
+
+  const reportTitle = (key) => key === 'overview' ? 'All reports' : `${REPORT_TABS.find(t => t.key === key)?.label || 'Report'} report`
+  function runExport(format, key = tab) {
+    const sections = reportSections(key)
+    if (!sections.some(sec => sec.rows.length)) { showToast('Nothing to download for this period', 'info'); return }
+    const report = { title: reportTitle(key), subtitle: `${periodLabel} · ${bizName || 'All businesses'}`, sections }
+    const base = `${key === 'overview' ? 'all-reports' : `${key === 'profit' ? 'profit-and-loss' : key}-report`}-${dateFrom}-to-${dateTo}`
+    if (format === 'csv') exportCSV(report, `${base}.csv`)
+    else if (format === 'xlsx') exportXLSX(report, `${base}.xlsx`)
+    else if (key === 'profit') handleExportPDF()          // keeps the formatted P&L statement
+    else exportPDF(report, `${base}.pdf`)
+  }
+
+  function startExport(format) {
+    setShowExportMenu(false)
+    if (tab === 'overview') {
+      showToast('Preparing all reports…', 'info')
+      setExportAllFormat(format)    // loads every tab's data, then downloads
     } else {
-      // orders/overview/sales/profit
-      downloadCSV(orders.map(o => ({
-        order_number: o.order_number || '', customer_name: o.customer_name || '',
-        customer_phone: o.customer_phone || '', status: o.status, state: o.state || '',
-        source: o.source || '', product: o.product_name || '',
-        total_amount: o.total_amount, amount_paid: o.amount_paid || '',
-        balance: o.balance_amount || '', created_at: o.created_at?.slice(0, 10) || '',
-      })), `orders-${dateFrom}-to-${dateTo}.csv`)
+      runExport(format)
     }
   }
 
-  function handleExportXLSX() {
-    if (tab === 'expenses') {
-      downloadXLSX(expenseData.map(e => ({
-        Date: e.date, Type: e.expense_type, Amount: e.amount,
-        Kind: e.isOrderExpense ? 'Order' : 'Business',
-        Business: e.businessName || '', Description: e.description || '',
-        'Order #': e.order?.order_number || '', 'Entered By': e.staffName || '',
-      })), 'Expenses', `expenses-${dateFrom}-to-${dateTo}.xlsx`)
-    } else if (tab === 'products') {
-      downloadXLSX(filteredSortedProducts.map(p => ({
-        Product: p.name, Business: p.business, Category: p.category || '',
-        'Units Sold': p.qty, Orders: p.orderCount,
-        'Last Sold': p.lastSoldAt?.slice(0, 10) || '',
-        'Available Stock': p.hasInventory ? p.available : '',
-      })), 'Products', `products-${dateFrom}-to-${dateTo}.xlsx`)
-    } else if (tab === 'compare') {
-      downloadXLSX(compareStats.map(b => ({
-        Business: b.name, Orders: b.totalOrders, Delivered: b.delivered,
-        Failed: b.failed, 'Gross Sales': b.grossSales, Expenses: b.totalExpenses,
-        'Net Profit': b.netProfit, 'Margin %': b.margin.toFixed(1),
-        'Delivery Rate %': b.deliverySuccessRate.toFixed(1),
-      })), 'Compare', `compare-${dateFrom}-to-${dateTo}.xlsx`)
-    } else {
-      downloadXLSX(orders.map(o => ({
-        'Order #': o.order_number || '', Customer: o.customer_name || '',
-        Status: o.status, State: o.state || '', Product: o.product_name || '',
-        'Total (NGN)': o.total_amount, 'Paid (NGN)': o.amount_paid || 0,
-        Date: o.created_at?.slice(0, 10) || '',
-      })), 'Orders', `orders-${dateFrom}-to-${dateTo}.xlsx`)
-    }
-  }
+  // Overview download: wait until every report's data has loaded
+  useEffect(() => {
+    if (!exportAllFormat) return
+    const waiting = [
+      [ordersReport, true], [expensesReport, isCeo], [staffReport, isCeo], [inventoryReport, true],
+      [inventoryMovements, true], [opsOrdersQ, true], [staffListQ, isCeo],
+      [expenseOrdersQ, isCeo && expenseOrderIds.length > 0], [productsReport, canQueryItems],
+    ].some(([q, on]) => on && (q.isFetching || !q.isFetched))
+    if (waiting) return
+    runExport(exportAllFormat, 'overview')
+    setExportAllFormat(null)
+  })
 
   function handleExportPDF() {
     const pl = plData
@@ -1110,22 +1168,26 @@ export function ReportsPage() {
             <button
               onClick={() => setShowExportMenu(v => !v)}
               className="p-2 bg-gray-100 text-gray-700 rounded-xl active:scale-95 transition-all flex items-center gap-1"
-              title="Export"
+              title={tab === 'overview' ? 'Download all reports' : 'Download this report'}
+              disabled={loadAll}
             >
-              <Download size={18} />
+              {loadAll ? <span className="w-[18px] h-[18px] border-2 border-gray-500 border-t-transparent rounded-full animate-spin" /> : <Download size={18} />}
               <ChevronDown size={13} />
             </button>
             {showExportMenu && (
               <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-gray-100 z-50 min-w-36 overflow-hidden">
-                <button onClick={() => { handleExportCSV();  setShowExportMenu(false) }}
+                <p className="px-4 pt-2.5 pb-1 text-[11px] text-gray-400">
+                  {tab === 'overview' ? 'All reports' : `${REPORT_TABS.find(t => t.key === tab)?.label} report`}
+                </p>
+                <button onClick={() => startExport('csv')}
                   className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                   <Download size={14} /> CSV
                 </button>
-                <button onClick={() => { handleExportXLSX(); setShowExportMenu(false) }}
+                <button onClick={() => startExport('xlsx')}
                   className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                   <Download size={14} /> Excel (XLSX)
                 </button>
-                <button onClick={() => { handleExportPDF();  setShowExportMenu(false) }}
+                <button onClick={() => startExport('pdf')}
                   className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                   <Download size={14} /> PDF
                 </button>
